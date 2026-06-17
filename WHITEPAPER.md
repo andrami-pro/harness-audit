@@ -8,7 +8,7 @@
 
 ## Abstract
 
-`harness-audit` is a system for auditing and installing an agent harness in AI-agent repositories. Unlike traditional static-audit approaches, it produces an **executable rubric** — a set of command-verifiable criteria — that serves as the convergence target for an autonomous implement-and-verify loop. The system operates over four structural pillars (harness in code, role separation, automatic verification, loop design) and integrates **role-differentiated model selection**, progressive memory M1→M5, and independent adversarial verification. Internal benchmarks indicate that separating the implementer from the verifier raises code-review accuracy from 62% (self-critique) to 89% (independent subagent), with false positives dropping from 28% to 7%.
+`harness-audit` is a system for auditing and installing an agent harness in AI-agent repositories. Unlike traditional static-audit approaches, it produces an **executable rubric** — a set of command-verifiable criteria — that serves as the convergence target for an autonomous implement-and-verify loop. The system operates over four structural pillars (harness in code, role separation, automatic verification, loop design) and integrates **role-differentiated model selection**, progressive memory M1→M5, and independent adversarial verification. The working hypothesis is that separating the implementer from the verifier materially raises code-review accuracy and lowers false positives. The specific figures cited below (~62% → ~89% accuracy; ~28% → ~7% false positives) are **directional, illustrative targets — not yet independently reproduced in this project**, and do not come from a published Anthropic benchmark. A reproducible in-house A/B is planned (see §8.1 Reproducibility / `benchmarks/`, pending). Until then, read them as expected direction, not measurement.
 
 ---
 
@@ -42,14 +42,14 @@ Language models exhibit three systematic biases when evaluating their own output
 
 **Context anchoring**: the evaluation is anchored to the generation reasoning — the model cannot see the diff with fresh eyes because it already knows why it made each decision.
 
-The quantified result:
+The expected result (figures are **illustrative, pending reproduction** — see the provenance note in the Abstract; not a published measurement):
 
-| Review method | Accuracy | False positives |
+| Review method | Accuracy (target) | False positives (target) |
 |---------------|----------|-----------------|
-| Self-critique (same model) | 62% | 28% |
-| Independent verifier subagent | **89%** | **7%** |
+| Self-critique (same model) | ~62% | ~28% |
+| Independent verifier subagent | **~89%** | **~7%** |
 
-A 28% false-positive rate means nearly 1 in 3 "code is correct" approvals is wrong. In production, that is a silent regression every three merges.
+If the order of magnitude holds, a ~28% false-positive rate would mean nearly 1 in 3 "code is correct" approvals is wrong — a silent regression roughly every three merges. The direction (an independent verifier lowers false positives) is well supported in the LLM self-correction literature; the exact magnitude is what this project still has to measure.
 
 ### 1.3 The Rubric Paradox
 
@@ -97,7 +97,7 @@ A continual-learning view of agent memory defines five maturity levels:
 | **M4** | Distill | Verified facts compressed into general rules |
 | **M5** | Consult | Rules read systematically before acting |
 
-The impact of progressive memory shows up as a steepening success curve across sessions: a system without progressive memory tends to stay flat (e.g., ~40% → 45% between the first and last batch of sessions), while a system that reaches M5 (consulting distilled rules before acting) climbs sharply (e.g., ~60% → 91%). The differentiator is not raw model capability — it is whether earlier verified lessons are read before the next decision.
+The hypothesis is that progressive memory shows up as a steepening success curve across sessions: a system without it tends to stay flat, while a system that reaches M5 (consulting distilled rules before acting) climbs. Any specific numbers here would be illustrative — quantifying this curve in this harness is pending work (see §8.1). The claimed differentiator is not raw model capability but whether earlier verified lessons are read before the next decision.
 
 `harness-audit` installs the memory system at M4 (Distill) from day one, with explicit instructions for agents to read it before acting (the necessary condition for M5).
 
@@ -149,7 +149,7 @@ Orchestrator (main session)
             Model: frontier tier
 ```
 
-**The independence rule is the most critical**: the reviewer receives artifacts, not conversation. If the reviewer knows the implementer's reasoning, it reproduces the same anchoring context that produces the 28% false-positive rate in self-critique.
+**The independence rule is the most critical**: the reviewer receives artifacts, not conversation. If the reviewer knows the implementer's reasoning, it reproduces the same anchoring context that drives false positives in self-critique.
 
 **Self-improving**: when the reviewer detects a pattern not covered by existing criteria, it proposes a new rule to the orchestrator. The orchestrator adds it to `AGENTS.md` and marks it `[VERIFIED]` in `memory/`. The harness improves itself session over session.
 
@@ -192,14 +192,14 @@ This is the pillar that distinguishes `harness-audit` from a static audit:
 
 ## 4. The Role-Differentiated Model-Selection Workflow
 
-### 4.1 Justification by Data
+### 4.1 Justification by Role and Cost
 
-The model assignment is not preference — it is a consequence of the benchmarks:
+The model assignment is a role/cost-fit heuristic (pending validation by the A/B in §8.1), not an arbitrary preference:
 
 | Role | Model class | Justification |
 |------|-------------|---------------|
 | **Implementer** | fast/mid tier | Sufficient for routine code generation; optimal cost/speed ratio |
-| **Reviewer** | frontier tier | Adversarial accuracy 89% vs 62%. The reviewer's premium cost is amortized by every FAIL caught before merge |
+| **Reviewer** | frontier tier | Higher adversarial accuracy than self-critique (~89% vs ~62%: illustrative target, pending measurement). The reviewer's premium cost is amortized by every FAIL caught before merge |
 | **Preflight checks** | small/fast tier | Command execution — needs no reasoning; minimal cost per iteration |
 | **Security review (critical phase)** | extended-thinking, top tier | Automatic extended reasoning for threat-model and prompt-injection analysis |
 
@@ -334,9 +334,21 @@ This implements the M5 (Consult) step of progressive memory: rules distilled fro
 
 **The reviewer can also be wrong**: the audit's adversarial verification and the loop's reviewer mitigate this, but do not eliminate it. A reviewer with poorly defined criteria can reject correct work or approve incorrect work. The self-improving mechanism exists to capture these cases session over session.
 
-**Model cost in long loops**: a 5-iteration loop with a frontier-tier reviewer has non-trivial cost. For budget-constrained projects, `maxIter` can drop to 3 and the reviewer can use a mid tier — with the expected loss of accuracy (62% vs 89%).
+**Model cost in long loops**: a 5-iteration loop with a frontier-tier reviewer has non-trivial cost. For budget-constrained projects, `maxIter` can drop to 3 and the reviewer can use a mid tier — with the expected loss of adversarial accuracy (the magnitude of the gap is pending measurement; see §8.1).
 
-**Dependence on an honest preflight**: if `scripts/preflight.sh` has checks that always pass (e.g., a hardcoded `exit 0`), the gate is not a gate. The audit verifies that preflight exits non-zero on failure, but cannot audit the integrity of a script designed to deceive.
+**Dependence on an honest preflight**: if `scripts/preflight.sh` has checks that always pass (e.g., a hardcoded `exit 0`), the gate is not a gate. The audit verifies that preflight exits non-zero on failure, but cannot audit the integrity of a script designed to deceive. The adversarial verifier (Step 6) mitigates this with a **negative-control self-test**: it confirms each sampled check FAILS on an input it should reject; a check that also passes its negative control is marked INVALID (see `verifier-protocol.md`).
+
+### 8.1 Reproducibility (pending)
+
+The review-accuracy figures (~62% self-critique → ~89% independent verifier; ~28% → ~7% false positives) and the M5 memory-curve numbers in this document are **directional, illustrative targets — not measurements taken in this project**. The direction is supported by the LLM self-correction literature; the exact magnitude in this harness is unmeasured.
+
+Reproduction plan (pending work, to produce `benchmarks/`):
+
+1. **Verifier vs self-critique A/B** — a fixed set of diffs with known bugs (a mix of correct and incorrect), N≥30 runs, median reported. Arm A: the same agent reviews its own diff with its reasoning in context. Arm B: a fresh-context verifier that receives only the diff + the rubric. Metrics: accuracy (real bugs caught) and false-positive rate. Each instrument is self-verified — a known-good diff must pass and a known-bad diff must fail before any model output is scored (the same negative control Step 6 requires).
+2. **Memory M-level curve** — task success across a series of sessions, with and without memory consulted before acting.
+3. **Publish the reproduction command** and raw numbers, in the style of the `ponytail` skill's benchmark (`npx promptfoo eval`, reproducible by anyone) — the honesty bar to clear.
+
+Until this exists, the numeric claims should be read as design hypotheses, not evidence.
 
 ---
 
@@ -426,7 +438,7 @@ Three invariants:
 
 1. **The rubric is the artifact of value.** A report a human reads and executes is L0. A rubric a loop converges is L3.
 
-2. **The verifier never knows the implementer's reasoning.** Reviewer independence is the necessary condition for the jump from 62% to 89%.
+2. **The verifier never knows the implementer's reasoning.** Reviewer independence is the necessary condition for the accuracy jump (its magnitude, ~62%→~89%, is the target still to be reproduced).
 
 3. **The model is interchangeable; the harness is not.** The day a model is replaced by its successor, the loop keeps working. The harness is the intellectual property; the model is the engine that runs it.
 

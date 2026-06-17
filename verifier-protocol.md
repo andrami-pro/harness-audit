@@ -1,6 +1,6 @@
 # verifier-protocol — adversarial verification of the audit (Step 6)
 
-Why it exists: self-critique by the same agent that generated the audit catches ~62% of errors (confirmation bias + anchoring to its own reasoning); a verifier with fresh context catches ~89%. Separating generation from evaluation is the Dev/QA equivalent of Loop Design.
+Why it exists: self-critique by the same agent that generated the audit is unreliable (confirmation bias + anchoring to its own reasoning); a verifier with fresh context catches materially more errors. Separating generation from evaluation is the Dev/QA equivalent of Loop Design. (The specific ~62% → ~89% figures cited in SKILL.md/WHITEPAPER are directional targets, not yet independently reproduced here — see the provenance note in WHITEPAPER §8.1.)
 
 ## Isolation rules (non-negotiable)
 
@@ -49,8 +49,24 @@ Launch with the Agent tool, type `Explore` (read-only) or the repo's `reviewer` 
 | CONFIRMED | Nothing — count it toward the summary's `verified: N/M` |
 | REFUTED | Fix the item in the rubric AND the report; re-sample 1 extra item from the same pillar (if there was one error, there may be more) |
 | UNCHECKABLE | Rewrite the item's `Check:` so it is executable; re-verify |
+| INVALID | The check passes but does **not discriminate** (see self-test below): rewrite it until its negative control fails; re-verify |
 
 If ≥ 2 items come back REFUTED: the whole audit is suspect — re-run Step 2 of the affected pillar before delivering, and distill into memory which check failed and why (rule M4: one check corrected per audit).
+
+## Instrument self-test — does the check discriminate? (negative control)
+
+A check that can only say PASS is a broken thermometer: it gives false confidence. Before a CONFIRMED verdict counts, the verifier proves the check **discriminates** by running it against a **negative control** — an input the check MUST fail on — without mutating the repo (read-only is non-negotiable; the negative control is constructed, the real repo is never broken).
+
+| Check shape | Negative control (must return FAIL / exit ≠ 0) |
+|---|---|
+| `test -f AGENTS.md` | `test -f AGENTS.md.__nonexistent__` → must exit ≠ 0 |
+| `[ "$(wc -l < AGENTS.md)" -le 200 ]` | same command fed an input > 200 lines (e.g. `seq 999 \| wc -l`) → must exit ≠ 0 |
+| `grep -q "reviewer" .claude/agents/*.md` | `grep -q "reviewer" /dev/null` → must exit ≠ 0 |
+| script with an exit code | run it against a fixture that violates the criterion on purpose → must exit ≠ 0 |
+
+Rule: if the check passes on the repo **and also** on its negative control, it does not discriminate → verdict **INVALID** (a stronger failure than UNCHECKABLE: UNCHECKABLE never runs, INVALID runs but lies). Rewrite the check until its negative control fails, then re-verify.
+
+Self-test sampling: apply the negative control to **at least 1 PASS item per run**, always prioritizing any check whose command output was not pasted as evidence (a PASS with no evidence and no demonstrated discrimination is exactly where a loop converges happily against a rubric that lies).
 
 ## Close
 

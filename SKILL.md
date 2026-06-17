@@ -1,6 +1,6 @@
 ---
 name: harness-audit
-description: Audit a project's agent harness against four pillars (harness-in-code, multi-agent role separation, automatic verification, loop design) and produce an EXECUTABLE rubric (harness-rubric.md) plus a stack-tailored remediation plan with stop conditions. Use when starting work in an unfamiliar repo, or when the user says "audit my harness", "audita el harness", "AGENTS.md", "preflight", "reviewer subagent", "harness engineering", "self-improving loop", "loop design", "rubric", "independent verifier", "continuous memory", "loop-readiness", or asks to make a repo portable across Claude Code / Codex / Cursor / Antigravity / Kilo Code. Methodology: the audit IS a rubric a loop converges against, not a static report; a verifier sub-agent beats self-critique (89% vs 62%); memory matures Fail→Investigate→Verify→Distill→Consult; AGENTS.md ≤ 200 lines; a minimal harness beats an inflated one. The model is the horse, the harness is the saddle.
+description: Audit a project's agent harness against four pillars (harness-in-code, multi-agent role separation, automatic verification, loop design) and produce an EXECUTABLE rubric (harness-rubric.md) plus a stack-tailored remediation plan with stop conditions. Use when starting work in an unfamiliar repo, or when the user says "audit my harness", "audita el harness", "AGENTS.md", "preflight", "reviewer subagent", "harness engineering", "self-improving loop", "loop design", "rubric", "independent verifier", "continuous memory", "loop-readiness", or asks to make a repo portable across Claude Code / Codex / Cursor / Antigravity / Kilo Code. Methodology: the audit IS a rubric a loop converges against, not a static report; an independent verifier sub-agent beats self-critique; memory matures Fail→Investigate→Verify→Distill→Consult; AGENTS.md ≤ 200 lines; a minimal harness beats an inflated one. The model is the horse, the harness is the saddle.
 ---
 
 # harness-audit — Four pillars + executable rubric + self-correction loop
@@ -135,7 +135,7 @@ Use exactly this format so it's machine-readable for follow-up plans:
 
 ## Anti-patterns detected
 - <e.g., AGENTS.md is 450 lines — bloated, will degrade context>
-- <e.g., reviewer sees implementer's reasoning — self-critique in disguise (62% vs 89% accuracy)>
+- <e.g., reviewer sees implementer's reasoning — self-critique in disguise (loses the independent-verifier advantage)>
 - <e.g., memory is M1: 40 failure notes, no verified facts, no rules>
 
 ## Risks if shipped as-is
@@ -169,14 +169,14 @@ Preflight checks to always include: (1) AGENTS.md exists and ≤ 200 lines, (2) 
 
 ### Step 4b — Emit the model-by-role develop-phase workflow (ALWAYS)
 
-**This step is mandatory for every audit**, regardless of project size or maturity. Write `.claude/workflows/develop-phase.js` at the repo root. This is the loop engine: Implementer (Sonnet) → Reviewer (Opus) → Preflight (Haiku). Without model differentiation the loop degrades to ~62% self-critique accuracy; with an independent reviewer it reaches ~89% (Anthropic internal benchmark, code-correctness tasks).
+**This step is mandatory for every audit**, regardless of project size or maturity. Write `.claude/workflows/develop-phase.js` at the repo root. This is the loop engine: Implementer (Sonnet) → Reviewer (Opus) → Preflight (Haiku). Without model differentiation the loop degrades to self-critique-level accuracy; with an independent reviewer it catches materially more defects before merge. *(Provenance: the often-cited ~62% → ~89% figures are directional targets — not reproduced independently here. A reproducible A/B is planned: see `benchmarks/` (TODO) and WHITEPAPER §8.1. Until then, treat the gap as qualitative, not measured.)*
 
-**Model assignment rationale:**
+**Model assignment rationale** (heuristic — role/cost fit, pending the benchmark above):
 
 | Role | Model class | Why |
 |------|-------------|-----|
 | Implementer | fast/mid (e.g. Sonnet) | Speed + cost for code generation; sufficient for routine implementation |
-| Reviewer | frontier (e.g. Opus) | Adversarial accuracy: 89% vs 62% (self-critique) |
+| Reviewer | frontier (e.g. Opus) | Adversarial accuracy: an independent frontier reviewer beats self-critique (directional; numbers pending the benchmark above) |
 | Preflight checks | small/fast (e.g. Haiku) | Pure command execution — no reasoning required, fastest + cheapest |
 | Complex security review | extended-thinking (top tier) | Use only for high-criticality phases: injection testing, threat modeling |
 
@@ -190,7 +190,7 @@ export const meta = {
   description: 'Implementer → Reviewer adversarial loop against harness-rubric.md, then a final Preflight gate.',
   phases: [
     { title: 'Implement', detail: 'Write code against the PRD + memory', model: 'sonnet' },
-    { title: 'Review',    detail: 'Find reasons to reject (89% vs 62% accuracy)', model: 'opus' },
+    { title: 'Review',    detail: 'Find reasons to reject (independent verifier > self-critique)', model: 'opus' },
     { title: 'Preflight', detail: "Run the project's preflight gate", model: 'haiku' },
   ],
 }
@@ -301,7 +301,7 @@ The model evaluates the task at the start of the session and proposes:
 
 ### Step 4c — Audit skills/workflows bloat + curated recommendations (NEVER auto-install or auto-remove)
 
-Two parts, in order: **(i) audit what exists and flag saturation** → **(ii) recommend removals and additions**. Never install or remove anything automatically. The "minimal harness" lesson is the north star (see the Vercel D0 case in the whitepaper: −80% tools → 3× faster). An audit that only adds and never recommends removal is incomplete.
+Two parts, in order: **(i) audit what exists and flag saturation** → **(ii) recommend removals and additions**. Never install or remove anything automatically. The "minimal harness" lesson is the north star — anecdotally the Vercel D0 case (−80% tools → 3× faster, an informal talk reference), and corroborated reproducibly by the `ponytail` skill's published benchmark (80–94% less code, 3–6× faster across Haiku/Sonnet/Opus; reproduce with `npx promptfoo eval`). An audit that only adds and never recommends removal is incomplete.
 
 **Part i — audit existing skills and workflows for bloat.** Inventory the global skills folder (affects all projects), the project skills folder, and the project workflows folder. Flag if a scope exceeds its threshold:
 
@@ -347,11 +347,11 @@ This is the core idea: the audit is a photo of a static report; the rubric is a 
 
 ### Step 6 — Adversarial verification of this audit
 
-Before delivering, spawn a fresh-context subagent (read-only) following [verifier-protocol.md](verifier-protocol.md): it receives ONLY the rubric + repo path — never this audit's reasoning — re-runs the `Check:` commands of 3–5 sampled items (always include any item graded ✓ without a pasted command output), and tries to REFUTE the verdicts. Fix every discrepancy before the final report and note `verified: N/M sampled checks confirmed` in the summary. Cheap insurance: these are `test -f` / `wc -l` commands, not deep analysis.
+Before delivering, spawn a fresh-context subagent (read-only) following [verifier-protocol.md](verifier-protocol.md): it receives ONLY the rubric + repo path — never this audit's reasoning — re-runs the `Check:` commands of 3–5 sampled items (always include any item graded ✓ without a pasted command output), and tries to REFUTE the verdicts. For at least one PASS item, it also runs the **negative-control self-test** from verifier-protocol.md (does the check FAIL on an input it should reject? a check that can't say no is a broken thermometer → verdict INVALID). Fix every discrepancy before the final report and note `verified: N/M sampled checks confirmed` in the summary. Cheap insurance: these are `test -f` / `wc -l` commands, not deep analysis.
 
 ## Rules
 
-- **Never inflate.** If the project is tiny (one-file script, weekend hack), say so and recommend a minimal AGENTS.md only. The minimal-harness lesson: −80% tools → 3× faster.
+- **Never inflate.** If the project is tiny (one-file script, weekend hack), say so and recommend a minimal AGENTS.md only. The minimal-harness lesson: less harness, more focus (anecdotal Vercel D0 −80% tools → 3× faster; reproducibly corroborated by ponytail's benchmark).
 - **Never delete files** during an audit — read-only except `harness-rubric.md` (and ask before writing it).
 - **If AGENTS.md exceeds 200 lines**, the FIRST recommendation is to trim — a bloated harness degrades the model.
 - **If the project has neither tests nor lint**, push back: "verification is pillar 3, not optional. What was the project's release process before?"
