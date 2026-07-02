@@ -11,7 +11,7 @@ The audit is not a static report a human reads and executes — it is an **execu
 
 The model is the horse; the harness is the saddle. Models change every few months — the harness stays. That is why the artifact of value is the rubric and the role conventions, not any one model.
 
-See [WHITEPAPER.md](WHITEPAPER.md) for the full rationale, benchmarks, and theory.
+See [WHITEPAPER.md](https://github.com/andrami-pro/harness-audit/blob/main/WHITEPAPER.md) for the full rationale, benchmarks, and theory.
 
 ## When to invoke
 
@@ -91,6 +91,9 @@ Also detect: package manager (`pnpm-lock.yaml` → pnpm, `yarn.lock` → yarn, `
 | Pre-commit hook | Hook framework installed | `test -f lefthook.yml` OR `.husky/` OR `.pre-commit-config.yaml` OR `pre-commit` in git hooks |
 | CI workflow | At least one CI pipeline runs preflight on PR | `ls .github/workflows/*.yml` or equivalent |
 | Self-improving loop | AGENTS.md/CLAUDE.md instructs reviewer to propose new rules | `grep -i "self.improv\|propose.*rule\|update.*agents.md" AGENTS.md CLAUDE.md 2>/dev/null` |
+| Secret-scan gate | A write-time or pre-commit check catches credential patterns (`sk-`, `ghp_`, `AKIA`, PEM blocks) before they land in tracked files | inspect hook config (`hooks/hooks.json`, lefthook, pre-commit) for a secret scanner — this plugin ships one (`secret-scan.js`) |
+| Destructive-command guard | Agent sessions cannot run `rm -rf` against root/home, `git checkout --force`, or `git clean -fdx` unchecked | inspect hook config for a Bash pre-execution guard — this plugin ships one (`destructive-guard.js`) |
+| No-verify blocked | `git commit/push --no-verify` is rejected, so the pre-commit gate cannot be silently bypassed | `grep -rE "no.?verify" hooks/ .husky/ lefthook.yml 2>/dev/null` — this plugin ships `block-no-verify.js` |
 
 #### Pillar 4 — Loop design (rubrics + continuous memory)
 
@@ -169,18 +172,19 @@ Preflight checks to always include: (1) AGENTS.md exists and ≤ 200 lines, (2) 
 
 ### Step 4b — Emit the model-by-role develop-phase workflow (ALWAYS)
 
-**This step is mandatory for every audit**, regardless of project size or maturity. Write `.claude/workflows/develop-phase.js` at the repo root. This is the loop engine: Implementer (Sonnet) → Reviewer (Opus) → Preflight (Haiku). Without model differentiation the loop degrades to self-critique-level accuracy; with an independent reviewer it catches materially more defects before merge. *(Provenance: the often-cited ~62% → ~89% figures are directional targets — not reproduced independently here. A reproducible A/B is planned: see `benchmarks/` (TODO) and WHITEPAPER §8.1. Until then, treat the gap as qualitative, not measured.)*
+**This step is mandatory for every audit**, regardless of project size or maturity. Write `.claude/workflows/develop-phase.js` at the repo root. This is the loop engine: Implementer (Opus) → Reviewer (Fable) → Preflight (Sonnet). Without model differentiation the loop degrades to self-critique-level accuracy; with an independent reviewer it catches materially more defects before merge. *(Provenance: the often-cited ~62% → ~89% figures are directional targets — not reproduced independently here. A reproducible A/B is planned: see `benchmarks/` (TODO) and WHITEPAPER §8.1. Until then, treat the gap as qualitative, not measured.)*
 
-**Model assignment rationale** (heuristic — role/cost fit, pending the benchmark above):
+**Model assignment rationale (current lineup: Opus 4.8 / Fable 5 / Sonnet 5 — a role/cost-fit heuristic, pending the benchmark above):**
 
 | Role | Model class | Why |
 |------|-------------|-----|
-| Implementer | fast/mid (e.g. Sonnet) | Speed + cost for code generation; sufficient for routine implementation |
-| Reviewer | frontier (e.g. Opus) | Adversarial accuracy: an independent frontier reviewer beats self-critique (directional; numbers pending the benchmark above) |
-| Preflight checks | small/fast (e.g. Haiku) | Pure command execution — no reasoning required, fastest + cheapest |
-| Complex security review | extended-thinking (top tier) | Use only for high-criticality phases: injection testing, threat modeling |
+| Orchestrator | Mythos tier (e.g. Fable 5) | Designs the loop, owns the rubric, manages memory across sessions |
+| Implementer | workhorse frontier (e.g. Opus 4.8) | Strong code generation at sustainable cost for the 80% of the work |
+| Reviewer | Mythos tier (e.g. Fable 5) | An independent reviewer beats self-critique (directional; numbers pending the benchmark above) — and a *different family* than the implementer, on purpose (cross-family review reduces shared blind spots) |
+| Preflight checks | mid/fast (e.g. Sonnet 5) | Command execution + result parsing — cheap, fast, reliable |
+| Complex security review | Mythos tier, extended thinking | Use only for high-criticality phases: injection testing, threat modeling |
 
-> The model *classes* matter more than any specific name. Substitute the equivalent tier in whatever harness you run (Claude Code / Codex / Cursor). The point is role-differentiated capability, not a fixed lineup.
+> The model *classes* matter more than any specific name. Substitute the equivalent tier in whatever harness you run (Claude Code / Codex / Cursor). The point is role-differentiated capability — and an implementer/reviewer split across model families — not a fixed lineup.
 
 **Generic template to write** (adapt the PRD path and project-specific rules to the stack detected in Step 1):
 
@@ -189,9 +193,9 @@ export const meta = {
   name: 'develop-phase',
   description: 'Implementer → Reviewer adversarial loop against harness-rubric.md, then a final Preflight gate.',
   phases: [
-    { title: 'Implement', detail: 'Write code against the PRD + memory', model: 'sonnet' },
-    { title: 'Review',    detail: 'Find reasons to reject (independent verifier > self-critique)', model: 'opus' },
-    { title: 'Preflight', detail: "Run the project's preflight gate", model: 'haiku' },
+    { title: 'Implement', detail: 'Write code against the PRD + memory', model: 'opus' },
+    { title: 'Review',    detail: 'Find reasons to reject (independent verifier > self-critique)', model: 'fable' },
+    { title: 'Preflight', detail: "Run the project's preflight gate", model: 'sonnet' },
   ],
 }
 
@@ -205,7 +209,7 @@ const prdHint = phaseN
   ? `Reference PRD: docs/prd/prd-phase-${phaseN}-*.md`
   : 'Active phase: see TASKS.md or equivalent'
 
-log(`Task: "${task}" · max ${maxIter} iter · Implementer=Sonnet · Reviewer=Opus`)
+log(`Task: "${task}" · max ${maxIter} iter · Implementer=Opus · Reviewer=Fable`)
 
 let approved = false, lastImpl = '', lastReview = '', iteration = 0
 
@@ -223,7 +227,7 @@ while (!approved && iteration < maxIter) {
 Read: memory/, ${prdHint}, harness-rubric.md, .claude/agents/implementer.md.
 TASK: ${task}${correctionCtx}
 When done: list created/modified files + a description of each change.`,
-    { model: 'sonnet', label: `impl:iter${iteration}`, phase: 'Implement' }
+    { model: 'opus', label: `impl:iter${iteration}`, phase: 'Implement' }
   )
 
   phase('Review')
@@ -239,7 +243,7 @@ Read harness-rubric.md and .claude/agents/reviewer.md from the repo.
 Evaluate the reviewer's mandatory criteria.
 Format: [PASS|FAIL] criterion — concrete evidence
 Last line (no extra text): APPROVED or REJECTED`,
-    { model: 'opus', label: `review:iter${iteration}`, phase: 'Review' }
+    { model: 'fable', label: `review:iter${iteration}`, phase: 'Review' }
   )
 
   approved = lastReview.includes('APPROVED')
@@ -253,7 +257,7 @@ phase('Preflight')
 const preflight = await agent(
   `Run the project's preflight gate and report the full output + exit code.
 If it fails: identify the exact check that failed.`,
-  { model: 'haiku', label: 'preflight', phase: 'Preflight' }
+  { model: 'sonnet', label: 'preflight', phase: 'Preflight' }
 )
 
 const preflightPassed = preflight.toLowerCase().includes('pass') || preflight.includes('exit:0')
@@ -270,7 +274,7 @@ return {
 
 **Adaptations required by stack** (from Step 1 detection):
 
-| Stack | Preflight command in the Haiku agent prompt | PRD path hint |
+| Stack | Preflight command in the preflight agent prompt | PRD path hint |
 |-------|---------------------------------------------|---------------|
 | Node + pnpm | `pnpm preflight` or `./scripts/preflight.sh` | `docs/prd/` or task-tracking file |
 | Python + uv | `./scripts/preflight.sh` or `uv run python scripts/preflight.py` | same |

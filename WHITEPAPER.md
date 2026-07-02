@@ -49,7 +49,7 @@ The expected result (figures are **illustrative, pending reproduction** — see 
 | Self-critique (same model) | ~62% | ~28% |
 | Independent verifier subagent | **~89%** | **~7%** |
 
-If the order of magnitude holds, a ~28% false-positive rate would mean nearly 1 in 3 "code is correct" approvals is wrong — a silent regression roughly every three merges. The direction (an independent verifier lowers false positives) is well supported in the LLM self-correction literature; the exact magnitude is what this project still has to measure.
+If the order of magnitude holds, a ~28% false-positive rate would mean nearly 1 in 3 "code is correct" approvals is wrong — a silent regression roughly every three merges. The direction (an independent verifier lowers false positives) is well supported in the LLM self-correction literature; the exact magnitude is what this project still has to measure (see §8.1 Reproducibility — contributions welcome).
 
 ### 1.3 The Rubric Paradox
 
@@ -198,12 +198,13 @@ The model assignment is a role/cost-fit heuristic (pending validation by the A/B
 
 | Role | Model class | Justification |
 |------|-------------|---------------|
-| **Implementer** | fast/mid tier | Sufficient for routine code generation; optimal cost/speed ratio |
-| **Reviewer** | frontier tier | Higher adversarial accuracy than self-critique (~89% vs ~62%: illustrative target, pending measurement). The reviewer's premium cost is amortized by every FAIL caught before merge |
-| **Preflight checks** | small/fast tier | Command execution — needs no reasoning; minimal cost per iteration |
-| **Security review (critical phase)** | extended-thinking, top tier | Automatic extended reasoning for threat-model and prompt-injection analysis |
+| **Orchestrator** | Mythos tier (e.g. Fable 5) | Designs the loop, owns the rubric, manages memory across sessions |
+| **Implementer** | workhorse frontier tier (e.g. Opus 4.8) | Strong code generation at sustainable cost for the bulk of the work |
+| **Reviewer** | Mythos tier (e.g. Fable 5) | Higher adversarial accuracy than self-critique (~89% vs ~62%: illustrative target, pending measurement) — and deliberately a *different family* than the implementer: cross-family review reduces shared blind spots. The premium cost is amortized by every FAIL caught before merge |
+| **Preflight checks** | mid/fast tier (e.g. Sonnet 5) | Command execution + result parsing; low cost per iteration |
+| **Security review (critical phase)** | Mythos tier, extended thinking | Extended reasoning for threat-model and prompt-injection analysis |
 
-The reviewer at frontier tier costs more per iteration, but every FAIL it catches avoids a regression that would cost N times more to debug later. The ROI is positive by design. Model *classes* matter more than specific names: substitute the equivalent tier in whatever harness you run.
+The reviewer at premium tier costs more per iteration, but every FAIL it catches avoids a regression that would cost N times more to debug later. The ROI is positive by design. Model *classes* matter more than specific names — the lineup in parentheses is current as of mid-2026 and will rotate; substitute the equivalent tier in whatever harness you run.
 
 ### 4.2 The Convergence Loop
 
@@ -214,11 +215,11 @@ args: { task, phase?, maxIter? }
 
 LOOP (until maxIter=5 or approved=true):
 │
-├── IMPLEMENT [fast/mid tier]
+├── IMPLEMENT [workhorse tier, e.g. Opus]
 │   Reads: memory/ → phase PRD → harness-rubric.md → implementer.md
 │   Executes the task + lists modified files
 │
-├── REVIEW [frontier tier]
+├── REVIEW [Mythos tier, e.g. Fable — different family, on purpose]
 │   Receives: ONLY the implementer's report (artifact)
 │   Reads: harness-rubric.md + reviewer.md
 │   Emits: [PASS|FAIL] per criterion → APPROVED | REJECTED
@@ -226,7 +227,7 @@ LOOP (until maxIter=5 or approved=true):
 └── If REJECTED → correctionCtx = reviewer's reasons → back to IMPLEMENT
     If APPROVED → exit the loop
 
-PREFLIGHT [small/fast tier]
+PREFLIGHT [mid/fast tier, e.g. Sonnet]
 │   Runs ./scripts/preflight.sh
 │   Reports exit code + failed check (if any)
 

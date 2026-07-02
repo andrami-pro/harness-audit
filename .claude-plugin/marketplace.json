@@ -1,0 +1,14 @@
+{
+  "name": "harness-audit",
+  "owner": {
+    "name": "Andrés Ramírez · andrami",
+    "url": "https://andrami.pro"
+  },
+  "plugins": [
+    {
+      "name": "harness-audit",
+      "source": "./",
+      "description": "Harness audit methodology (four pillars, executable rubric, independent verifier) + write-time security guards."
+    }
+  ]
+}
