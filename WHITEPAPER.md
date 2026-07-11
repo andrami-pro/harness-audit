@@ -339,17 +339,17 @@ This implements the M5 (Consult) step of progressive memory: rules distilled fro
 
 **Dependence on an honest preflight**: if `scripts/preflight.sh` has checks that always pass (e.g., a hardcoded `exit 0`), the gate is not a gate. The audit verifies that preflight exits non-zero on failure, but cannot audit the integrity of a script designed to deceive. The adversarial verifier (Step 6) mitigates this with a **negative-control self-test**: it confirms each sampled check FAILS on an input it should reject; a check that also passes its negative control is marked INVALID (see `verifier-protocol.md`).
 
-### 8.1 Reproducibility (pending)
+### 8.1 Reproducibility (scaffold built; K≥30 run pending)
 
 The review-accuracy figures (~62% self-critique → ~89% independent verifier; ~28% → ~7% false positives) and the M5 memory-curve numbers in this document are **directional, illustrative targets — not measurements taken in this project**. The direction is supported by the LLM self-correction literature; the exact magnitude in this harness is unmeasured.
 
-Reproduction plan (pending work, to produce `benchmarks/`):
+The scaffold that will measure them now lives in [`benchmarks/`](benchmarks/). Design discipline inspired by [headroom](https://github.com/headroomlabs-ai/headroom) (TOST-gated evals; no fabricated statistics), alongside `ponytail`'s. Status: **built and runnable, not yet run at N≥30** — the figures above remain unmeasured because the run hasn't happened, not because the instrument is missing.
 
-1. **Verifier vs self-critique A/B** — a fixed set of diffs with known bugs (a mix of correct and incorrect), N≥30 runs, median reported. Arm A: the same agent reviews its own diff with its reasoning in context. Arm B: a fresh-context verifier that receives only the diff + the rubric. Metrics: accuracy (real bugs caught) and false-positive rate. Each instrument is self-verified — a known-good diff must pass and a known-bad diff must fail before any model output is scored (the same negative control Step 6 requires).
-2. **Memory M-level curve** — task success across a series of sessions, with and without memory consulted before acting.
-3. **Publish the reproduction command** and raw numbers, in the style of the `ponytail` skill's benchmark (`npx promptfoo eval`, reproducible by anyone) — the honesty bar to clear.
+1. **Verifier vs self-critique A/B** — [`benchmarks/verifier_ab.js`](benchmarks/verifier_ab.js) over [`benchmarks/corpus/`](benchmarks/corpus/) (8 labeled diffs, a mix of correct/incorrect, bugs drawn from the harness's own vocabulary). Arm A: the agent reviews a diff it is told it authored, **anchored with the author's rationale** (reproduces the §1.2 bias). Arm B: a fresh-context verifier that receives **only** diff + rubric, adversarial mandate. Reports the **full confusion matrix** (precision, recall/bug-detection, false-alarm rate, miss rate) — which disambiguates the single "false positives" number above, which today conflates a false alarm (rejecting good code) with a miss (approving a bug). A negative control ([`benchmarks/negative-control.md`](benchmarks/negative-control.md)) validates the instruments before scoring — the same self-test Step 6 requires. Run: `Workflow({ scriptPath: 'benchmarks/verifier_ab.js', args: { kRuns: 30 } })`.
+2. **Memory M-level curve** — task success across a series of sessions, with and without memory consulted before acting. *(Pending; a success-correlation technique — see Pillar 4 in SKILL.md — is the likely path to automate populating that memory.)*
+3. **Publish the reproduction command** and raw numbers — the command and a frozen contract ([`benchmarks/README.md`](benchmarks/README.md) + [`benchmarks/MANIFEST.md`](benchmarks/MANIFEST.md)) are already published; what's still missing is the **raw numbers from a real run**, in the style of the `ponytail` skill's benchmark (`npx promptfoo eval`, reproducible by anyone) — the honesty bar to clear.
 
-Until this exists, the numeric claims should be read as design hypotheses, not evidence.
+Honest limitation of the scaffold: `agent()` does not expose `temperature`/seed, so runs are reproducible in distribution (at large K) but not bit-for-bit; a fully pinned version would need a runner against the API directly, which this scaffold does not yet have. Until a K≥30 run exists with its raw numbers, the numeric claims should be read as design hypotheses, not evidence.
 
 ---
 

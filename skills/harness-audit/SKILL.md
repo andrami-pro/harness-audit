@@ -66,7 +66,7 @@ Also detect: package manager (`pnpm-lock.yaml` → pnpm, `yarn.lock` → yarn, `
 | Preflight script | Single command that runs all health checks | `grep -E '"(preflight\|verify\|check)"' package.json` (or `Makefile`, `justfile`, etc.) |
 | Memory exists | Convention for logging progress (sprint log, ADR folder, decision log, memory dir) | `find docs/ .claude/ -iname "*log*" -o -iname "*decision*" -o -iname "*adr*" -o -iname "*memory*" 2>/dev/null` — existence only; **quality is graded in Pillar 4** |
 | Task tracking | Tasks file or external tracker reference | `test -f TASKS.md` or check `AGENTS.md` for Linear/Jira link |
-| Code-graph index (optional) | A structural index exists so symbol queries beat grep from day one | if the project supports one and it's missing, the plan MAY include initializing it as a Phase 1 step |
+| Graphify graph exists | `graphify-out/graph.json` exists — a full AST-parsed structural graph so critics/scorer query structure instead of burning context on grep | `test -f graphify-out/graph.json && echo PASS \|\| echo FAIL` — FAIL is **blocking**: if the `graphify` CLI is missing, the plan MUST include installing it (`uv tool install graphifyy`, fallback `pipx install graphifyy` / `pip install graphifyy`) as a Phase 1 step; if the CLI exists but no graph, bootstrap with `graphify extract . --code-only` |
 
 #### Pillar 2 — Role separation (multi-agent) + verifier independence
 
@@ -75,8 +75,8 @@ Also detect: package manager (`pnpm-lock.yaml` → pnpm, `yarn.lock` → yarn, `
 | Subagents folder | `.claude/agents/` (or equivalent) exists with at least one role definition | `ls .claude/agents/*.md 2>/dev/null` |
 | Reviewer present | A subagent that audits diffs against rules | `grep -l -i "reviewer\|review.*diff" .claude/agents/*.md 2>/dev/null` |
 | Reviewer independence | Reviewer receives ONLY diff + rules — never the implementer's reasoning or chat context | read reviewer.md: inputs must be artifacts (diff, files, rubric), not conversation |
-| Reviewer refutes, not confirms | Reviewer prompted to find reasons to REJECT, with evidence per criterion (PASS/FAIL + quote) | `grep -i "refut\|reject\|evidence" .claude/agents/reviewer*.md` |
-| No self-approval | AGENTS.md documents that the implementer never approves its own diff | `grep -i "self.approv\|reviewer" AGENTS.md` |
+| Reviewer refutes, not confirms | Reviewer prompted to find reasons to REJECT, with evidence per criterion (PASS/FAIL + quote) | `grep -i "refut\|reject\|evidence\|evidencia" .claude/agents/reviewer*.md` |
+| No self-approval | AGENTS.md documents that the implementer never approves its own diff | `grep -i "self.approv\|auto.aprob\|reviewer" AGENTS.md` |
 | Skills (personas) | A skills folder for domain personas (PM, dev, UX, etc.) | `ls .claude/skills/*/SKILL.md 2>/dev/null` |
 | Multi-harness portability | Same role conventions discoverable for Codex/Cursor (AGENTS.md mentions roles abstractly) | `grep -i "orchestrat\|implement\|review" AGENTS.md` |
 
@@ -101,10 +101,12 @@ Also detect: package manager (`pnpm-lock.yaml` → pnpm, `yarn.lock` → yarn, `
 |---|---|---|
 | Executable done-rubric | `harness-rubric.md` exists, or AGENTS.md defines done-criteria as `Check:` commands with thresholds | `test -f harness-rubric.md` or `grep -c "Check:" AGENTS.md` |
 | Preflight machine-readable | Preflight exits non-zero on failure and prints a parseable summary (a loop can read it) | run preflight; inspect `$?` and output structure |
-| Stop conditions | Agent/skill definitions include iteration limits or escalation rules ("until X OR N attempts") | `grep -riE "stop\|max.*(iter\|attempt)\|escalat" .claude/agents/ .claude/skills/ 2>/dev/null` |
+| Stop conditions | Agent/skill definitions include iteration limits or escalation rules ("until X OR N attempts") | `grep -riE "stop\|máximo\|max.*(iter\|attempt)\|escalat" .claude/agents/ .claude/skills/ 2>/dev/null` |
 | Memory maturity M1–M5 | Grade the BEST memory artifact against the progression scale below | read 2–3 memory/ADR files and classify |
-| Memory consulted before acting | AGENTS.md/CLAUDE.md instructs agents to READ memory before starting work, not only write after | `grep -iE "read.*memory\|consult" AGENTS.md CLAUDE.md` |
-| Memory compaction policy | Size budget + dedup/merge rule documented (unbounded memory = bloat that degrades recall) | `du -sh` memory dir + `grep -iE "compact\|distill\|merge\|limit" AGENTS.md` |
+| Memory consulted before acting | AGENTS.md/CLAUDE.md instructs agents to READ memory before starting work, not only write after | `grep -iE "l[eé]e.*memoria\|read.*memory\|consult" AGENTS.md CLAUDE.md` |
+| Memory compaction policy | Size budget + dedup/merge rule documented (unbounded memory = bloat that degrades recall) | `du -sh` memory dir + `grep -iE "compact\|destil\|distill\|merge\|l[ií]mite\|limit" AGENTS.md` |
+| Memory distilled from session telemetry | An offline analyzer reads past session logs, correlates each failure with the fix that *worked*, and writes distilled corrections (jumps M1→M3 in one step — see the success-correlation note below) | `grep -riE "success.correlat\|session.*log\|\blearn\b" scripts/ .claude/ package.json pyproject.toml 2>/dev/null` — usually absent; this is M4→M5 maturity, so flag ⚠ (aspirational), not ✗ (basic gap) |
+| Auto-writes don't clobber curated memory | If any tool auto-writes to `memory/`/`AGENTS.md`/`CLAUDE.md`, it fences its output in delimited markers so hand-curated content survives a re-run | `grep -rE "<!--.*(start\|end).*-->" memory/ AGENTS.md CLAUDE.md CLAUDE.local.md 2>/dev/null` — N/A if nothing auto-writes memory |
 
 **Memory maturity scale** (continual-learning progression — grade by what the notes ARE, not how many):
 
@@ -113,6 +115,8 @@ Also detect: package manager (`pnpm-lock.yaml` → pnpm, `yarn.lock` → yarn, `
 - **M3 Verify** — facts tagged `[VERIFIED]` / `[UNVERIFIED]` with the check that proved them
 - **M4 Distill** — verified facts compressed into general rules ("when X, always Y")
 - **M5 Consult** — rules are actually read before acting (instruction exists + evidence of use, e.g. references in recent commits/ADRs)
+
+> **Success-correlation shortcut (M1→M3).** The highest-signal way to climb from raw failure notes (M1) to verified facts (M3) is *not* hand-annotation — it's to correlate each failed action with the action that later **fixed** it: "`Read foo/X.java` failed → `Read bar/X.scala` succeeded ⇒ *X lives in bar/, not foo/*." The fix that worked IS the verification. An offline distiller (reference impl: headroom `learn`) automates this from agent session logs and writes it, marker-fenced, to the agent-native canonical file (`AGENTS.md` / `CLAUDE.local.md` / `GEMINI.md`) — the same portability principle as Pillar 1. Keep the human in the outer loop: default to the gitignored personal file + dry-run (propose, don't auto-merge).
 
 ### Step 3 — Output the audit report
 
@@ -303,6 +307,16 @@ The model evaluates the task at the start of the session and proposes:
   The user approves or overrides to continue in a normal session.
 ```
 
+**Critical zones by stack** (adapt to the stack detected in Step 1 — trigger B above):
+
+| Stack | Critical zones |
+|-------|----------------|
+| Node + Astro | `worker/`, `src/pages/`, `src/layouts/`, shared UI components, `wrangler.jsonc`, `AGENTS.md` |
+| Node + Next/Remix | `app/`, `pages/`, middleware, `next.config.*`, shared components |
+| Python + FastAPI | auth-guarded routers, `alembic/`, DB models, `main.py`, `AGENTS.md` |
+| Rust | `src/lib.rs`, public traits, `Cargo.toml`, `AGENTS.md` |
+| Any | `AGENTS.md`, `CLAUDE.md`, harness config files, CI workflows |
+
 ### Step 4c — Audit skills/workflows bloat + curated recommendations (NEVER auto-install or auto-remove)
 
 Two parts, in order: **(i) audit what exists and flag saturation** → **(ii) recommend removals and additions**. Never install or remove anything automatically. The "minimal harness" lesson is the north star — anecdotally the Vercel D0 case (−80% tools → 3× faster, an informal talk reference), and corroborated reproducibly by the `ponytail` skill's published benchmark (80–94% less code, 3–6× faster across Haiku/Sonnet/Opus; reproduce with `npx promptfoo eval`). An audit that only adds and never recommends removal is incomplete.
@@ -316,6 +330,16 @@ Two parts, in order: **(i) audit what exists and flag saturation** → **(ii) re
 | Project workflows | > 3 | Multiple workflows doing overlapping orchestration |
 
 Classify each skill/workflow as **KEEP** (used in this repo, not covered by AGENTS.md), **REVIEW** (overlaps with another skill or with AGENTS.md), or **REMOVE** (domain not present in this repo, no role separation, no stop conditions, no `Check:` criteria, or duplicates `develop-phase.js`).
+
+**Pre-loop-design anti-patterns** — mark any skill/workflow as a REMOVE candidate if it:
+- Combines implementer + reviewer in a single agent (no role separation)
+- Has no stop conditions ("keep improving until good")
+- Instructs the model to be a "full assistant" without a specialized role
+- Duplicates what `develop-phase.js` already does (another workflow that runs implement→review without model switching)
+- Has no `Check:` criteria — pure prose instructions with no machine-verifiable outcome
+- References tools or integrations not present anywhere in the repo's dependency files
+
+**Workflow-specific check** — for each file in `.claude/workflows/`: does it assign different models per role (if not → REVIEW, it's pre-Loop-Design)? Does it have a stop condition (`maxIter` or equivalent, if not → REVIEW)? Does it duplicate `develop-phase.js` (if yes → REMOVE)?
 
 Global skills: never recommend `rm`. Recommend per-project deactivation via a convention — list skill names in `.claude/skills-ignore` and add a line to `CLAUDE.md` instructing the model not to invoke them here. The model reads CLAUDE.md at session start and honors the list (soft, not a hard block). Project skills and workflows are local files — recommend their removal with a reason, but let the human run the delete.
 
@@ -339,7 +363,28 @@ Global skills: never recommend `rm`. Recommend per-project deactivation via a co
 > Remove a workflow: `rm .claude/workflows/<name>.js`.
 ```
 
-**Part ii — recommend additions (after accounting for removals).** Produce a curated short-list of 3–5 skills that would make the Implementer and Reviewer more effective for the detected stack. Recommendation only — the human installs. Total skills after removals + additions must stay ≤ 15 global / ≤ 5 project. Score by: stack match, role utility (does the Implementer use it when writing / the Reviewer to catch domain errors?), minimal-harness fit, not-already-covered by AGENTS.md, and remaining budget. If at threshold with nothing to remove, recommend 0 additions and say so explicitly. Never recommend skills for a domain absent from the repo, or business/content skills in a purely technical project.
+**Part ii — recommend additions (after accounting for removals).** Produce a curated short-list of 3–5 skills that would make the Implementer and Reviewer more effective for the detected stack. Recommendation only — the human installs (use `find-skills` to search for candidates beyond the heuristic table below). Total skills after removals + additions must stay ≤ 15 global / ≤ 5 project. Score by: (1) stack match, (2) role utility (does the Implementer use it when writing / the Reviewer to catch domain errors?), (3) minimal-harness fit (drop it if it makes agents slower or noisier), (4) not-already-covered by AGENTS.md, (5) remaining budget. If at threshold with nothing to remove, recommend 0 additions and say so explicitly. Never recommend skills for a domain absent from the repo, or business/content skills in a purely technical project.
+
+**Stack → skills mapping** (heuristic starting point — refine with `find-skills`):
+
+| Detected stack / domain | Skills to consider |
+|-------------------------|--------------------|
+| Node + React/Vite | `vercel-react-best-practices`, `framer-motion-animator`, `frontend-design`, `ui-ux-pro-max` |
+| Node + Astro | `vercel-react-best-practices`, `web-perf`, `frontend-design` |
+| Python + FastAPI | `supabase-postgres-best-practices`, `neon-postgres` (if a DB is present) |
+| Cloudflare Workers | `cloudflare`, `workers-best-practices`, `wrangler`, `durable-objects` |
+| Flutter / Dart | `flutter-animations` |
+| Any + AI agent layer | `agents-sdk`, `sandbox-sdk` |
+| Any + web scraping | `web-scraping`, `apify-ultimate-scraper` |
+| Any + Postgres | `supabase-postgres-best-practices`, `neon-postgres` |
+| WebGL / 3D | `webgl`, `webgl-scene-prompts`, `3d-video-prompts` |
+
+**External tools (NOT skills — don't count against the skill budget).** For projects with agent session history or token-heavy multi-model loops, two external, file-first tools complement the harness. Recommend them only when the trigger applies; they are optional and the harness must stay correct without them:
+
+| Tool | Recommend when | What it gives | Honesty caveat |
+|------|-----------------|----------------|-----------------|
+| [headroom](https://github.com/headroomlabs-ai/headroom) `learn` (failure-learning) | `~/.claude/projects/*.jsonl` (or Codex/Gemini) session logs exist | Offline distiller: correlates each failure with its fix, writes marker-fenced corrections to `AGENTS.md`/`CLAUDE.local.md`/`GEMINI.md`. Automates the Pillar-4 memory-distillation item (M1→M3→M5) | Default dry-run + gitignored personal file — keep the human in the outer loop; propose, don't auto-merge |
+| [headroom](https://github.com/headroomlabs-ai/headroom) `wrap` / proxy (context compression) | The `develop-phase` loop runs many iterations across Opus+Fable+Sonnet (token-heavy) | Reversible tool-output compression; cuts the loop's token cost. Mitigates the WHITEPAPER §8 "model cost in long loops" limitation | It is a **runtime** layer. Recommend as optional token-economics, **never** a harness dependency — the loop must be correct with the proxy absent (file-based over runtime cleverness) |
 
 ### Step 5 — Emit the executable rubric (`harness-rubric.md`)
 

@@ -19,6 +19,19 @@ const check = (name, fn) => {
 };
 const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
 const mustExist = (rel) => { if (!fs.existsSync(path.join(ROOT, rel))) throw new Error(`${rel} missing`); };
+// Vacuous-safe glob: commands/ and agents/ don't exist yet (F2+ create them) — an absent
+// or empty dir returns [] so callers degrade to a no-op PASS instead of crashing.
+const globMd = (dir) => {
+  const abs = path.join(ROOT, dir);
+  if (!fs.existsSync(abs)) return [];
+  return fs.readdirSync(abs).filter((f) => f.endsWith('.md')).map((f) => path.join(dir, f)).sort();
+};
+const hasFrontmatterField = (rel, field) => {
+  const s = read(rel);
+  if (!/^---\n/.test(s)) throw new Error(`${rel} missing frontmatter`);
+  const fm = s.split('---')[1] ?? '';
+  if (!new RegExp(`${field}:\\s*\\S+`).test(fm)) throw new Error(`${rel} frontmatter missing ${field}`);
+};
 
 check('plugin.json valid + required fields', () => {
   const p = JSON.parse(read('.claude-plugin/plugin.json'));
@@ -57,22 +70,40 @@ check('verifier-protocol has the negative-control self-test', () => {
 });
 
 check('no stale model lineup (Haiku must not be the preflight tier)', () => {
-  for (const rel of ['skills/harness-audit/SKILL.md', 'WHITEPAPER.md', 'README.md']) {
+  // D18: the invariant extends to commands/ and agents/ — vacuously satisfied while those
+  // dirs don't exist yet (F2+ create them), so a missing dir must never crash this check.
+  const files = ['skills/harness-audit/SKILL.md', 'WHITEPAPER.md', 'README.md', ...globMd('commands'), ...globMd('agents')];
+  for (const rel of files) {
     const hits = read(rel).split('\n')
       .map((l, i) => ({ l, n: i + 1 }))
       .filter(({ l }) => /haiku/i.test(l) && /preflight/i.test(l));
     if (hits.length) throw new Error(`${rel}:${hits[0].n} still pairs Haiku with preflight`);
   }
+  return `${files.length} files scanned`;
 });
 
 check('benchmark figures are hedged, not asserted', () => {
-  const files = ['skills/harness-audit/SKILL.md', 'WHITEPAPER.md'];
+  // D18: same extension to commands/ and agents/, same vacuous-safety.
+  const files = ['skills/harness-audit/SKILL.md', 'WHITEPAPER.md', ...globMd('commands'), ...globMd('agents')];
   for (const rel of files) {
     const t = read(rel);
     if (/89\s*%/.test(t) && !/directional|illustrative|not (yet )?(independently )?reproduced/i.test(t)) {
       throw new Error(`${rel} cites 89% without a directional/unreproduced hedge`);
     }
   }
+  return `${files.length} files scanned`;
+});
+
+check('every commands/*.md has frontmatter description (vacuous if none exist yet)', () => {
+  const files = globMd('commands');
+  for (const rel of files) hasFrontmatterField(rel, 'description');
+  return files.length ? `${files.length} command(s) checked` : 'no commands/ yet';
+});
+
+check('every agents/*.md has frontmatter description (vacuous if none exist yet)', () => {
+  const files = globMd('agents');
+  for (const rel of files) hasFrontmatterField(rel, 'description');
+  return files.length ? `${files.length} agent(s) checked` : 'no agents/ yet';
 });
 
 check('hooks.json valid + every referenced script exists and parses', () => {
