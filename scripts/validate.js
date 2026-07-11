@@ -111,14 +111,16 @@ check('every agents/*.md has a frontmatter description', () => {
 });
 
 // Each pattern is a leak that reached a public file, or the private contract that is the reason
-// anyone would pay for the audit. `REDACTED` is not hypothetical: a private project name shipped
-// inside a benchmark fixture, and no other check in this file would have caught it.
+// anyone would pay for the audit. A leak glues itself to its neighbours: the one that shipped inside a
+// benchmark fixture was `REDACTED_agent`, where `\b` finds no boundary at all — so these names match as
+// substrings, not as words. `xx-yy` is the single exception: it hides inside innocent hyphenation
+// (`files-config`, `types-core`), so it alone is fenced against adjacent letters.
 const PRIVATE_LEAKS = [
-  /\bes-co\b/i,
-  /\bREDACTED\b/i,
-  /\b(persona-a|persona-b|persona-c|persona-d)\b/i,
-  /\b(persona-e|persona-f|persona-g|persona-h)\b/i,
-  /\b(REDACTED|REDACTED|REDACTED|REDACTED)\b/i,
+  /(?<![a-z])es[-_]co(?![a-z])/i,
+  /REDACTED/i,
+  /persona-a|persona-b|persona-c|persona-d/i,
+  /persona-e|persona-f|persona-g|persona-h/i,
+  /REDACTED|REDACTED|REDACTED|REDACTED/i,
 ];
 
 check('no private contract leaks in commands/, agents/, benchmarks/', () => {

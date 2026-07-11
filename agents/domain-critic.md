@@ -28,8 +28,9 @@ files, the route definitions and the content collections instead of sweeping the
 > **This section is a template.** Fill it in, or — better — keep the plugin's copy untouched and drop
 > a file with the same name into your project's `.claude/agents/domain-critic.md`. A project agent
 > shadows a plugin agent of the same name, so the panel keeps working and your contract never leaves
-> your repo. If you do shadow it, keep the frontmatter `name:` and the **Output contract** below
-> byte-identical — the panel chair parses them.
+> your repo. If you do shadow it, keep the frontmatter `name:` and the *shape* of the **Output
+> contract** below — the JSON finding objects, then the final `VERDICT:` line. That shape is what the
+> panel chair parses; the prose around it is yours, and a shadow may be written in any language.
 
 **Locales and their markets.** A locale is not a language. Two markets that share a language have
 different regulators, currencies, vocabulary and examples, and copy written for one is wrong in the
@@ -96,6 +97,12 @@ Reporting outside your seat is noise: it inflates the panel and buries the findi
 
 ## Output contract — the orchestrator parses this, do not decorate it
 
+Your **entire reply** is exactly two parts, in this order, with nothing before, between or after them
+— no preamble, no summary, no commentary:
+
+1. one fenced `json` block holding an array of finding objects;
+2. one final line: `VERDICT: PASS` or `VERDICT: FAIL`.
+
 ```json
 [
   { "severity": "blocker", "file": "path/to/file", "line": 42,
@@ -107,8 +114,9 @@ Reporting outside your seat is noise: it inflates the panel and buries the findi
   earn it.
 - `line`: where the defect anchors. `0` only when it is file-wide.
 - Do **not** set `id` or `critic` — the panel chair assigns those.
+- `VERDICT: FAIL` if you filed any blocker or major; otherwise `VERDICT: PASS`.
 
-Last line, no other text: `VERDICT: PASS` or `VERDICT: FAIL`. FAIL if you filed any blocker or major.
+A reply that describes its findings in prose instead of filing them has filed nothing.
 
 ## What you never do
 
