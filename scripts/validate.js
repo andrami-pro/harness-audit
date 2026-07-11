@@ -19,12 +19,17 @@ const check = (name, fn) => {
 };
 const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
 const mustExist = (rel) => { if (!fs.existsSync(path.join(ROOT, rel))) throw new Error(`${rel} missing`); };
-// Vacuous-safe glob: commands/ and agents/ don't exist yet (F2+ create them) — an absent
-// or empty dir returns [] so callers degrade to a no-op PASS instead of crashing.
 const globMd = (dir) => {
   const abs = path.join(ROOT, dir);
   if (!fs.existsSync(abs)) return [];
   return fs.readdirSync(abs).filter((f) => f.endsWith('.md')).map((f) => path.join(dir, f)).sort();
+};
+const walk = (dir) => {
+  const abs = path.join(ROOT, dir);
+  if (!fs.existsSync(abs)) return [];
+  return fs.readdirSync(abs, { withFileTypes: true })
+    .flatMap((e) => (e.isDirectory() ? walk(path.join(dir, e.name)) : [path.join(dir, e.name)]))
+    .sort();
 };
 const hasFrontmatterField = (rel, field) => {
   const s = read(rel);
@@ -70,8 +75,6 @@ check('verifier-protocol has the negative-control self-test', () => {
 });
 
 check('no stale model lineup (Haiku must not be the preflight tier)', () => {
-  // D18: the invariant extends to commands/ and agents/ — vacuously satisfied while those
-  // dirs don't exist yet (F2+ create them), so a missing dir must never crash this check.
   const files = ['skills/harness-audit/SKILL.md', 'WHITEPAPER.md', 'README.md', ...globMd('commands'), ...globMd('agents')];
   for (const rel of files) {
     const hits = read(rel).split('\n')
@@ -83,7 +86,6 @@ check('no stale model lineup (Haiku must not be the preflight tier)', () => {
 });
 
 check('benchmark figures are hedged, not asserted', () => {
-  // D18: same extension to commands/ and agents/, same vacuous-safety.
   const files = ['skills/harness-audit/SKILL.md', 'WHITEPAPER.md', ...globMd('commands'), ...globMd('agents')];
   for (const rel of files) {
     const t = read(rel);
@@ -94,16 +96,42 @@ check('benchmark figures are hedged, not asserted', () => {
   return `${files.length} files scanned`;
 });
 
-check('every commands/*.md has frontmatter description (vacuous if none exist yet)', () => {
+check('every commands/*.md has a frontmatter description', () => {
   const files = globMd('commands');
+  if (!files.length) throw new Error('commands/ is empty — the plugin ships no loop');
   for (const rel of files) hasFrontmatterField(rel, 'description');
-  return files.length ? `${files.length} command(s) checked` : 'no commands/ yet';
+  return `${files.length} command(s) checked`;
 });
 
-check('every agents/*.md has frontmatter description (vacuous if none exist yet)', () => {
+check('every agents/*.md has a frontmatter description', () => {
   const files = globMd('agents');
+  if (!files.length) throw new Error('agents/ is empty — the plugin ships no critics');
   for (const rel of files) hasFrontmatterField(rel, 'description');
-  return files.length ? `${files.length} agent(s) checked` : 'no agents/ yet';
+  return `${files.length} agent(s) checked`;
+});
+
+// Each pattern is a leak that reached a public file, or the private contract that is the reason
+// anyone would pay for the audit. `REDACTED` is not hypothetical: a private project name shipped
+// inside a benchmark fixture, and no other check in this file would have caught it.
+const PRIVATE_LEAKS = [
+  /\bes-co\b/i,
+  /\bREDACTED\b/i,
+  /\b(persona-a|persona-b|persona-c|persona-d)\b/i,
+  /\b(persona-e|persona-f|persona-g|persona-h)\b/i,
+  /\b(REDACTED|REDACTED|REDACTED|REDACTED)\b/i,
+];
+
+check('no private contract leaks in commands/, agents/, benchmarks/', () => {
+  const files = [...walk('commands'), ...walk('agents'), ...walk('benchmarks')];
+  if (!files.length) throw new Error('nothing scanned — the gate would pass vacuously');
+  for (const rel of files) {
+    read(rel).split('\n').forEach((line, i) => {
+      for (const re of PRIVATE_LEAKS) {
+        if (re.test(line)) throw new Error(`${rel}:${i + 1} leaks private contract — matched ${re}`);
+      }
+    });
+  }
+  return `${files.length} files scanned`;
 });
 
 check('hooks.json valid + every referenced script exists and parses', () => {
