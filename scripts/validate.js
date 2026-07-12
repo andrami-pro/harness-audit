@@ -108,6 +108,54 @@ check('every agents/*.md has a frontmatter description', () => {
   return `${files.length} agent(s) checked`;
 });
 
+// Pins the command count the README's loop catalog promises (4: skill-loop, orchestrate, review-loop,
+// iterate — Loop 1 is a pattern, not a command, by design). A 5th command shipped without updating the
+// README catalog would drift silently; so would a command that lost its argument-hint, which is the
+// piece `/command` autocomplete and the SlashCommand tool both read to know how to call it.
+//
+// Negative control (2026-07-12, both reverted): argument-hint stripped from commands/iterate.md — exit 1,
+// "commands/iterate.md frontmatter missing argument-hint"; a 5th command copied in — exit 1,
+// "commands/*.md = 5, expected exactly 4".
+check('exactly 4 loop commands, each with description + argument-hint', () => {
+  const files = globMd('commands');
+  if (files.length !== 4) throw new Error(`commands/*.md = ${files.length}, expected exactly 4`);
+  for (const rel of files) {
+    hasFrontmatterField(rel, 'description');
+    hasFrontmatterField(rel, 'argument-hint');
+  }
+  return `${files.length} command(s), all with argument-hint`;
+});
+
+// The catalog table is the honesty-gated deliverable of F7 (DoD-3): a loop only gets a row once it has a
+// real recorded run. If the header survives but a body row is silently dropped by a later edit, this
+// check would still pass — that's an editorial risk, not a structural one, and out of scope for a command
+// this cheap. What this check guards is the coarser, more common failure: the whole table gone missing.
+//
+// Negative control (2026-07-12, reverted): dropped the "Stops when" column from the header row —
+// exit 1, "README missing the five-loops catalog table header".
+check('README documents the loop catalog (table header present)', () => {
+  const t = read('README.md');
+  if (!/\|\s*Your situation\s*\|\s*Loop\s*\|\s*Command\s*\|\s*Cost\s*\|\s*Stops when\s*\|/.test(t)) {
+    throw new Error('README missing the five-loops catalog table header');
+  }
+});
+
+// Graphify is a first-class prerequisite (D21): critics and the scorer query the graph instead of
+// grepping cold. If the Prerequisites section loses the install one-liner, a new user hits an
+// undocumented dependency the moment a loop runs a critic.
+//
+// Negative control (2026-07-12, reverted): replaced the section body with generic toolchain prose —
+// exit 1, "Prerequisites section does not mention Graphify".
+check('README documents Graphify as a prerequisite', () => {
+  const t = read('README.md');
+  if (!/### Prerequisites/.test(t)) throw new Error('README missing a Prerequisites section');
+  const section = t.split('### Prerequisites')[1].split(/\n### /)[0];
+  if (!/graphify/i.test(section)) throw new Error('Prerequisites section does not mention Graphify');
+  if (!/uv tool install graphifyy|pipx install graphifyy|pip install graphifyy/.test(section)) {
+    throw new Error('Prerequisites section missing the graphifyy install one-liner');
+  }
+});
+
 // Each pattern is a leak that reached a public file, or the private contract that is the reason
 // anyone would pay for the audit. A leak glues itself to its neighbours: the one that shipped inside a
 // benchmark fixture was `REDACTED_agent`, where `\b` finds no boundary at all — so these names match as

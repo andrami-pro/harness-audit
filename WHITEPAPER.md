@@ -276,6 +276,45 @@ The skill runs 6 steps in sequence:
 
 A greenfield project reaches L2 once Phase 1 completes (preflight green) and L3 as soon as the reviewer processes its first diff and memory records its first `[VERIFIED]`.
 
+### 5.3 From Theory to Executable Loops
+
+Pillar 4 defines a shape — goal, rubric, independent verifier, memory that outlives the run — not a
+single instance of it. The package ships five loops because there are five recurring subjects that shape
+applies to, not five different theories:
+
+| # | Loop | Subject | Rubric | Verifier | Memory artifact |
+|---|------|---------|--------|----------|------------------|
+| 1 | Stateless | a commit | smoke tests + `wip-green` | the test suite itself (mutation-verified) | none by design — the point of "stateless" |
+| 2 | Learning | a skill | a fixed eval task, judged blind | a judge on a different model family than the arms | `LEARNINGS.md` inside the skill |
+| 3 | Multi-agent review | a draft / diff | the critic panel's checklist | four orthogonal critics, none of which authored the artifact | a findings JSON per round |
+| 4 | Verification | an app / corpus | `harness-rubric.md`, score /100 | critics + scorer, `develop-phase` per feature | a findings JSON with score + blocker trend |
+| 5 | Workflow improvement | the process itself | the process's own predictions | the *next* round, which settles the previous round's prediction | `process.md` (spec) + `process-log.md` (predictions) |
+
+Read against §5.2, the loop-readiness grades are not a separate scale — they are what these loops build,
+in order:
+
+- **L0 → L1**: nothing here yet — lint/tests exist but nothing consumes their exit code as a gate.
+- **L1 → L2**: Loop 1 *is* the L2 gate. A single preflight command that exits non-zero on failure is the
+  minimum a loop can iterate against; every other loop in this package assumes it already passed.
+- **L2 → L3**: Loop 4 is L3 made concrete — an executable rubric, a verifier independent of the
+  implementer, and a memory artifact (the findings JSON, and for the per-feature `develop-phase` variant,
+  the rubric itself) that the next round reads before acting. A project with Loop 1 wired and Loop 4
+  available on demand has closed the loop Pillar 4 describes.
+- **Loop 2 is M1→M5 applied to a skill**, not a new mechanism: the blind A/B is the "fix that worked" the
+  Pillar-4 success-correlation shortcut asks for, and `LEARNINGS.md` is where it lands verified instead of
+  guessed.
+- **Loop 3 is Pillar 2 generalized past code review**: the same role-separation argument (an independent
+  reviewer reduces shared blind spots) applied to any artifact a diff touches — copy, a multilingual pair,
+  a regulated claim — not only source files.
+- **Loop 5 is the recursive case**: it points the whole apparatus — rubric, verifier, memory — at the
+  *process* that runs the other four loops, one level up the stack. Its rubric is a prediction instead of
+  a score threshold, and its verifier is time: the next round is what confirms or falsifies what the last
+  one predicted.
+
+None of this is aspirational — every loop in the table above has at least one recorded run backing the row
+it occupies in the README's catalog; see that catalog for what "recorded" means and which run backs which
+loop.
+
 ---
 
 ## 6. System Properties
