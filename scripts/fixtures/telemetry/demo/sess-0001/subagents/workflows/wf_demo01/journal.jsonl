@@ -1,0 +1,4 @@
+{"type":"started","key":"v2:demo0000000000000000000000000000000000000000000000000000000001","agentId":"a2000000000000002"}
+{"type":"result","key":"v2:demo0000000000000000000000000000000000000000000000000000000001","agentId":"a2000000000000002","result":"Implemented the demo loop.\n\n## Files\n- scripts/demo.js\n\nPreflight green."}
+{"type":"started","key":"v2:demo0000000000000000000000000000000000000000000000000000000002","agentId":"a3000000000000003"}
+{"type":"result","key":"v2:demo0000000000000000000000000000000000000000000000000000000002","agentId":"a3000000000000003","result":"Review — demo loop\n\n[PASS] the loop stops on its own condition\n\nAPROBADO"}

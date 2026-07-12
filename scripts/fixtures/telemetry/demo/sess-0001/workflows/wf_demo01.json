@@ -1,0 +1,36 @@
+{
+  "runId": "wf_demo01",
+  "timestamp": "2026-07-11T10:59:00.000Z",
+  "taskId": "demo00001",
+  "scriptPath": "/workspace/demo/.claude/workflows/develop-phase.js",
+  "workflowName": "develop-phase",
+  "summary": "Implementer (Opus) -> Reviewer (Fable 5) adversarial loop against the rubric.",
+  "status": "completed",
+  "startTime": 1783767540000,
+  "durationMs": 1620000,
+  "agentCount": 2,
+  "totalTokens": 30500,
+  "totalToolCalls": 12,
+  "defaultModel": "claude-opus-4-8",
+  "result": {
+    "task": "implement the demo loop",
+    "iterations": 1,
+    "approved": true,
+    "preflightPassed": true
+  },
+  "logs": [
+    "Task: \"implement the demo loop\" - max 5 iter",
+    "-- Iteration 1/5 --",
+    "APROBADO iter 1"
+  ],
+  "phases": [
+    { "title": "Implement", "detail": "Opus writes the code", "model": "opus" },
+    { "title": "Review", "detail": "Fable 5 looks for reasons to reject", "model": "fable" }
+  ],
+  "workflowProgress": [
+    { "type": "workflow_phase", "index": 1, "title": "Implement" },
+    { "type": "workflow_agent", "index": 1, "label": "impl:iter1", "phaseIndex": 1, "phaseTitle": "Implement", "agentId": "a2000000000000002", "model": "claude-opus-4-8", "state": "done", "startedAt": 1783767600000 },
+    { "type": "workflow_phase", "index": 2, "title": "Review" },
+    { "type": "workflow_agent", "index": 2, "label": "review:iter1", "phaseIndex": 2, "phaseTitle": "Review", "agentId": "a3000000000000003", "model": "claude-fable-5", "state": "done", "startedAt": 1783769100000 }
+  ]
+}

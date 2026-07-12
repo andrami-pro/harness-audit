@@ -121,8 +121,8 @@ const PRIVATE_LEAKS = [
   /REDACTED|REDACTED|REDACTED|REDACTED/i,
 ];
 
-check('no private contract leaks in commands/, agents/, benchmarks/', () => {
-  const files = [...walk('commands'), ...walk('agents'), ...walk('benchmarks')];
+check('no private contract leaks in commands/, agents/, benchmarks/, fixtures/', () => {
+  const files = [...walk('commands'), ...walk('agents'), ...walk('benchmarks'), ...walk('scripts/fixtures')];
   if (!files.length) throw new Error('nothing scanned — the gate would pass vacuously');
   for (const rel of files) {
     read(rel).split('\n').forEach((line, i) => {
@@ -148,6 +148,49 @@ check('hooks.json valid + every referenced script exists and parses', () => {
 check('install.sh parses (sh -n)', () => {
   mustExist('install.sh');
   execFileSync('sh', ['-n', path.join(ROOT, 'install.sh')], { stdio: 'pipe' });
+});
+
+// The transcript format is internal to Claude Code and can change without notice. These assertions are
+// derived facts, not file-existence: each one dies if a shape this parser depends on moves. Asserting
+// only that the fixture parses would guard the neighbouring failure mode, not the one that happens.
+check('loop-stats reconstructs the pinned telemetry fixture', () => {
+  const script = path.join(ROOT, 'scripts/loop-stats.js');
+  mustExist('scripts/loop-stats.js');
+  execFileSync('node', ['--check', script], { stdio: 'pipe' });
+
+  const raw = execFileSync('node', [script, '--root', path.join(ROOT, 'scripts/fixtures/telemetry'),
+    '--project', 'demo', '--json'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  const d = JSON.parse(raw);
+
+  // usage.* summed across the session, the Task subagent and both workflow agents. The 5m/1h split is
+  // asserted separately: cache_creation_input_tokens covers for a renamed subkey, so the collapsed
+  // cacheWrite total stays right while every 1h write silently reprices at the cheaper 5m rate.
+  const totals = { runs: 8, in: 17000, out: 2180, cacheRead: 25100, cacheWrite: 1500, cacheWrite5m: 500, cacheWrite1h: 1000 };
+  for (const [k, want] of Object.entries(totals)) {
+    if (d.totals[k] !== want) throw new Error(`totals.${k} = ${d.totals[k]}, expected ${want}`);
+  }
+  if (d.warnings !== 0) throw new Error(`${d.warnings} line(s) became unreadable`);
+
+  // journal.agentId ↔ agent-<id>.jsonl ↔ workflowProgress.label: without the join these agents are
+  // unlabelled and their tokens land nowhere.
+  const rows = Object.fromEntries(d.agents.map((a) => [`${a.agentType}·${a.model}`, a]));
+  const impl = rows['implementer·claude-opus-4-8'];
+  if (!impl || !rows['reviewer·claude-fable-5']) throw new Error('workflow agent join lost');
+  if (impl.out !== 1000) throw new Error(`joined implementer out = ${impl.out}, expected 1000`);
+
+  const [wf] = d.workflows;
+  if (!wf || wf.name !== 'develop-phase') throw new Error('workflow run record lost');
+  if (wf.rounds !== 1 || wf.verdict !== 'APROBADO') throw new Error(`verdict/rounds drifted: ${wf.rounds}/${wf.verdict}`);
+  if (wf.durationMs !== 1500000) throw new Error(`duration = ${wf.durationMs}, expected 1500000`);
+
+  if (d.prompts.total !== 3) throw new Error(`prompts.total = ${d.prompts.total}, expected 3`);
+  if (d.prompts.top[0].count !== 2) throw new Error('recurring-prompt count drifted');
+
+  // an unpriced model must degrade to n/a, never to a guessed number or a crash
+  if (typeof impl.costUsd !== 'number' || impl.costUsd <= 0) throw new Error('cost estimate lost');
+  if (d.unpricedModels.length !== 1) throw new Error(`unpriced models = ${d.unpricedModels.length}, expected 1`);
+
+  return `${d.totals.runs} runs · ${d.workflows.length} workflow · $${d.totals.costUsd.toFixed(2)} est.`;
 });
 
 let failed = 0;
