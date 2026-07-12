@@ -121,6 +121,7 @@ const PRIVATE_LEAKS = [
   /REDACTED|REDACTED|REDACTED|REDACTED/i,
 ];
 
+// Negative control — «persona-a» planted in the telemetry fixture: exit 1, sess-0001.jsonl:2 (2026-07-12).
 check('no private contract leaks in commands/, agents/, benchmarks/, fixtures/', () => {
   const files = [...walk('commands'), ...walk('agents'), ...walk('benchmarks'), ...walk('scripts/fixtures')];
   if (!files.length) throw new Error('nothing scanned — the gate would pass vacuously');
@@ -153,6 +154,14 @@ check('install.sh parses (sh -n)', () => {
 // The transcript format is internal to Claude Code and can change without notice. These assertions are
 // derived facts, not file-existence: each one dies if a shape this parser depends on moves. Asserting
 // only that the fixture parses would guard the neighbouring failure mode, not the one that happens.
+//
+// Negative control (verifier-protocol.md: a check that can only say PASS is a broken thermometer).
+// Each mutation was applied to the fixture, observed, and reverted — 2026-07-12, all exit 1:
+//   usage → usageX in an agent jsonl ......... totals.runs = 6, expected 8
+//   ephemeral_1h_input_tokens → ..._1h_in .... totals.cacheWrite5m = 1500, expected 500
+//   truncated line at sess-0001.jsonl:2 ...... totals.runs = 7, expected 8
+//   journal agentId → agent_id ............... totals.runs = 5, expected 8
+//   workflowProgress label → "" .............. workflow agent join lost
 check('loop-stats reconstructs the pinned telemetry fixture', () => {
   const script = path.join(ROOT, 'scripts/loop-stats.js');
   mustExist('scripts/loop-stats.js');
