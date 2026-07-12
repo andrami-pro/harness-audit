@@ -28,7 +28,9 @@ const ROLES = ['architect', 'orchestrator', 'implementer', 'reviewer', 'prefligh
 // Targets whose harness accepts a non-Anthropic `provider` (Pi, Kilo, OpenCode per D25). Every
 // other target — Claude Code chief among them — only understands bare Anthropic model ids, so a
 // provider field there is not an error, just unsupported: it falls back to `defaults` with a warning.
-const MULTI_PROVIDER_TARGETS = new Set(['pi', 'kilo', 'opencode']);
+// 'kilo-loops' (F9's commands+agents port) is a distinct install.sh target from 'kilo' (the
+// skill-only target this set predates) — both write into a Kilo harness, so both belong here.
+const MULTI_PROVIDER_TARGETS = new Set(['pi', 'kilo', 'kilo-loops', 'opencode']);
 
 // Identical criterion to loop-stats.js's baseModel(): `claude-opus-4-8[1m]` and
 // `claude-haiku-4-5-20251001` are the same model as their bare id — the context-window suffix

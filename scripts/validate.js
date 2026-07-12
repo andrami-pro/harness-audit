@@ -566,6 +566,147 @@ check('every loop command produces the v2 schema the dashboard reads', () => {
   return '4 commands instruct startedAt/endedAt/tokens · skill-loop instructs armTokens';
 });
 
+// F9's port is a schema TRANSFORM, not a copy — the risk is not "the file is missing" (the four
+// checks above already catch that) but "the file exists and is wrong": a command that silently
+// drops `description`, an agent whose `permission`/`tools` block is malformed YAML, or a Pi agent
+// missing the `name` field pi-subagents requires to discover it at all. Every real commands/*.md and
+// agents/*.md in this repo is round-tripped through both transforms so a schema drift in either
+// source corpus fails here before it fails a user's install.
+//
+// Negative controls (2026-07-12, each applied by hand, observed, reverted — all exit 1):
+//   transformAgentPi's `if (!name) throw` guard deleted, then run against this check's own
+//   no-name fixture ................................................................................
+//     "transformAgentPi accepted a fixture with no name field" — the function stopped refusing a
+//     source that would have shipped a nameless, undiscoverable pi-subagents agent
+//   parseFrontmatter's `if (idx === -1) throw` guard deleted, then run against this check's own
+//   multi-line-value fixture .......................................................................
+//     "parseFrontmatter accepted a multi-line value instead of refusing it" — instead of throwing,
+//     the second line silently became its own bogus frontmatter key (`  Writ: "  Write"`)
+//   TOOL_MAP.Bash.permission renamed 'bash' -> 'shell' (no such OpenCode/Kilo permission key) ......
+//     "agents/correctness-critic.md: opencode/kilo port emits unknown permission key 'shell'" — a
+//     permission key neither harness's documented vocabulary recognizes grants nothing at runtime
+check('port-loops.js transforms every real command/agent into valid target frontmatter', () => {
+  const script = path.join(ROOT, 'scripts/port-loops.js');
+  execFileSync('node', ['--check', script], { stdio: 'pipe' });
+  const port = require(script);
+
+  const OC_PERMISSION_KEYS = new Set(['read', 'edit', 'glob', 'grep', 'list', 'bash', 'task',
+    'external_directory', 'todowrite', 'webfetch', 'websearch', 'lsp', 'skill', 'question', 'doom_loop']);
+
+  for (const rel of globMd('commands')) {
+    const { fm } = port.parseFrontmatter(read(rel));
+    const { fm: out } = port.transformCommandOpenCodeKilo(fm);
+    const description = out.find(([k]) => k === 'description');
+    if (!description || !description[1]) throw new Error(`${rel}: ported command lost its description`);
+    for (const dropped of ['argument-hint', 'allowed-tools', 'disable-model-invocation']) {
+      if (out.some(([k]) => k === dropped)) throw new Error(`${rel}: ported command still carries Claude-only field '${dropped}'`);
+    }
+  }
+
+  for (const rel of globMd('agents')) {
+    const { fm } = port.parseFrontmatter(read(rel));
+
+    const { fm: ocOut } = port.transformAgentOpenCodeKilo(fm);
+    if (!ocOut.some(([k, v]) => k === 'mode' && v === 'subagent')) throw new Error(`${rel}: opencode/kilo port missing mode: subagent`);
+    const perm = (ocOut.find(([k]) => k === 'permission') || [])[1];
+    if (perm) {
+      for (const k of Object.keys(perm)) {
+        if (!OC_PERMISSION_KEYS.has(k)) throw new Error(`${rel}: opencode/kilo port emits unknown permission key '${k}'`);
+      }
+    }
+
+    const { fm: piOut } = port.transformAgentPi(fm);
+    const piName = piOut.find(([k]) => k === 'name');
+    if (!piName || !piName[1]) throw new Error(`${rel}: pi port missing required name field`);
+    if (!piOut.some(([k, v]) => k === 'defaultContext' && v === 'fresh')) throw new Error(`${rel}: pi port missing defaultContext: fresh`);
+  }
+
+  // A malformed source (a multi-line frontmatter value this line-based parser cannot read) must be
+  // refused, not silently mis-split into a bogus extra key.
+  let threw = false;
+  try {
+    port.parseFrontmatter('---\ntools: Read\n  Write\ndescription: x\n---\nbody');
+  } catch (e) { threw = /flat key: value/.test(e.message); }
+  if (!threw) throw new Error('parseFrontmatter accepted a multi-line value instead of refusing it');
+
+  // A Pi agent fixture missing `name` (the field pi-subagents needs to discover it at all) must
+  // refuse to transform rather than write a nameless, undiscoverable agent file.
+  let piThrew = false;
+  try {
+    port.transformAgentPi(port.parseFrontmatter('---\ndescription: no name here\ntools: read\n---\nbody').fm);
+  } catch (e) { piThrew = /missing name/.test(e.message); }
+  if (!piThrew) throw new Error('transformAgentPi accepted a fixture with no name field');
+
+  return `${globMd('commands').length} command(s) + ${globMd('agents').length} agent(s) round-tripped through opencode/kilo + pi`;
+});
+
+// Every capability the port DESTROYS has to be named in the README, because the README is the only
+// place a user finds out. This is the check the F9 review should not have had to be: the first draft
+// dropped `disable-model-invocation` (the veto that keeps two token-hungry loops and one that analyses
+// the human from auto-firing), left a code comment claiming the loss was "documented as a README
+// caveat", and shipped no such caveat — while the README went on asserting the veto still held. The
+// code was right and the documentation lied, in a repo whose whole product is not lying. So: each
+// destroyed guardrail is bound to the prose that has to disclose it, and the binding is executable.
+//
+// Negative controls (2026-07-12, each applied, observed, reverted — all exit 1):
+//   the `disable-model-invocation` paragraph struck from README §Compatibility ....................
+//     "README never discloses that the port drops 'disable-model-invocation' — the manual-only veto
+//      on /review-loop, /iterate and /session-review does not exist on OpenCode/Kilo"
+//     NOTE: this control FAILED TO BITE on the first version of this check (exit 0) — the matrix row
+//     alone matched its regex, so a README that had deleted the entire explanatory paragraph still
+//     passed. The check was tightened to demand the CONSEQUENCE in prose, not the fact in a cell,
+//     and only then did the control fire. Recorded because it is the whole argument for §0: this
+//     check was decoration for the length of one commit, and nothing but the control said so.
+//   the sentence "you cannot run /orchestrate (or any loop command) on Pi" struck from the README ..
+//     "README never states plainly that the loop COMMANDS do not port to Pi — 7 agents with no
+//      orchestration reads as a working port"
+//   the correctness-critic/WebSearch caveat struck from the README ................................
+//     "README never discloses that correctness-critic loses WebSearch on Pi"
+check('README discloses every guardrail the port destroys', () => {
+  const port = require(path.join(ROOT, 'scripts/port-loops.js'));
+  const t = read('README.md');
+
+  // Not "is the string present anywhere" — the disclosure has to sit in the section a reader lands on
+  // from the install instructions, or it is a caveat hidden from the person who needs it.
+  if (!/## Compatibility across harnesses/.test(t)) throw new Error('README lost the compatibility matrix section');
+  const compat = t.split('## Compatibility across harnesses')[1].split(/\n## /)[0];
+
+  // What the transform actually destroys, asked of the transform itself rather than assumed here: a
+  // future field silently added to the drop list fails this check until the README names it too.
+  const cmdDrops = new Set();
+  for (const rel of globMd('commands')) {
+    port.transformCommandOpenCodeKilo(port.parseFrontmatter(read(rel)).fm).dropped.forEach((d) => cmdDrops.add(d));
+  }
+  if (!cmdDrops.has('disable-model-invocation')) {
+    throw new Error('the command transform no longer reports dropping disable-model-invocation — either it is carried now (update this check) or the report was lost (a silent drop)');
+  }
+  // Not satisfied by the matrix row: a table cell reading "❌ no equivalent" is a fact a reader can
+  // skim past without learning the consequence. The disclosure has to name what the loss DOES —
+  // the three loops become auto-dispatchable — in prose, or it has not been made. (The first version
+  // of this check accepted the matrix row alone and its negative control passed 0/3; that is how a
+  // check becomes decoration.)
+  const CONSEQUENCE = /auto-dispatch(?:able|ed)?[\s\S]{0,400}(review-loop|iterate|session-review)|(review-loop|iterate|session-review)[\s\S]{0,400}auto-dispatch(?:able|ed)?/i;
+  if (!/disable-model-invocation/.test(compat) || !CONSEQUENCE.test(compat)) {
+    throw new Error("README never discloses that the port drops 'disable-model-invocation' — the manual-only veto on /review-loop, /iterate and /session-review does not exist on OpenCode/Kilo");
+  }
+
+  // Pi gets agents, not loops. The exact claim, in the words a reader cannot misread as "it works".
+  if (!/cannot run `?\/orchestrate`? \(or any loop command\) on Pi, with or without the extension/i.test(compat)) {
+    throw new Error('README never states plainly that the loop COMMANDS do not port to Pi — 7 agents with no orchestration reads as a working port');
+  }
+  if (port.destDirsFor('pi').commands !== null) {
+    throw new Error('port-loops.js now ports commands to Pi — the README says it cannot; one of the two is lying');
+  }
+
+  // The fact seat losing its only route to facts is a caveat, not a footnote.
+  const piDrops = port.transformAgentPi(port.parseFrontmatter(read('agents/correctness-critic.md')).fm).dropped;
+  if (piDrops.includes('WebSearch') && !/correctness-critic[\s\S]{0,300}WebSearch/i.test(compat)) {
+    throw new Error('README never discloses that correctness-critic loses WebSearch on Pi');
+  }
+
+  return 'disable-model-invocation · Pi has no loop commands · correctness-critic loses WebSearch';
+});
+
 let failed = 0;
 for (const r of results) {
   failed += r.ok ? 0 : 1;

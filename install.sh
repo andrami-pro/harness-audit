@@ -12,7 +12,11 @@
 #   ./install.sh --target cursor       # project-level  .cursor/skills/
 #   ./install.sh --target kilo         # user-level     ~/.kilo/skills/
 #   ./install.sh --target antigravity  # project-level  .agents/skills/
-#   ./install.sh --target pi           # project-level  .pi/{commands,agents}/ — see NOTE below
+#   ./install.sh --target pi           # project-level  .pi/skills/ + .pi/agents/ — see NOTE below
+#   ./install.sh --target opencode     # project-level  .opencode/{commands,agents}/ — the 5 loop
+#                                       # commands + 7 agents, native (OpenCode has Task tool)
+#   ./install.sh --target kilo-loops   # project-level  .kilo/{commands,agents}/ — same port,
+#                                       # separate from the `kilo` skill-only target above
 #
 #   --skip-graphify   degraded mode: skip the Graphify check entirely.
 #                      The audit still runs but marks the Graphify criterion
@@ -20,6 +24,8 @@
 #   --yes             non-interactive: answer yes to the Graphify install
 #                      prompt without asking (for CI); also auto-confirms a
 #                      SOFT model-lineup guardrail (see --lineup below).
+#                      Does NOT bypass the --target pi subagent gate below —
+#                      that gate is hard, not confirmable (see NOTE on pi).
 #   --lineup [path]   resolve scripts/model-lineup.js (D25) for $TARGET and
 #                      re-stamp the `model:` frontmatter of commands/*.md and
 #                      agents/*.md before copying them alongside the skill.
@@ -29,11 +35,23 @@
 #                      as-is, no merge — meant for a specific test lineup.
 #                      Omitting --lineup entirely leaves today's defaults
 #                      intact: no lineup resolution, no frontmatter rewrite.
+#   --skip-subagent-check   --target pi only. Generate .pi/agents/ even
+#                      though the pi-subagents extension isn't detected.
+#                      These agents WILL NOT dispatch until it's installed —
+#                      this flag exists for testing the port, not for normal
+#                      use. See NOTE on pi below.
 #
-# NOTE on --target pi: Pi has no Task tool in core (subagents need its example
-# extension, per the PRD's F9 research) — this target exists ONLY to exercise
-# --lineup's multi-provider resolution end to end (D25/F11). It is not a real
-# Pi port; that is F9's job.
+# NOTE on --target pi: Pi's core has no Task tool — per pi.dev, "Pi ships with
+# powerful defaults but skips features like sub-agents". All 5 loop commands
+# in this repo dispatch subagents, so a Pi port only works through the
+# third-party pi-subagents extension (github.com/nicobailon/pi-subagents,
+# `pi install npm:pi-subagents`). --target pi checks for it before writing
+# anything: found → ports agents/*.md to .pi/agents/ in the pi-subagents
+# schema; missing → fails with the install command, unless
+# --skip-subagent-check is passed, in which case it writes the same files
+# with a loud warning that they are inert without the extension. Pi's own
+# slash commands are prompt templates, not agent dispatchers — this port
+# does not touch them; only agents/ crosses over.
 #
 # Project-level targets install into the CURRENT working directory's project.
 
@@ -44,6 +62,7 @@ SRC_DIR="$ROOT_DIR/skills/harness-audit"
 TARGET=""
 SKIP_GRAPHIFY=0
 ASSUME_YES=0
+SKIP_SUBAGENT_CHECK=0
 LINEUP_REQUESTED=0
 LINEUP_FILE=""
 
@@ -52,6 +71,7 @@ while [ $# -gt 0 ]; do
     --target) TARGET="${2:-}"; shift 2 ;;
     --skip-graphify) SKIP_GRAPHIFY=1; shift ;;
     --yes) ASSUME_YES=1; shift ;;
+    --skip-subagent-check) SKIP_SUBAGENT_CHECK=1; shift ;;
     --lineup)
       LINEUP_REQUESTED=1
       shift
@@ -64,7 +84,7 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-[ -n "$TARGET" ] || { echo "Usage: ./install.sh --target {claude|claude-user|cursor|kilo|antigravity|pi} [--skip-graphify] [--yes] [--lineup [path]]" >&2; exit 1; }
+[ -n "$TARGET" ] || { echo "Usage: ./install.sh --target {claude|claude-user|cursor|kilo|antigravity|pi|opencode|kilo-loops} [--skip-graphify] [--yes] [--lineup [path]] [--skip-subagent-check]" >&2; exit 1; }
 [ -d "$SRC_DIR" ] || { echo "error: $SRC_DIR not found (run from the repo root)" >&2; exit 1; }
 
 case "$TARGET" in
@@ -74,20 +94,26 @@ case "$TARGET" in
   kilo)         DEST="$HOME/.kilo/skills/harness-audit" ;;
   antigravity)  DEST=".agents/skills/harness-audit" ;;
   pi)           DEST=".pi/skills/harness-audit" ;;
-  *) echo "error: unknown target '$TARGET' (use claude|claude-user|cursor|kilo|antigravity|pi)" >&2; exit 1 ;;
+  # loops-only targets: no skill copy here. OpenCode/Kilo already read .claude/skills/ natively
+  # (per the PRD's F9 research), and Kilo's skill-only path lives under the `kilo` target above.
+  opencode)     DEST="" ;;
+  kilo-loops)   DEST="" ;;
+  *) echo "error: unknown target '$TARGET' (use claude|claude-user|cursor|kilo|antigravity|pi|opencode|kilo-loops)" >&2; exit 1 ;;
 esac
 
-mkdir -p "$DEST"
-cp -R "$SRC_DIR"/. "$DEST"/
+if [ -n "$DEST" ]; then
+  mkdir -p "$DEST"
+  cp -R "$SRC_DIR"/. "$DEST"/
 
-echo "✓ harness-audit installed at $DEST"
-echo "  Files: $(ls "$DEST" | tr '\n' ' ')"
-case "$TARGET" in
-  claude|claude-user) echo "  Invoke with: /harness-audit (or just ask for a harness audit)" ;;
-  kilo) echo "  Tip: Kilo can also read ~/.claude/skills — see kilo.jsonc 'skills.paths'." ;;
-  *) echo "  The skill follows the open Agent Skills standard (agentskills.io)." ;;
-esac
-echo "  Note: the security hooks only load via the Claude Code plugin install, not via skill copy."
+  echo "✓ harness-audit installed at $DEST"
+  echo "  Files: $(ls "$DEST" | tr '\n' ' ')"
+  case "$TARGET" in
+    claude|claude-user) echo "  Invoke with: /harness-audit (or just ask for a harness audit)" ;;
+    kilo) echo "  Tip: Kilo can also read ~/.claude/skills — see kilo.jsonc 'skills.paths'." ;;
+    *) echo "  The skill follows the open Agent Skills standard (agentskills.io)." ;;
+  esac
+  echo "  Note: the security hooks only load via the Claude Code plugin install, not via skill copy."
+fi
 
 # ── Graphify bootstrap (D21) ──────────────────────────────────────────────
 # The critics, scorer, and the audit itself query the Graphify graph instead
@@ -147,6 +173,86 @@ else
     echo "  cold. Install later with: uv tool install graphifyy"
   fi
 fi
+
+# ── Loop port: OpenCode / Kilo Code / Pi (F9) ───────────────────────────────
+# opencode and kilo-loops are a mechanical frontmatter transform (both share one schema — see
+# scripts/port-loops.js). pi is gated: its core has no Task tool, so the port only means anything
+# with the third-party pi-subagents extension installed — see the NOTE at the top of this file.
+case "$TARGET" in
+  opencode|kilo-loops|pi)
+    echo ""
+    PORTER="$ROOT_DIR/scripts/port-loops.js"
+    [ -f "$PORTER" ] || { echo "error: $PORTER not found (run from the repo root)" >&2; exit 1; }
+    command -v node >/dev/null 2>&1 || { echo "error: --target $TARGET needs Node >= 18 to port commands/agents" >&2; exit 1; }
+
+    if [ "$TARGET" = "pi" ]; then
+      PI_SUBAGENTS_FOUND=0
+      for f in "$HOME/.pi/agent/settings.json" "$(pwd)/.pi/settings.json"; do
+        if [ -f "$f" ] && grep -q "pi-subagents" "$f" 2>/dev/null; then PI_SUBAGENTS_FOUND=1; fi
+      done
+      # `pi install npm:<pkg>` installs under npm/ — so the package lands in npm/node_modules/<pkg>,
+      # not npm/<pkg>. Checking the latter is a check that can never fire.
+      [ -d "$HOME/.pi/agent/npm/node_modules/pi-subagents" ] && PI_SUBAGENTS_FOUND=1
+      [ -d "$(pwd)/.pi/npm/node_modules/pi-subagents" ] && PI_SUBAGENTS_FOUND=1
+
+      if [ "$PI_SUBAGENTS_FOUND" -eq 0 ]; then
+        echo "⚠ pi-subagents extension not found (checked ~/.pi/agent/settings.json,"
+        echo "  ./.pi/settings.json, and both npm/ install dirs)."
+        echo "  Pi's core has no sub-agent support — per pi.dev: \"Pi ships with powerful"
+        echo "  defaults but skips features like sub-agents\". All 5 loop commands in this"
+        echo "  repo dispatch subagents, so .pi/agents/ would look like a working port and"
+        echo "  dispatch nothing without it."
+        echo "  Install it, then re-run this command:"
+        echo "    pi install npm:pi-subagents"
+        echo "  Verify with: pi list   (or: grep pi-subagents ~/.pi/agent/settings.json)"
+        if [ "$SKIP_SUBAGENT_CHECK" -eq 1 ]; then
+          echo ""
+          echo "⚠⚠⚠ --skip-subagent-check: writing .pi/agents/ ANYWAY. These agents will NOT"
+          echo "    dispatch until pi-subagents is installed — this port is INERT until then. ⚠⚠⚠"
+        else
+          echo ""
+          # Hard, not confirmable (same shape as D25a): --yes is for SOFT prompts elsewhere in
+          # this script, never for shipping files that silently don't do what they look like.
+          echo "error: --target pi aborted — no working subagent dispatch without pi-subagents." >&2
+          echo "  Re-run with --skip-subagent-check to write the (inert) files anyway." >&2
+          exit 1
+        fi
+      else
+        echo "✓ pi-subagents extension found"
+      fi
+    fi
+
+    node "$PORTER" --target "$TARGET" --root "$ROOT_DIR"
+
+    case "$TARGET" in
+      opencode|kilo-loops)
+        echo ""
+        echo "⚠ The manual-only guardrail does NOT cross over. In Claude Code, /review-loop,"
+        echo "  /iterate and /session-review ship with 'disable-model-invocation: true' — the model"
+        echo "  may suggest them, never fire them. Neither OpenCode nor Kilo Code has an equivalent"
+        echo "  field, so on this target all three are auto-dispatchable by the model: two of them"
+        echo "  are token-hungry, and /session-review analyses YOU. Put the restriction in your"
+        echo "  AGENTS.md and check it holds — nothing enforces it locally anymore."
+        echo ""
+        echo "⚠ The 'model:' line in each ported agent is still a Claude alias (sonnet/fable/opus),"
+        echo "  which this target cannot resolve. Re-run with --lineup to stamp real provider/model"
+        echo "  ids, or edit the files by hand."
+        ;;
+      pi)
+        echo ""
+        echo "⚠ You did NOT get the loops — you got their agents. The orchestration (rounds, stop"
+        echo "  conditions, findings aggregation) lives in the COMMAND bodies, and Pi's slash commands"
+        echo "  are prompt templates that cannot dispatch agents. You cannot run /orchestrate (or any"
+        echo "  loop command) on Pi, with or without the extension — you get the 7 agents as"
+        echo "  dispatchable subagents and drive them yourself."
+        echo ""
+        echo "⚠ correctness-critic lost WebSearch (pi-subagents has no verified equivalent builtin)."
+        echo "  Its whole job is checking claims against the web; on Pi it cannot. Install"
+        echo "  pi-web-access and add its tools to that agent's frontmatter, or do not rely on it here."
+        ;;
+    esac
+    ;;
+esac
 
 # ── Model line-up (D25/F11) ─────────────────────────────────────────────────
 # Resolution happens HERE, at install time — the copies this writes are static, portable
@@ -239,14 +345,27 @@ if [ "$LINEUP_REQUESTED" -eq 1 ]; then
   case "$TARGET" in
     claude)      CMD_DEST=".claude/commands"; AGENT_DEST=".claude/agents" ;;
     claude-user) CMD_DEST="$HOME/.claude/commands"; AGENT_DEST="$HOME/.claude/agents" ;;
-    pi)          CMD_DEST=".pi/commands"; AGENT_DEST=".pi/agents" ;;
+    # F9: pi/opencode/kilo-loops already have their own port step above (schema-transformed,
+    # commands/ absent for pi) — this section only re-stamps model: on top of it, never re-copies.
+    pi)          CMD_DEST=""; AGENT_DEST=".pi/agents" ;;
+    opencode)    CMD_DEST=".opencode/commands"; AGENT_DEST=".opencode/agents" ;;
+    kilo-loops)  CMD_DEST=".kilo/commands"; AGENT_DEST=".kilo/agents" ;;
     *)           CMD_DEST=""; AGENT_DEST="" ;;
   esac
 
   if [ -n "$AGENT_DEST" ]; then
-    mkdir -p "$CMD_DEST" "$AGENT_DEST"
-    cp -R "$ROOT_DIR"/commands/. "$CMD_DEST"/
-    cp -R "$ROOT_DIR"/agents/. "$AGENT_DEST"/
+    case "$TARGET" in
+      pi|opencode|kilo-loops)
+        # Re-copying commands/agents/. here would overwrite the F9 port's schema-transformed
+        # files with raw Claude Code frontmatter — incompatible with OpenCode/Kilo/pi-subagents.
+        [ -d "$AGENT_DEST" ] || { echo "error: $AGENT_DEST missing — the F9 port step must run before --lineup can re-stamp it" >&2; exit 1; }
+        ;;
+      *)
+        mkdir -p "$CMD_DEST" "$AGENT_DEST"
+        cp -R "$ROOT_DIR"/commands/. "$CMD_DEST"/
+        cp -R "$ROOT_DIR"/agents/. "$AGENT_DEST"/
+        ;;
+    esac
 
     # Static role→file convention (not a frontmatter field): the four critics share one role,
     # the scorer is its own, skill-improver plays the editor/implementer role for Loop 2.
@@ -270,7 +389,11 @@ if [ "$LINEUP_REQUESTED" -eq 1 ]; then
         STAMPED=$((STAMPED + 1))
       fi
     done
-    echo "✓ commands/ + agents/ installed at $CMD_DEST and $AGENT_DEST — $STAMPED agent(s) re-stamped for target '$TARGET'"
+    if [ -n "$CMD_DEST" ]; then
+      echo "✓ commands/ + agents/ installed at $CMD_DEST and $AGENT_DEST — $STAMPED agent(s) re-stamped for target '$TARGET'"
+    else
+      echo "✓ agents/ installed at $AGENT_DEST — $STAMPED agent(s) re-stamped for target '$TARGET' (no commands/ port for this target)"
+    fi
   else
     echo "⚠ --lineup: no commands/agents install path for target '$TARGET' yet (that target gets loops via"
     echo "  the Claude Code plugin marketplace instead) — the skill copy above is unaffected."

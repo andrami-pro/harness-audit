@@ -43,6 +43,38 @@ The skill follows the open [Agent Skills](https://agentskills.io) standard. From
 
 The methodology is fully portable; the security hooks are Claude Code plugin-specific.
 
+### Option 4 — the loop commands + agents themselves (OpenCode, Kilo Code, Pi)
+
+The skill is one thing; the 5 loop commands and 7 agents that dispatch them are another. OpenCode and
+Kilo Code both have a native Task tool and share one frontmatter schema, so the port is a mechanical
+transform — the same file, a different folder:
+
+```bash
+./install.sh --target opencode              # .opencode/{commands,agents}/
+./install.sh --target kilo-loops            # .kilo/{commands,agents}/  (separate from --target kilo)
+./install.sh --target opencode --lineup     # …and stamp real model ids while you're at it (below)
+```
+
+**Run it with `--lineup`.** Each agent ships with a Claude Code model alias (`model: fable`,
+`model: sonnet`) that **neither OpenCode nor Kilo Code can resolve** — they want a `provider/model` id.
+The port carries the line over verbatim, so without `--lineup` you get an unresolvable placeholder that
+your harness will fall back from (silently, to its own default). `--lineup` re-stamps every one of them
+from your [model line-up](#watch-them-run) file. If you skip it, edit the `model:` lines by hand.
+
+**Two guardrails do not survive the crossing** — the manual-only veto on the three expensive/consent-
+gated loops, and `SKILL.md`'s `allowed-tools`. Read
+[Compatibility across harnesses](#compatibility-across-harnesses) before you rely on either.
+
+Pi is a different story: **the 5 loop commands do not port to Pi at all**, with or without any
+extension — only the 7 agents do, and only once the third-party
+[`pi-subagents`](https://github.com/nicobailon/pi-subagents) extension is installed. Read the
+[Pi section](#compatibility-across-harnesses) before reaching for this:
+
+```bash
+pi install npm:pi-subagents   # required — .pi/agents/ dispatch nothing without it
+./install.sh --target pi      # .pi/agents/ only. Refuses to write anything if the check above fails.
+```
+
 ## Usage
 
 Just ask in natural language. The skill triggers on phrases such as:
@@ -63,6 +95,65 @@ It detects the stack automatically, audits the four pillars, grades loop-readine
 4. **Loop design** — an executable rubric every criterion of which is checkable by command, explicit stop conditions, and a memory that matures Fail → Investigate → Verify → Distill → Consult.
 
 A minimal harness beats an inflated one: trimming tooling tends to make agents faster, not weaker.
+
+## Compatibility across harnesses
+
+This methodology has four layers, and they cross to Claude Code / OpenCode / Kilo Code / Pi at four
+different rates. Read this before assuming a layer "just works" on a harness you didn't test it on.
+
+| Layer | Claude Code | OpenCode | Kilo Code | Pi |
+|---|---|---|---|---|
+| `AGENTS.md` + executable rubric | ✅ native | ✅ native | ✅ native | ✅ native — Pi reads `AGENTS.md` directly |
+| Skill (`SKILL.md` + templates) | ✅ native | ✅ native | ✅ native | ✅ native |
+| The 5 loop commands | ✅ native (Task tool) | ✅ native (Task tool) | ✅ native (Task tool) | ❌ **do not port — see below** |
+| The 7 agents | ✅ native | ✅ native | ✅ native | ⚠️ agents only, and only via a third-party extension |
+| Manual-only guardrail (`disable-model-invocation`) | ✅ enforced | ❌ **no equivalent — dropped** | ❌ **no equivalent — dropped** | n/a (no commands) |
+| Hooks + dashboard (`loop-stats.js`) | ✅ native | 📖 documented, not automated | 📖 documented, not automated | 📖 documented, not automated |
+
+**Loops on Pi, in full — read this before you install:** Pi's core ships with no sub-agent support at
+all — per [pi.dev](https://pi.dev)'s own docs, *"Pi ships with powerful defaults but skips features like
+sub-agents."* The third-party [`pi-subagents`](https://github.com/nicobailon/pi-subagents) extension
+(`pi install npm:pi-subagents`) adds subagent dispatch, and that is what `--target pi` ports the 7
+agents into — not first-party, not bundled, a real dependency this repo is naming rather than hiding.
+
+But the extension does **not** give you the loops. Each loop's actual machinery — the rounds, the stop
+conditions, the findings aggregation, the fix passes — lives in the body of its **command**, and Pi's
+own slash commands (`~/.pi/agent/prompts/*.md`) are prompt templates that cannot dispatch agents. So,
+plainly: **you cannot run `/orchestrate` (or any loop command) on Pi, with or without the extension —
+you get the 7 agents as dispatchable subagents and drive them yourself.** `--target pi` writes
+`.pi/agents/` only, refuses to write anything at all when the extension is absent, and says this to
+your face on the way out. What Pi gives you is the critic panel as raw material; the loop is yours to
+run by hand.
+
+One agent is degraded on Pi even so: **`correctness-critic` loses `WebSearch`** — pi-subagents exposes
+no verified equivalent builtin — while its prompt still promises to check every figure and claim
+against the web. That is its entire job. Install
+[`pi-web-access`](https://github.com/nicobailon/pi-web-access) and add its tools to that agent's
+frontmatter, or do not trust that seat on this target.
+
+**The manual-only guardrail does not cross to OpenCode or Kilo Code.** In Claude Code, `/review-loop`,
+`/iterate` and `/session-review` ship with `disable-model-invocation: true`: the model may *suggest*
+them, never *fire* them. Two of the three are token-hungry, and the third takes **you** as its subject.
+Neither OpenCode nor Kilo Code has any equivalent frontmatter field, so the port **drops it** — and
+after the port, all three are auto-dispatchable by the model on those harnesses, with no local veto.
+`install.sh` warns about this per file at install time. Your only remaining enforcement is a rule in
+your own `AGENTS.md`, and a rule nothing checks is a wish; if the cost or the consent matters to you,
+verify that rule actually holds.
+
+**The `allowed-tools` trap (silent on two of these harnesses):** `SKILL.md`'s `allowed-tools` field —
+the guardrail that scopes what a skill's own instructions are allowed to ask the model to do — is part
+of the Agent Skills standard, but **OpenCode and Kilo Code both ignore it without a warning.** Any
+skill whose safety story leans on that field loses the guardrail silently the moment it crosses to
+either harness; there is no error, no log line, nothing to grep for. Pi, via the separate
+[`@gotgenes/pi-permission-system`](https://github.com/gotgenes/pi-permission-system) extension, is the
+one target that actually enforces a tool-permission field at runtime — but that is a different,
+non-bundled piece from `pi-subagents`, and this repo does not depend on it.
+
+**Hooks and the dashboard are Claude Code-only by design** — they are ~20 lines of hook glue per
+harness, each with a different plugin API (Claude Code's hooks are an external command reading JSON
+from stdin; OpenCode and Kilo Code use in-process JS/TS plugin modules instead). The recipe is
+documented, not automated: nobody has needed a second harness's dashboard badly enough yet to justify
+writing and maintaining three more integrations against APIs this repo doesn't otherwise touch.
 
 ## The six loops — which one do you need?
 
@@ -207,6 +298,10 @@ task is the right shape for one and say so in a line; it may never fire one.
 - `/session-review`, because of **consent**. It is cheap; that is not the point. Its subject is the human,
   and an agent that decides on its own to analyze how you work has not saved you a step — it has reviewed
   you without asking.
+
+**On Claude Code only.** That field is Claude Code's; OpenCode and Kilo Code have no equivalent, so a
+ported copy of these three loses the veto and becomes auto-dispatchable — see
+[Compatibility across harnesses](#compatibility-across-harnesses).
 
 ### Watch them run
 
