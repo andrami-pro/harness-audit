@@ -566,12 +566,41 @@ check('every loop command produces the v2 schema the dashboard reads', () => {
   return '4 commands instruct startedAt/endedAt/tokens · skill-loop instructs armTokens';
 });
 
+// Pi's prompt-template loader parses frontmatter as STRICT YAML, and a file that fails to parse is
+// DISCARDED IN SILENCE — no error, no warning, the template just never appears. So a Pi frontmatter
+// value is only real if a strict YAML parser would accept it. This repo has no YAML dependency and is
+// not adding one, so this reimplements the one rule that actually bit: a plain (unquoted) scalar
+// containing `: ` is a mapping indicator, not text, and YAML rejects the line ("mapping values are not
+// allowed in this context"). Three of this repo's five descriptions contain one (`Cost: medium`,
+// `converge: the`, `keep. Cost: medium-h`) — and for one commit, `/orchestrate`, `/iterate` and
+// `/skill-loop` were written to disk and silently thrown away by Pi's loader. Measured with
+// `pi --mode rpc` + `get_commands`: 2 of 5 templates registered. The check that was supposed to prevent
+// exactly this counted FILES WRITTEN, which is the neighbouring failure mode and not the one that
+// happened. That is §0 with the paint still wet: a check aimed one inch off the target is decoration.
+function assertPiFrontmatterLoads(rel, pairs) {
+  for (const [k, v] of pairs) {
+    const value = String(v);
+    const quoted = (value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"));
+    if (!quoted && /:\s/.test(value)) {
+      throw new Error(`${rel}: Pi cannot load this template — frontmatter '${k}' is an unquoted YAML scalar containing ': ', which strict YAML reads as a mapping. Pi's loader will discard the file in silence and the command will not exist.`);
+    }
+    if (!quoted && /^[>|&*!%@`]/.test(value)) {
+      throw new Error(`${rel}: Pi cannot load this template — frontmatter '${k}' is an unquoted YAML scalar opening with the reserved indicator '${value[0]}'.`);
+    }
+  }
+}
+
 // F9's port is a schema TRANSFORM, not a copy — the risk is not "the file is missing" (the four
 // checks above already catch that) but "the file exists and is wrong": a command that silently
 // drops `description`, an agent whose `permission`/`tools` block is malformed YAML, or a Pi agent
 // missing the `name` field pi-subagents requires to discover it at all. Every real commands/*.md and
 // agents/*.md in this repo is round-tripped through both transforms so a schema drift in either
 // source corpus fails here before it fails a user's install.
+//
+// Negative control for the F12 strict-YAML hardening (2026-07-13, applied, observed, reverted — exit 1):
+//   port-loops.js's `yamlQuote` reduced to the identity function, so descriptions emit unquoted .....
+//     "commands/iterate.md: Pi cannot load this template — frontmatter 'description' is an unquoted
+//      YAML scalar containing ': '…" — the exact defect real Pi exhibited, now caught before install
 //
 // Negative controls (2026-07-12, each applied by hand, observed, reverted — all exit 1):
 //   transformAgentPi's `if (!name) throw` guard deleted, then run against this check's own
@@ -594,12 +623,32 @@ check('port-loops.js transforms every real command/agent into valid target front
     'external_directory', 'todowrite', 'webfetch', 'websearch', 'lsp', 'skill', 'question', 'doom_loop']);
 
   for (const rel of globMd('commands')) {
-    const { fm } = port.parseFrontmatter(read(rel));
+    const { fm, body } = port.parseFrontmatter(read(rel));
     const { fm: out } = port.transformCommandOpenCodeKilo(fm);
     const description = out.find(([k]) => k === 'description');
     if (!description || !description[1]) throw new Error(`${rel}: ported command lost its description`);
     for (const dropped of ['argument-hint', 'allowed-tools', 'disable-model-invocation']) {
       if (out.some(([k]) => k === dropped)) throw new Error(`${rel}: ported command still carries Claude-only field '${dropped}'`);
+    }
+
+    // F12: Pi gets commands too now (prompt templates, .pi/prompts/) — except the ones it cannot run.
+    if (port.PI_UNPORTABLE_COMMANDS.has(path.basename(rel, '.md'))) continue;
+    const { fm: piOut, body: piBody } = port.transformCommandPi(fm, body);
+    const piDescription = piOut.find(([k]) => k === 'description');
+    if (!piDescription || !piDescription[1]) throw new Error(`${rel}: pi-ported command lost its description`);
+    for (const dropped of port.PI_COMMAND_DROPPED_FIELDS) {
+      if (piOut.some(([k]) => k === dropped)) throw new Error(`${rel}: pi-ported command still carries Claude-only field '${dropped}'`);
+    }
+    // The blocker this check missed the first time: every value has to SURVIVE Pi's strict-YAML
+    // frontmatter loader. See assertPiFrontmatterLoads — a file Pi cannot parse is discarded in
+    // silence, so "the file was written" proves nothing at all.
+    assertPiFrontmatterLoads(rel, piOut);
+    const leftoverTaskRef = /\bTask tool\b|\bTask calls\b|subagent_type|\.claude\/agents|each Task returned|`Task`\s|AskUserQuestion|CLAUDE_PLUGIN_ROOT/.exec(piBody);
+    if (leftoverTaskRef) throw new Error(`${rel}: pi-ported command body still reads "${leftoverTaskRef[0]}" — a Claude Code-only reference that does not resolve on Pi`);
+    // Pi's own prompt-template engine substitutes $ARGUMENTS/$@ natively (docs/prompt-templates.md)
+    // — every source command that uses it must keep using it, not have it rewritten into prose.
+    if (body.includes('$ARGUMENTS') && !piBody.includes('$ARGUMENTS')) {
+      throw new Error(`${rel}: pi-ported command body dropped $ARGUMENTS — it is a real, working substitution on Pi, not dead text`);
     }
   }
 
@@ -657,11 +706,25 @@ check('port-loops.js transforms every real command/agent into valid target front
 //     passed. The check was tightened to demand the CONSEQUENCE in prose, not the fact in a cell,
 //     and only then did the control fire. Recorded because it is the whole argument for §0: this
 //     check was decoration for the length of one commit, and nothing but the control said so.
-//   the sentence "you cannot run /orchestrate (or any loop command) on Pi" struck from the README ..
-//     "README never states plainly that the loop COMMANDS do not port to Pi — 7 agents with no
-//      orchestration reads as a working port"
 //   the correctness-critic/WebSearch caveat struck from the README ................................
 //     "README never discloses that correctness-critic loses WebSearch on Pi"
+//
+// F12 RECOLOCATION (2026-07-13, not a deletion): the assertion that used to sit here — "README never
+// states plainly that the loop COMMANDS do not port to Pi" — checked a claim that turned out to be
+// FALSE. F9 concluded Pi could not run the loop commands at all; it can, via pi-subagents, exactly like
+// the agents already required it (see README §Compatibility, "Loops on Pi, in full"). Deleting that
+// check outright would leave this file with no memory that the claim was ever tested; instead it is
+// replaced below with its mirror image — a check that the README now asserts the TRUE thing (loops run
+// on Pi) and keeps asserting the two caveats that are still true (WebSearch, the model alias). A second,
+// new check (further down) binds that capability to `install.sh` actually delivering it.
+// Negative controls for the recolocated assertions (2026-07-13, each applied, observed, reverted — all
+// exit 1):
+//   `destDirsFor('pi').commands` reverted to `null` in port-loops.js .............................
+//     "port-loops.js no longer ports commands to Pi — the README says it does; one of the two is lying"
+//   the "preserved on Pi — by construction" sentence struck from README §Compatibility .............
+//     "README no longer states that the manual-only veto survives on Pi by construction"
+//   the Pi model-alias caveat paragraph struck from README §Compatibility ..........................
+//     "README never discloses that the model: alias is unresolved on Pi too"
 check('README discloses every guardrail the port destroys', () => {
   const port = require(path.join(ROOT, 'scripts/port-loops.js'));
   const t = read('README.md');
@@ -690,12 +753,30 @@ check('README discloses every guardrail the port destroys', () => {
     throw new Error("README never discloses that the port drops 'disable-model-invocation' — the manual-only veto on /review-loop, /iterate and /session-review does not exist on OpenCode/Kilo");
   }
 
-  // Pi gets agents, not loops. The exact claim, in the words a reader cannot misread as "it works".
-  if (!/cannot run `?\/orchestrate`? \(or any loop command\) on Pi, with or without the extension/i.test(compat)) {
-    throw new Error('README never states plainly that the loop COMMANDS do not port to Pi — 7 agents with no orchestration reads as a working port');
+  // Pi gets the loops too now (F12) — asked of the transform itself, not assumed: if a future change
+  // silently un-ports commands from Pi, this fails until the README is corrected back down with it.
+  if (port.destDirsFor('pi').commands === null) {
+    throw new Error('port-loops.js no longer ports commands to Pi — the README says it does; one of the two is lying');
   }
-  if (port.destDirsFor('pi').commands !== null) {
-    throw new Error('port-loops.js now ports commands to Pi — the README says it cannot; one of the two is lying');
+  if (!/preserved on Pi[\s\S]{0,40}— by construction/i.test(compat)) {
+    throw new Error('README no longer states that the manual-only veto survives on Pi by construction');
+  }
+  // Command frontmatter never carries `model:` (verified against the transform itself, not assumed) —
+  // the caveat is about the 7 ported AGENTS, and it has to say so for Pi specifically, not just for
+  // OpenCode/Kilo Code.
+  for (const rel of globMd('commands')) {
+    if (port.transformCommandPi(port.parseFrontmatter(read(rel)).fm, port.parseFrontmatter(read(rel)).body).fm.some(([k]) => k === 'model')) {
+      throw new Error(`${rel}: pi-ported command now carries a model: field — the README's "no commands carry model:" claim is stale`);
+    }
+  }
+  if (!/model:`? line is still a Claude Code alias on Pi/i.test(compat)) {
+    throw new Error('README never discloses that the model: alias is unresolved on Pi too, not just on OpenCode/Kilo Code');
+  }
+  // A loop the port WITHHOLDS is a disclosure too — and the one most easily mistaken for a bug.
+  for (const name of port.PI_UNPORTABLE_COMMANDS) {
+    if (!new RegExp(`\`?/${name}\`? does not port to Pi`, 'i').test(compat)) {
+      throw new Error(`README never states that /${name} does not port to Pi — a user who types it and gets nothing has no way to know that is by design`);
+    }
   }
 
   // The fact seat losing its only route to facts is a caveat, not a footnote.
@@ -704,7 +785,67 @@ check('README discloses every guardrail the port destroys', () => {
     throw new Error('README never discloses that correctness-critic loses WebSearch on Pi');
   }
 
-  return 'disable-model-invocation · Pi has no loop commands · correctness-critic loses WebSearch';
+  return 'disable-model-invocation dropped on OpenCode/Kilo · Pi loops preserved by construction + model alias · correctness-critic loses WebSearch on Pi';
+});
+
+// F12: the check above binds the README's PROSE to the transform's behavior; this one binds it to
+// `install.sh` — the thing a user actually runs — and, crucially, to what PI ITSELF WILL ACCEPT.
+//
+// The first version of this check counted files in `.pi/prompts/` and called that success. Real Pi
+// (`pi --mode rpc`, `get_commands`) then registered 2 of the 5 it had "installed": the other three had
+// an unquoted `: ` in their description and Pi's strict-YAML loader binned them without a word. Writing
+// a file the loader discards is not installing a loop. So every template this installer writes is now
+// re-parsed here through the same strict-YAML rule Pi applies (assertPiFrontmatterLoads) — the check
+// fails for the reason a user would actually experience ("Pi cannot load this template"), not for the
+// adjacent one that was easy to assert ("the file is not there").
+//
+// Negative controls (2026-07-13, each applied by hand, observed, reverted — all exit 1):
+//   port-loops.js's `yamlQuote` reduced to the identity (descriptions emit unquoted, exactly as they
+//   did when real Pi silently dropped 3 of 5) ......................................................
+//     ".pi/prompts/iterate.md: Pi cannot load this template — frontmatter 'description' is an unquoted
+//      YAML scalar containing ': '…"
+//   `PI_UNPORTABLE_COMMANDS` emptied, so session-review ports to Pi again .........................
+//     "install.sh --target pi wrote 5 prompt template(s), expected 4 — session-review shells out to
+//      ${CLAUDE_PLUGIN_ROOT}/scripts/loop-stats.js and cannot run on Pi"
+check("install.sh --target pi installs templates Pi can actually load", () => {
+  execFileSync('sh', ['-n', path.join(ROOT, 'install.sh')], { stdio: 'pipe' });
+  const port = require(path.join(ROOT, 'scripts/port-loops.js'));
+
+  const clean = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-pi-clean-'));
+  execFileSync('sh', ['-c', `sh "${path.join(ROOT, 'install.sh')}" --target pi --skip-graphify --skip-subagent-check 2>&1`], { cwd: clean });
+
+  const promptDir = path.join(clean, '.pi/prompts');
+  const promptFiles = fs.existsSync(promptDir) ? fs.readdirSync(promptDir).filter((f) => f.endsWith('.md')).sort() : [];
+  const expected = globMd('commands').map((f) => path.basename(f))
+    .filter((f) => !port.PI_UNPORTABLE_COMMANDS.has(path.basename(f, '.md'))).sort();
+  if (promptFiles.length !== expected.length) {
+    throw new Error(`install.sh --target pi wrote ${promptFiles.length} prompt template(s), expected ${expected.length} — session-review shells out to \${CLAUDE_PLUGIN_ROOT}/scripts/loop-stats.js and cannot run on Pi`);
+  }
+  for (const name of port.PI_UNPORTABLE_COMMANDS) {
+    if (promptFiles.includes(`${name}.md`)) throw new Error(`install.sh --target pi wrote ${name}.md, a command that cannot run on Pi — it would look like a working loop and die on its first command`);
+  }
+
+  // The blocker: does PI accept these files, or does its loader bin them? Same strict-YAML rule,
+  // applied to what actually landed on disk — not to what the transform said it would write.
+  for (const f of promptFiles) {
+    const src = fs.readFileSync(path.join(promptDir, f), 'utf8');
+    const { fm, body } = port.parseFrontmatter(src);
+    assertPiFrontmatterLoads(`.pi/prompts/${f}`, fm);
+    if (!fm.some(([k]) => k === 'description')) throw new Error(`.pi/prompts/${f}: no description — Pi falls back to the first body line in autocomplete`);
+    // Asserted against the FILE, not against PI_UNPORTABLE_COMMANDS: deriving "what may be installed"
+    // from the same constant that decides what gets installed is a tautology that can never fail. The
+    // real, independent property is that nothing Pi is asked to run may reach for a Claude Code
+    // plugin-runtime variable — a path that resolves to nothing and dies on the first command.
+    if (body.includes('CLAUDE_PLUGIN_ROOT')) {
+      throw new Error(`.pi/prompts/${f}: installed to Pi but its body reads \${CLAUDE_PLUGIN_ROOT} — a Claude Code plugin-runtime variable that is empty on Pi, pointing at a script this target never installs. It would look like a working loop and die on its first command.`);
+    }
+  }
+
+  const agentFiles = fs.existsSync(path.join(clean, '.pi/agents'))
+    ? fs.readdirSync(path.join(clean, '.pi/agents')).filter((f) => f.endsWith('.md')) : [];
+  if (agentFiles.length !== 7) throw new Error(`install.sh --target pi wrote ${agentFiles.length} agent(s) in .pi/agents, expected 7`);
+
+  return `${promptFiles.length} prompt(s) Pi's strict-YAML loader accepts + ${agentFiles.length} agents · session-review correctly withheld`;
 });
 
 let failed = 0;

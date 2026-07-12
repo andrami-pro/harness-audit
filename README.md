@@ -65,14 +65,15 @@ from your [model line-up](#watch-them-run) file. If you skip it, edit the `model
 gated loops, and `SKILL.md`'s `allowed-tools`. Read
 [Compatibility across harnesses](#compatibility-across-harnesses) before you rely on either.
 
-Pi is a different story: **the 5 loop commands do not port to Pi at all**, with or without any
-extension — only the 7 agents do, and only once the third-party
-[`pi-subagents`](https://github.com/nicobailon/pi-subagents) extension is installed. Read the
+Pi is a different story, but not the one an earlier version of this README told: **4 of the 5 loop
+commands do port to Pi**, as Pi's own prompt templates — gated on the same third-party
+[`pi-subagents`](https://github.com/nicobailon/pi-subagents) extension the 7 agents already require.
+`/session-review` is the exception and does not port at all. Read the
 [Pi section](#compatibility-across-harnesses) before reaching for this:
 
 ```bash
-pi install npm:pi-subagents   # required — .pi/agents/ dispatch nothing without it
-./install.sh --target pi      # .pi/agents/ only. Refuses to write anything if the check above fails.
+pi install npm:pi-subagents   # required — .pi/prompts/ and .pi/agents/ dispatch nothing without it
+./install.sh --target pi      # 4 prompts + 7 agents. Refuses to write anything if the check above fails.
 ```
 
 ## Usage
@@ -105,31 +106,73 @@ different rates. Read this before assuming a layer "just works" on a harness you
 |---|---|---|---|---|
 | `AGENTS.md` + executable rubric | ✅ native | ✅ native | ✅ native | ✅ native — Pi reads `AGENTS.md` directly |
 | Skill (`SKILL.md` + templates) | ✅ native | ✅ native | ✅ native | ✅ native |
-| The 5 loop commands | ✅ native (Task tool) | ✅ native (Task tool) | ✅ native (Task tool) | ❌ **do not port — see below** |
-| The 7 agents | ✅ native | ✅ native | ✅ native | ⚠️ agents only, and only via a third-party extension |
-| Manual-only guardrail (`disable-model-invocation`) | ✅ enforced | ❌ **no equivalent — dropped** | ❌ **no equivalent — dropped** | n/a (no commands) |
+| The 5 loop commands | ✅ native (Task tool) | ✅ native (Task tool) | ✅ native (Task tool) | ⚠️ **4 of 5** as prompt templates, via a third-party extension — `/session-review` does not port, see below |
+| The 7 agents | ✅ native | ✅ native | ✅ native | ✅ via the same third-party extension |
+| Manual-only guardrail (`disable-model-invocation`) | ✅ enforced | ❌ **no equivalent — dropped** | ❌ **no equivalent — dropped** | ✅ **preserved by construction — see below** |
 | Hooks + dashboard (`loop-stats.js`) | ✅ native | 📖 documented, not automated | 📖 documented, not automated | 📖 documented, not automated |
 
 **Loops on Pi, in full — read this before you install:** Pi's core ships with no sub-agent support at
 all — per [pi.dev](https://pi.dev)'s own docs, *"Pi ships with powerful defaults but skips features like
 sub-agents."* The third-party [`pi-subagents`](https://github.com/nicobailon/pi-subagents) extension
-(`pi install npm:pi-subagents`) adds subagent dispatch, and that is what `--target pi` ports the 7
-agents into — not first-party, not bundled, a real dependency this repo is naming rather than hiding.
+(`pi install npm:pi-subagents`) adds subagent dispatch, and that is what `--target pi` ports both the 7
+agents **and** the 5 loop commands into — not first-party, not bundled, a real dependency this repo is
+naming rather than hiding.
 
-But the extension does **not** give you the loops. Each loop's actual machinery — the rounds, the stop
-conditions, the findings aggregation, the fix passes — lives in the body of its **command**, and Pi's
-own slash commands (`~/.pi/agent/prompts/*.md`) are prompt templates that cannot dispatch agents. So,
-plainly: **you cannot run `/orchestrate` (or any loop command) on Pi, with or without the extension —
-you get the 7 agents as dispatchable subagents and drive them yourself.** `--target pi` writes
-`.pi/agents/` only, refuses to write anything at all when the extension is absent, and says this to
-your face on the way out. What Pi gives you is the critic panel as raw material; the loop is yours to
-run by hand.
+Pi's own slash commands genuinely **are** prompt templates (`.pi/prompts/*.md`), and a prompt template
+cannot dispatch anything **by itself** — an earlier version of this README read that fact as "the loop
+commands cannot port to Pi" and said so, in the matrix and in `install.sh`'s own output. That was wrong,
+and the error was stopping one layer too early: a loop command in this repo does not dispatch anything
+by itself either. Its body is instructions telling whichever session expands it to call a dispatch tool
+— Task on Claude Code. With pi-subagents installed, Pi's parent session has the equivalent tool,
+`subagent`, and a prompt template whose body says "dispatch via `subagent`" works exactly like
+pi-subagents' own bundled `/review-loop` template (`prompts/review-loop.md` in that package) — the
+reference this port's Pi transform follows. `--target pi` ports 4 of this repo's 5 commands to
+`.pi/prompts/` on that basis — rounds, stop conditions, findings aggregation and all. `.pi/prompts/` is
+a native discovery location: nothing has to be registered anywhere, and no `.pi/settings.json` is
+written. Type `/orchestrate`, `/skill-loop`, `/review-loop`, `/iterate` exactly as in Claude Code.
+
+Every claim in this section was checked by running Pi (`pi --mode rpc`, `get_commands`) against a freshly
+installed project and reading back which commands it actually registered — not by reading the docs. The
+first draft of this port passed its own test suite while Pi silently discarded three of the five
+templates it had written.
+
+**`/session-review` does not port to Pi, and will not.** Its first step shells out to
+`node "${CLAUDE_PLUGIN_ROOT}/scripts/loop-stats.js"` — a variable that exists only inside the Claude Code
+plugin runtime, pointing at a script `--target pi` does not install — and its data source is *the
+transcripts Claude Code writes*, not Pi's sessions, which live elsewhere in a different format. Ported, it
+would be a template that looks like a working loop and dies on its first command. `--target pi` withholds
+it and says why. Run Loop 6 from Claude Code; it reads your local transcripts either way.
+
+**Pi loads project `.pi/` resources only after you TRUST the project.** Interactive Pi asks on first start
+(or use `/trust`); the non-interactive modes (`-p`, `--mode json`, `--mode rpc`) never ask and skip project
+resources entirely unless `defaultProjectTrust` is `always` or you pass `--approve`. Until then the ported
+templates and agents are on disk and invisible — which looks exactly like a failed install and is not one.
+
+**This repo's `/review-loop` shadows the `/review-loop` that pi-subagents itself ships.** Project prompts
+win over package prompts, so after `--target pi` that name resolves to this repo's Loop 4 (deep verification,
+token-hungry), not the extension's lighter review/fix loop. If you were using the extension's, rename one of
+the two files.
+
+**The manual-only veto is preserved on Pi — by construction, not by a matching field.** In Claude Code,
+`/review-loop` and `/iterate` (the two of the three manual-only loops that reach Pi at all) ship with
+`disable-model-invocation: true`, and Pi's prompt-template frontmatter has no equivalent field — which
+reads like the same loss OpenCode and Kilo Code take, below. It is not. A Pi prompt template only ever
+expands when something types `/name` in the editor or passes it through the SDK/RPC `prompt` path
+(`docs/usage.md`, `docs/rpc.md`); nothing exposed to the model — no builtin tool, no pi-subagents tool —
+lets it invoke a prompt template on its own (verified against Pi's builtin tool list and the full
+pi-subagents tool-call surface, 2026-07-13). So the veto holds on Pi with no field at all to carry it: the
+model can still only *suggest* these loops, never fire them, because nothing lets it try.
 
 One agent is degraded on Pi even so: **`correctness-critic` loses `WebSearch`** — pi-subagents exposes
 no verified equivalent builtin — while its prompt still promises to check every figure and claim
 against the web. That is its entire job. Install
 [`pi-web-access`](https://github.com/nicobailon/pi-web-access) and add its tools to that agent's
 frontmatter, or do not trust that seat on this target.
+
+**The `model:` line is still a Claude Code alias on Pi, the same trap as OpenCode/Kilo Code below.**
+None of the 5 commands carry a `model:` field — they run in whatever model expanded them, by design —
+but all 7 ported agents do, and pi-subagents cannot resolve `sonnet`/`fable`/`opus` any better than
+OpenCode or Kilo Code can. Re-run `--lineup` to stamp real provider/model ids, or edit the files by hand.
 
 **The manual-only guardrail does not cross to OpenCode or Kilo Code.** In Claude Code, `/review-loop`,
 `/iterate` and `/session-review` ship with `disable-model-invocation: true`: the model may *suggest*
@@ -299,9 +342,10 @@ task is the right shape for one and say so in a line; it may never fire one.
   and an agent that decides on its own to analyze how you work has not saved you a step — it has reviewed
   you without asking.
 
-**On Claude Code only.** That field is Claude Code's; OpenCode and Kilo Code have no equivalent, so a
-ported copy of these three loses the veto and becomes auto-dispatchable — see
-[Compatibility across harnesses](#compatibility-across-harnesses).
+**`disable-model-invocation` itself is Claude Code's field.** OpenCode and Kilo Code have no equivalent,
+so a ported copy of these three loses the veto and becomes auto-dispatchable. Pi has no equivalent
+field either, but keeps the veto anyway — invocation there is always a typed `/name`, never a tool call
+the model can make on its own. See [Compatibility across harnesses](#compatibility-across-harnesses).
 
 ### Watch them run
 

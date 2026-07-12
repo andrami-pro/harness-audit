@@ -156,14 +156,103 @@ function transformAgentPi(fm) {
   return { fm: out, dropped };
 }
 
+// Pi's own slash-command mechanism IS prompt templates (`.pi/prompts/*.md`, discovered per
+// docs/prompt-templates.md of @earendil-works/pi-coding-agent — verified 2026-07-13). "Pi has no Task
+// tool" (true) was read, in F9, as "the loop commands cannot port to Pi" — that inference was wrong: a
+// prompt template's body is just instructions to whatever session expands it, and a session with the
+// pi-subagents extension installed has the `subagent` tool. pi-subagents ships its own loop prompt
+// template this way (`prompts/review-loop.md` in the pi-subagents package, invoked as `/review-loop`) —
+// that file is this port's reference for both the frontmatter shape and the body's dispatch vocabulary.
+// So commands DO cross to Pi now, gated on the same extension the agents already require.
+// A prompt template's frontmatter carries `description` AND `argument-hint` — the hint renders before
+// the description in Pi's autocomplete dropdown (docs/prompt-templates.md, "Argument Hints"). Both are
+// ported. `allowed-tools` has no destination (a prompt template borrows whatever tools the expanding
+// session already has — it does not gate them per-template) and `disable-model-invocation` has no
+// destination either — but unlike the OpenCode/Kilo transform, dropping the latter is NOT reported as a
+// lost guardrail: a prompt template only ever expands when something types `/name` in the editor or
+// passes it through the SDK/RPC `prompt` path (docs/usage.md:34, docs/rpc.md:765) — never as a tool call
+// the model itself can make. Verified against Pi's built-in tool list (docs/usage.md:208:
+// read/bash/edit/write/grep/find/ls, no command-invocation tool) and the pi-subagents tool surface (its
+// README's full tool-call reference has no "run this prompt template" action) — nothing lets the model
+// fire one on its own. So neither field is tracked in `dropped`: nothing here used to work and now does not.
+//
+// $ARGUMENTS is NOT rewritten. It is a real, working substitution in Pi's own prompt-template engine
+// ("$@ or $ARGUMENTS for all args joined", docs/prompt-templates.md) — every one of this repo's commands
+// already uses it (`Artifacts under review: **$ARGUMENTS**`, etc.) and it resolves in Pi exactly as it
+// does in Claude Code. Left untouched, on purpose.
+const PI_COMMAND_DROPPED_FIELDS = ['allowed-tools', 'disable-model-invocation'];
+
+// Pi's prompt-template loader parses frontmatter as STRICT YAML and drops a file that fails to parse —
+// silently, with no error, no log line: the template simply never appears in `/`-autocomplete. Three of
+// this repo's descriptions contain an inline `: ` (`Cost: medium`, `converge: the`, `keep. Cost:`), which
+// in a plain YAML scalar is a mapping indicator, not text — so `/orchestrate`, `/iterate` and
+// `/skill-loop` were written to disk and then thrown away by the loader. Measured, not reasoned:
+// `pi --mode rpc` + `get_commands` listed only 2 of the 5 as `source: "prompt"` until these values were
+// quoted. Every Pi frontmatter value this port emits is therefore a double-quoted YAML scalar.
+//
+// pi-subagents' AGENT loader is a different, lenient line-based parser (its src/agents/frontmatter.ts
+// matches `^([\w-]+):\s*(.*)$` and takes the rest of the line verbatim), so agents/*.md — one of which
+// has the same inline `: ` — are unaffected and are left unquoted.
+const yamlQuote = (v) => JSON.stringify(String(v));
+
+// session-review does NOT port to Pi, and this is the honest half of the port rather than a gap in it.
+// Its step 1 shells out to `node "${CLAUDE_PLUGIN_ROOT}/scripts/loop-stats.js"` — a variable that only
+// exists inside the Claude Code plugin runtime, pointing at a script `--target pi` does not install —
+// and its data source is the transcripts Claude Code writes (its own description says so), not Pi's
+// sessions, which live elsewhere in a different format. Ported, it would be a template that looks like a
+// working loop and dies on its first command. That is precisely the failure mode this port refuses.
+const PI_UNPORTABLE_COMMANDS = new Set(['session-review']);
+
+// Task-tool-specific body text, replaced with the pi-subagents `subagent` tool's own vocabulary — every
+// pair below is a literal substring verified against commands/*.md, 2026-07-13. A pair that matches
+// nothing in a given file is simply a no-op there; nothing here touches $ARGUMENTS, rounds, stop
+// conditions, findings aggregation, or any of the orchestration logic itself.
+const PI_COMMAND_BODY_SUBSTITUTIONS = [
+  // orchestrate.md, review-loop.md, skill-loop.md: "launch N in one message, N Task calls" (Claude
+  // Code needs N separate tool_use blocks to run them in parallel). pi-subagents runs an array of
+  // `tasks` inside ONE `subagent` call in parallel (see its README's "Parallel" example) — a closer
+  // match to "must run in parallel, must not see each other" than N separate calls would even be.
+  ['one message, four Task calls', 'one `subagent` call with four parallel tasks'],
+  ['one message, five Task calls', 'one `subagent` call with five parallel tasks'],
+  // orchestrate.md, review-loop.md: the seat table's column header names the Claude Code Task
+  // parameter (`subagent_type`); pi-subagents' equivalent parameter is `agent`.
+  ['| subagent_type | seat |', '| agent | seat |'],
+  // iterate.md: same header, different table shape (sequential seats, not a parallel panel).
+  ['`subagent_type`', '`agent`'],
+  // orchestrate.md, review-loop.md, iterate.md: the project-defined fallback agent's file path.
+  ['.claude/agents/implementer.md', '.pi/agents/implementer.md'],
+  // orchestrate.md, review-loop.md, iterate.md: "...as the harness reported it when each Task
+  // returned."
+  ['it when each Task returned.', 'it when each subagent run returned.'],
+  // skill-loop.md: same fact, wrapped across a line so it needs its own pair.
+  ['when its Task\nreturns:', 'when its subagent run\nreturns:'],
+  // skill-loop.md: AskUserQuestion has no Pi builtin or pi-subagents equivalent (neither tool map lists
+  // one) — Pi is an interactive session by default, so asking the human is just the next reply, not a
+  // dedicated tool call.
+  ['confirm them with **AskUserQuestion**\nbefore spending a token',
+    'confirm them with the human directly — ask in your reply and wait for their answer\nbefore spending a token'],
+  // session-review.md: a single Task call to one agent, not a table row.
+  ['Send **one** `Task` to a single agent', 'Run **one** `subagent` call to a single agent'],
+];
+
+function transformCommandPi(fm, body) {
+  const description = get(fm, 'description');
+  if (!description) throw new Error('command missing description');
+  const out = [['description', yamlQuote(description)]];
+  // The source may already quote it ("[max-iterations, default 5]"); strip that before re-quoting, or
+  // the emitted value is a YAML string whose own content is a pair of quotes.
+  const hint = get(fm, 'argument-hint');
+  if (hint) out.push(['argument-hint', yamlQuote(hint.replace(/^"(.*)"$/, '$1').replace(/^'(.*)'$/, '$1'))]);
+  let outBody = body;
+  for (const [from, to] of PI_COMMAND_BODY_SUBSTITUTIONS) outBody = outBody.split(from).join(to);
+  return { fm: out, dropped: [], body: outBody };
+}
+
 function destDirsFor(target) {
   switch (target) {
     case 'opencode': return { commands: '.opencode/commands', agents: '.opencode/agents' };
     case 'kilo-loops': return { commands: '.kilo/commands', agents: '.kilo/agents' };
-    // Pi's native slash commands (~/.pi/agent/prompts/*.md) are prompt templates, not agent
-    // dispatchers (per pi.dev) — porting the loop commands there would look like a working /orchestrate
-    // and dispatch nothing. Only agents are ported for Pi.
-    case 'pi': return { commands: null, agents: '.pi/agents' };
+    case 'pi': return { commands: '.pi/prompts', agents: '.pi/agents' };
     default: throw new Error(`port-loops.js: unknown target '${target}' (use opencode|kilo-loops|pi)`);
   }
 }
@@ -172,15 +261,19 @@ function destDirsFor(target) {
 // some capability went missing somewhere, which is not actionable. "correctness-critic.md: WebSearch"
 // tells them the fact-checking critic — the one whose entire job is verifying claims against the web —
 // can no longer reach the web on this target. Same information, and only one of the two can be acted on.
-function portDir(srcDir, destDir, transform) {
+function portDir(srcDir, destDir, transform, skip = new Set()) {
   fs.mkdirSync(destDir, { recursive: true });
-  const files = fs.readdirSync(srcDir).filter((f) => f.endsWith('.md')).sort();
+  const files = fs.readdirSync(srcDir)
+    .filter((f) => f.endsWith('.md') && !skip.has(path.basename(f, '.md'))).sort();
   const dropped = [];
   for (const f of files) {
     const { fm, body } = parseFrontmatter(fs.readFileSync(path.join(srcDir, f), 'utf8'));
-    const result = transform(fm);
+    // `transform` always receives (fm, body) — the OpenCode/Kilo/Pi-agent transforms only touch fm and
+    // return no `.body`, so they fall back to the untouched source body below. transformCommandPi is
+    // the only transform that also rewrites `.body` (Task-tool vocabulary -> subagent vocabulary).
+    const result = transform(fm, body);
     if (result.dropped.length) dropped.push({ file: f, fields: result.dropped });
-    fs.writeFileSync(path.join(destDir, f), serializeFrontmatter(result.fm, body));
+    fs.writeFileSync(path.join(destDir, f), serializeFrontmatter(result.fm, result.body !== undefined ? result.body : body));
   }
   return { count: files.length, dropped };
 }
@@ -188,16 +281,20 @@ function portDir(srcDir, destDir, transform) {
 function run(target, root) {
   const dest = destDirsFor(target);
   const dropped = [];
+  const skipped = [];
   let commandCount = 0;
   if (dest.commands) {
-    const r = portDir(path.join(root, 'commands'), dest.commands, transformCommandOpenCodeKilo);
+    const commandTransform = target === 'pi' ? transformCommandPi : transformCommandOpenCodeKilo;
+    const skip = target === 'pi' ? PI_UNPORTABLE_COMMANDS : new Set();
+    const r = portDir(path.join(root, 'commands'), dest.commands, commandTransform, skip);
     commandCount = r.count;
     dropped.push(...r.dropped);
+    skipped.push(...skip);
   }
   const agentTransform = target === 'pi' ? transformAgentPi : transformAgentOpenCodeKilo;
   const agentResult = portDir(path.join(root, 'agents'), dest.agents, agentTransform);
   dropped.push(...agentResult.dropped);
-  return { commandCount, agentCount: agentResult.count, dropped };
+  return { commandCount, agentCount: agentResult.count, dropped, skipped };
 }
 
 function main() {
@@ -210,8 +307,14 @@ function main() {
     process.exit(1);
   }
   try {
-    const { commandCount, agentCount, dropped } = run(target, root);
+    const { commandCount, agentCount, dropped, skipped } = run(target, root);
     process.stdout.write(`✓ ported ${commandCount} command(s) + ${agentCount} agent(s) to ${target}\n`);
+    for (const name of skipped) {
+      process.stdout.write(`⚠ /${name} NOT ported to ${target}: it shells out to `
+        + '`${CLAUDE_PLUGIN_ROOT}/scripts/loop-stats.js` (a Claude Code plugin-runtime variable, and a\n'
+        + `    script this target does not install) and reads Claude Code's transcripts, not ${target}'s\n`
+        + '    sessions. Ported, it would look like a working loop and die on its first command.\n');
+    }
     if (dropped.length) {
       process.stdout.write('⚠ fields with no equivalent on this target, dropped per file:\n');
       for (const { file, fields } of dropped) {
@@ -228,5 +331,6 @@ if (require.main === module) main();
 
 module.exports = {
   parseFrontmatter, serializeFrontmatter, transformCommandOpenCodeKilo, transformAgentOpenCodeKilo,
-  transformAgentPi, destDirsFor, TOOL_MAP, parseToolList, run,
+  transformAgentPi, transformCommandPi, PI_COMMAND_DROPPED_FIELDS, PI_COMMAND_BODY_SUBSTITUTIONS,
+  PI_UNPORTABLE_COMMANDS, destDirsFor, TOOL_MAP, parseToolList, run,
 };

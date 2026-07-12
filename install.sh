@@ -12,7 +12,7 @@
 #   ./install.sh --target cursor       # project-level  .cursor/skills/
 #   ./install.sh --target kilo         # user-level     ~/.kilo/skills/
 #   ./install.sh --target antigravity  # project-level  .agents/skills/
-#   ./install.sh --target pi           # project-level  .pi/skills/ + .pi/agents/ — see NOTE below
+#   ./install.sh --target pi           # project-level  .pi/skills/ + .pi/prompts/ (4) + .pi/agents/ (7) — see NOTE below
 #   ./install.sh --target opencode     # project-level  .opencode/{commands,agents}/ — the 5 loop
 #                                       # commands + 7 agents, native (OpenCode has Task tool)
 #   ./install.sh --target kilo-loops   # project-level  .kilo/{commands,agents}/ — same port,
@@ -46,12 +46,16 @@
 # in this repo dispatch subagents, so a Pi port only works through the
 # third-party pi-subagents extension (github.com/nicobailon/pi-subagents,
 # `pi install npm:pi-subagents`). --target pi checks for it before writing
-# anything: found → ports agents/*.md to .pi/agents/ in the pi-subagents
-# schema; missing → fails with the install command, unless
+# anything: found → ports 4 of the 5 commands/*.md to .pi/prompts/ (Pi's own
+# prompt-template format, a native discovery location, invoked the same way,
+# by typing /orchestrate etc.) and all 7 agents/*.md to .pi/agents/ in the
+# pi-subagents schema; missing → fails with the install command, unless
 # --skip-subagent-check is passed, in which case it writes the same files
-# with a loud warning that they are inert without the extension. Pi's own
-# slash commands are prompt templates, not agent dispatchers — this port
-# does not touch them; only agents/ crosses over.
+# with a loud warning that they are inert without the extension — nothing
+# here dispatches a subagent without it, commands included.
+# session-review is the 5th command and does NOT port: it shells out to
+# ${CLAUDE_PLUGIN_ROOT}/scripts/loop-stats.js and reads Claude Code's own
+# transcripts. See PI_UNPORTABLE_COMMANDS in scripts/port-loops.js.
 #
 # Project-level targets install into the CURRENT working directory's project.
 
@@ -199,16 +203,17 @@ case "$TARGET" in
         echo "⚠ pi-subagents extension not found (checked ~/.pi/agent/settings.json,"
         echo "  ./.pi/settings.json, and both npm/ install dirs)."
         echo "  Pi's core has no sub-agent support — per pi.dev: \"Pi ships with powerful"
-        echo "  defaults but skips features like sub-agents\". All 5 loop commands in this"
-        echo "  repo dispatch subagents, so .pi/agents/ would look like a working port and"
+        echo "  defaults but skips features like sub-agents\". Every loop command in this"
+        echo "  repo dispatches subagents (via the ported .pi/prompts/*.md), and all 7 agents"
+        echo "  are just their dispatch targets — both would look like a working port and"
         echo "  dispatch nothing without it."
         echo "  Install it, then re-run this command:"
         echo "    pi install npm:pi-subagents"
         echo "  Verify with: pi list   (or: grep pi-subagents ~/.pi/agent/settings.json)"
         if [ "$SKIP_SUBAGENT_CHECK" -eq 1 ]; then
           echo ""
-          echo "⚠⚠⚠ --skip-subagent-check: writing .pi/agents/ ANYWAY. These agents will NOT"
-          echo "    dispatch until pi-subagents is installed — this port is INERT until then. ⚠⚠⚠"
+          echo "⚠⚠⚠ --skip-subagent-check: writing .pi/prompts/ and .pi/agents/ ANYWAY. Neither"
+          echo "    dispatches until pi-subagents is installed — this port is INERT until then. ⚠⚠⚠"
         else
           echo ""
           # Hard, not confirmable (same shape as D25a): --yes is for SOFT prompts elsewhere in
@@ -223,6 +228,13 @@ case "$TARGET" in
     fi
 
     node "$PORTER" --target "$TARGET" --root "$ROOT_DIR"
+
+    # No .pi/settings.json is written for --target pi, and that is a decision, not an omission: an
+    # earlier draft of this installer merged a `prompts` entry into it and told the user that entry was
+    # what made /orchestrate resolve. It is not. `.pi/prompts/*.md` is a NATIVE discovery location
+    # (docs/prompt-templates.md), measured: deleting settings.json entirely and re-running
+    # `pi --mode rpc` + get_commands still lists every template. The merge was real code doing nothing,
+    # sold as the mechanism — so it is gone, along with the invalid-JSON edge case it needed.
 
     case "$TARGET" in
       opencode|kilo-loops)
@@ -240,15 +252,35 @@ case "$TARGET" in
         ;;
       pi)
         echo ""
-        echo "⚠ You did NOT get the loops — you got their agents. The orchestration (rounds, stop"
-        echo "  conditions, findings aggregation) lives in the COMMAND bodies, and Pi's slash commands"
-        echo "  are prompt templates that cannot dispatch agents. You cannot run /orchestrate (or any"
-        echo "  loop command) on Pi, with or without the extension — you get the 7 agents as"
-        echo "  dispatchable subagents and drive them yourself."
+        echo "✓ You got 4 of the 5 loop commands: /orchestrate, /skill-loop, /review-loop and /iterate are now"
+        echo "  Pi prompt templates (.pi/prompts/*.md) — type /orchestrate etc. exactly as in Claude"
+        echo "  Code. Each instructs the parent Pi session to dispatch the 7 ported agents"
+        echo "  (.pi/agents/*.md) via the pi-subagents 'subagent' tool; rounds, stop conditions and"
+        echo "  findings aggregation are unchanged from the source command. /session-review is NOT"
+        echo "  among them — see the warning printed above."
+        echo ""
+        echo "⚠ Pi only loads project .pi/ resources AFTER you TRUST the project. Interactive Pi asks"
+        echo "  on first start (or run /trust); non-interactive modes (-p, --mode json, --mode rpc)"
+        echo "  never ask and skip them unless defaultProjectTrust is 'always' or you pass --approve."
+        echo "  Until then these templates and agents are on disk and invisible."
+        echo ""
+        echo "⚠ This repo's /review-loop SHADOWS the /review-loop that pi-subagents itself ships"
+        echo "  (project prompts win over package prompts). If you were using the extension's own"
+        echo "  review loop, that name is now this repo's Loop 4. Rename either file to keep both."
+        echo ""
+        echo "⚠ The manual-only guardrail is preserved by CONSTRUCTION here, not by a matching field:"
+        echo "  a prompt template only ever expands when something types /name — nothing exposed to"
+        echo "  the model (no builtin tool, no pi-subagents tool) lets it invoke one itself. So"
+        echo "  /review-loop and /iterate stay human-fired on Pi, unlike on OpenCode/Kilo Code where"
+        echo "  the equivalent field is dropped outright."
         echo ""
         echo "⚠ correctness-critic lost WebSearch (pi-subagents has no verified equivalent builtin)."
         echo "  Its whole job is checking claims against the web; on Pi it cannot. Install"
         echo "  pi-web-access and add its tools to that agent's frontmatter, or do not rely on it here."
+        echo ""
+        echo "⚠ The 'model:' line in each ported agent (and none of the commands, which carry no"
+        echo "  model: field) is still a Claude alias (sonnet/fable/opus), which pi-subagents cannot"
+        echo "  resolve. Re-run with --lineup to stamp real provider/model ids, or edit by hand."
         ;;
     esac
     ;;
