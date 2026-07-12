@@ -108,6 +108,7 @@ Also detect: package manager (`pnpm-lock.yaml` → pnpm, `yarn.lock` → yarn, `
 | No self-approval | AGENTS.md documents that the implementer never approves its own diff | `grep -i "self.approv\|auto.aprob\|reviewer" AGENTS.md` |
 | Skills (personas) | A skills folder for domain personas (PM, dev, UX, etc.) | `ls .claude/skills/*/SKILL.md 2>/dev/null` |
 | Multi-harness portability | Same role conventions discoverable for Codex/Cursor (AGENTS.md mentions roles abstractly) | `grep -i "orchestrat\|implement\|review" AGENTS.md` |
+| Model line-up independence (D25, P2-8) | If a `model-lineup.json` exists (global or project), the reviewer role's model does not share a family with the implementer role's model | `node "${CLAUDE_PLUGIN_ROOT}/scripts/model-lineup.js" resolve --target claude --global ~/.agents/model-lineup.json --project .agents/model-lineup.json; echo $?` — `0` = independent, `2` = HARD violation (not confirmable); no lineup file at all is N/A, not FAIL. The script ships with the plugin, not with the audited repo, so the `${CLAUDE_PLUGIN_ROOT}` prefix is mandatory — a bare relative path exits 1 and reads exactly like "no lineup" |
 
 #### Pillar 3 — Automatic verification
 
@@ -203,11 +204,47 @@ For every ✗ or ⚠ item, propose a concrete fix using the stack's idioms (reci
 
 Preflight checks to always include: (1) AGENTS.md exists and ≤ 200 lines, (2) typecheck, (3) lint, (4) schema/config validation if runtime config exists, (5) domain-specific invariant if any. Preflight must exit non-zero on any failure — it is the loop's gate, not a log.
 
+### Step 4a — Resolve the model line-up (D25)
+
+Before emitting `develop-phase.js` in Step 4b, resolve which model plays which role instead of assuming
+the hardcoded Opus/Fable/Sonnet names below. The line-up is a project-portable file
+(`~/.agents/model-lineup.json`, harness-neutral — same schema `install.sh --lineup` reads), not a string
+baked into this skill.
+
+1. **Look for a line-up.** Resolve it with the script that ships with the plugin — `${CLAUDE_PLUGIN_ROOT}`
+   is mandatory (same convention as the `loop-stats.js` call in `/session-review`): the script lives with
+   the plugin, not with the repo being audited, so a bare relative path exits 1 and is indistinguishable
+   from "this project has no line-up".
+   ```bash
+   node "${CLAUDE_PLUGIN_ROOT}/scripts/model-lineup.js" resolve --target claude \
+     --global ~/.agents/model-lineup.json --project .agents/model-lineup.json
+   ```
+2. **Nothing found?** Propose the shipped `defaults` block (§Esquemas, D25 — Opus implementer, Fable
+   reviewer/scorer/architect/judge, Sonnet orchestrator/preflight/critic) as this project's line-up, and
+   **write `~/.agents/model-lineup.json` only with the human's consent**: "No model-lineup.json exists yet.
+   Set one up globally with these defaults (Opus implementer / Fable reviewer / Sonnet preflight)?" A no
+   means Step 4b uses the hardcoded table below for this run only — nothing gets written.
+3. **HARD guardrail (D25a, never confirmable).** If resolution exits `2` — the reviewer and implementer
+   share a model family — report the exact reason `model-lineup.js` printed and stop. Do **not** emit
+   `develop-phase.js` with a self-reviewing pair, and do not ask the human to override this: there is no
+   override.
+4. **SOFT guardrail (D25b, confirmable per project).** If the resolution reports a `softViolations` entry
+   (`model-lineup.js`'s `KNOWN_INVARIANTS` today ships one: it flags the role this repo retired its
+   cheapest, fastest tier from back on 2026-07-02), use **AskUserQuestion** to ask exactly what the
+   violation names, verbatim from `softViolations[].message`. A yes writes the exception into this
+   project's `.agents/model-lineup.json`
+   (`confirmedExceptions[]`, via `node "${CLAUDE_PLUGIN_ROOT}/scripts/model-lineup.js" record-exception`) — it never edits
+   `validate.js` or any global invariant. A no means: stop and let the human fix the line-up instead of
+   proceeding with an unconfirmed contradiction.
+5. **Unknown model id?** `unknownModels` in the output is a warning, not a blocker — note it in the audit
+   report and continue.
+6. Carry the resolved `{role: model}` map into Step 4b instead of the hardcoded Opus/Fable/Sonnet names.
+
 ### Step 4b — Emit the model-by-role develop-phase workflow (ALWAYS)
 
-**This step is mandatory for every audit**, regardless of project size or maturity. Write `.claude/workflows/develop-phase.js` at the repo root. This is the loop engine: Implementer (Opus) → Reviewer (Fable) → Preflight (Sonnet). Without model differentiation the loop degrades to self-critique-level accuracy; with an independent reviewer it catches materially more defects before merge. *(Provenance: the often-cited ~62% → ~89% figures are directional targets — not reproduced independently here. A reproducible A/B is planned: see `benchmarks/` (TODO) and WHITEPAPER §8.1. Until then, treat the gap as qualitative, not measured.)*
+**This step is mandatory for every audit**, regardless of project size or maturity. Write `.claude/workflows/develop-phase.js` at the repo root using the line-up resolved in Step 4a (fallback: Implementer=Opus → Reviewer=Fable → Preflight=Sonnet, the table below). Without model differentiation the loop degrades to self-critique-level accuracy; with an independent reviewer it catches materially more defects before merge. *(Provenance: the often-cited ~62% → ~89% figures are directional targets — not reproduced independently here. A reproducible A/B is planned: see `benchmarks/` (TODO) and WHITEPAPER §8.1. Until then, treat the gap as qualitative, not measured.)*
 
-**Model assignment rationale (current lineup: Opus 4.8 / Fable 5 / Sonnet 5 — a role/cost-fit heuristic, pending the benchmark above):**
+**Model assignment rationale (fallback lineup absent a resolved `model-lineup.json`: Opus 4.8 / Fable 5 / Sonnet 5 — a role/cost-fit heuristic, pending the benchmark above):**
 
 | Role | Model class | Why |
 |------|-------------|-----|

@@ -36,6 +36,7 @@ Re-check: after each change, only the affected checks; every 3 iterations, the f
 | "Tests should be high quality" | `grep -rL "expect\|assert" tests/ \| wc -l` → 0 test files without assertions |
 | "Memory should be up to date" | `grep -c "\[VERIFIED" docs/decisions/*.md` → ≥ 1, and `du -s docs/decisions \| cut -f1` → ≤ 200 (KB) |
 | "The reviewer should be independent" | `grep -ciE "refut\|reject\|evidence" .claude/agents/reviewer.md` → ≥ 1 |
+| "The model line-up should keep reviewer and implementer independent" | `node "${CLAUDE_PLUGIN_ROOT}/scripts/model-lineup.js" resolve --target claude --global ~/.agents/model-lineup.json --project .agents/model-lineup.json; echo $?` → exit `0` (exit `2` = P2-8 FAIL: reviewer shares the implementer's model family, D25a) |
 
 ## Complete example (excerpt)
 

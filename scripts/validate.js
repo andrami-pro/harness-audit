@@ -274,6 +274,57 @@ check('loop-stats degrades gracefully on the broken telemetry fixture', () => {
   return `${d.warnings} warnings · ${d.totals.runs} run survived`;
 });
 
+// D25a — the HARD guardrail is the one piece of F11 that must never have a confirmable escape
+// hatch: a lineup that puts the reviewer in the implementer's model family has to be rejected by
+// construction, not by a prompt someone can click through. So each fixture below pins an id shape
+// that reaches familyOf() and that a naive comparison lets through:
+//
+//   invalid-same-family ....... opus-4-7 vs opus-4-8 — same line, different version. A full-string
+//                               compare misses it.
+//   invalid-provider-qualified  nvidia-nim/claude-opus-4-8 vs claude-opus-4-8 — same weights behind
+//                               a provider prefix, and NOT a hypothetical: stampValue() emits
+//                               exactly this `provider/model` shape for multi-provider targets, so
+//                               a stamped value copied back into a lineup would blind the one rule
+//                               D25 declares non-confirmable.
+//   invalid-legacy-id ......... claude-3-5-sonnet-20241022 vs claude-sonnet-5 — the legacy id puts
+//                               the version BEFORE the tier, so a position-based parse reads the
+//                               family as "claude-3".
+//
+// Negative controls — each mutation applied, observed, reverted (2026-07-12, all exit 1):
+//   reviewer in invalid-same-family.json → claude-fable-5 (a genuinely different family) ..........
+//     resolve exited 0 instead of 2 → "accepted a lineup where reviewer and implementer share a
+//     model family (invalid-same-family.json) — the independence property (D25a) did not fire"
+//   familyOf's dropProvider() removed (tier read from the raw id, provider prefix intact) .........
+//     nvidia-nim/claude-opus-4-8 resolved to family "nvidia-nim/claude-opus-4" ≠ "claude-opus",
+//     resolve exited 0 → "…(invalid-provider-qualified.json) — the independence property (D25a)
+//     did not fire". This is the finding's own failure mode, not a neighbour's.
+//   familyOf's segment scan → positional /^claude-([a-z]+)-/ ......................................
+//     claude-3-5-sonnet-20241022 resolved to family "claude-3-5-sonnet" ≠ "claude-sonnet",
+//     resolve exited 0 → "…(invalid-legacy-id.json) — the independence property (D25a) did not fire"
+check('model-lineup.js rejects same-family reviewer/implementer fixtures', () => {
+  const script = path.join(ROOT, 'scripts/model-lineup.js');
+  mustExist('scripts/model-lineup.js');
+  execFileSync('node', ['--check', script], { stdio: 'pipe' });
+
+  execFileSync('node', [script, 'resolve', '--target', 'claude',
+    '--file', path.join(ROOT, 'scripts/fixtures/lineup/valid.json')], { stdio: 'pipe' });
+
+  const rejected = ['invalid-same-family.json', 'invalid-provider-qualified.json', 'invalid-legacy-id.json'];
+  for (const fixture of rejected) {
+    let status = null;
+    try {
+      execFileSync('node', [script, 'resolve', '--target', 'claude',
+        '--file', path.join(ROOT, 'scripts/fixtures/lineup', fixture)], { stdio: 'pipe' });
+    } catch (e) { status = e.status; }
+    if (status === null) {
+      throw new Error(`accepted a lineup where reviewer and implementer share a model family (${fixture}) — the independence property (D25a) did not fire`);
+    }
+    if (status !== 2) throw new Error(`${fixture}: expected exit 2 (hard violation), got ${status}`);
+  }
+
+  return `valid fixture resolves clean, ${rejected.length} same-family fixtures rejected (exit 2)`;
+});
+
 let failed = 0;
 for (const r of results) {
   failed += r.ok ? 0 : 1;

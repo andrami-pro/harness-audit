@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "defaults": {
+    "architect":    { "model": "claude-fable-5" },
+    "orchestrator": { "model": "claude-sonnet-5" },
+    "implementer":  { "model": "claude-sonnet-5" },
+    "reviewer":     { "model": "claude-3-5-sonnet-20241022" },
+    "preflight":    { "model": "claude-sonnet-5" },
+    "scorer":       { "model": "claude-fable-5" },
+    "critic":       { "model": "claude-sonnet-5" },
+    "judge":        { "model": "claude-fable-5" }
+  },
+  "harness": {}
+}

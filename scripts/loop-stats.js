@@ -47,7 +47,7 @@ const baseModel = (m) => String(m || 'unknown').replace(/\[[^\]]*\]$/, '').repla
 function parseArgs(argv) {
   const a = {
     root: path.join(os.homedir(), '.claude', 'projects'),
-    project: null, repo: null, sinceMs: null, html: null, json: false, top: 3,
+    project: null, repo: null, sinceMs: null, html: null, json: false, top: 3, lineup: null,
   };
   for (let i = 0; i < argv.length; i++) {
     const flag = argv[i];
@@ -56,6 +56,7 @@ function parseArgs(argv) {
     else if (flag === '--repo') a.repo = argv[++i];
     else if (flag === '--html') a.html = argv[++i];
     else if (flag === '--json') a.json = true;
+    else if (flag === '--lineup') a.lineup = argv[++i];
     else if (flag === '--top') {
       const n = Number.parseInt(argv[++i], 10);
       if (Number.isInteger(n) && n > 0) a.top = n;
@@ -414,12 +415,13 @@ function aggregate(args) {
   };
 
   const repo = args.repo ? parseRepo(args.repo) : { loopRuns: [], learnings: [] };
+  const agents = [...rows.values()].sort((a, b) => b.tokens - a.tokens);
 
   return {
     project: args.project,
     generatedAt: new Date().toISOString(),
     window: args.sinceMs ? new Date(args.sinceMs).toISOString() : 'all',
-    agents: [...rows.values()].sort((a, b) => b.tokens - a.tokens),
+    agents,
     totals,
     unpricedModels: [...unpriced],
     introPricedModels: [...introPriced],
@@ -428,8 +430,57 @@ function aggregate(args) {
     loopRuns: repo.loopRuns,
     learnings: repo.learnings,
     prompts: promptStats,
+    lineup: buildLineup(args, agents),
     warnings: warnings.length,
   };
+}
+
+// D25/F11 — configured vs. observed, free from telemetry that already carries message.model per
+// agent. This block is entirely optional: no model-lineup.json anywhere (global or project) means
+// no LINEUP block, not an error — most projects running loop-stats have never set one up.
+function buildLineup(args, agents) {
+  let lineupMod;
+  try { lineupMod = require('./model-lineup.js'); }
+  catch (e) { warn(`model-lineup.js unavailable — skipping LINEUP block (${e.code || e.message})`); return null; }
+
+  let lineup;
+  try {
+    if (args.lineup) {
+      lineup = JSON.parse(fs.readFileSync(args.lineup, 'utf8'));
+    } else {
+      const globalPath = path.join(os.homedir(), '.agents', 'model-lineup.json');
+      const projectPath = path.join(args.repo || process.cwd(), '.agents', 'model-lineup.json');
+      const g = fs.existsSync(globalPath) ? JSON.parse(fs.readFileSync(globalPath, 'utf8')) : null;
+      const p = fs.existsSync(projectPath) ? JSON.parse(fs.readFileSync(projectPath, 'utf8')) : null;
+      if (!g && !p) return null;
+      lineup = lineupMod.mergeLineups(g, p);
+    }
+  } catch (e) {
+    warn(`model-lineup.json unreadable — skipping LINEUP block (${e.message})`);
+    return null;
+  }
+
+  // The dashboard reads Claude Code's own transcripts — "configured" only makes sense against the
+  // target this machine is actually running, which is always 'claude' here.
+  const { resolved } = lineupMod.resolveLineup(lineup, 'claude');
+  const rows = [];
+  for (const role of lineupMod.ROLES) {
+    const cfg = resolved[role];
+    if (!cfg) continue;
+    const candidates = role === 'critic'
+      ? agents.filter((a) => /-critic$/.test(a.agentType))
+      : agents.filter((a) => a.agentType === role);
+    const observed = candidates.sort((a, b) => b.runs - a.runs)[0] || null;
+    rows.push({
+      role,
+      configured: cfg.model,
+      observedAgentType: observed ? observed.agentType : null,
+      observedModel: observed ? observed.model : null,
+      observedRuns: observed ? observed.runs : 0,
+      drift: !!(observed && baseModel(observed.model) !== baseModel(cfg.model)),
+    });
+  }
+  return rows.length ? rows : null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -470,6 +521,19 @@ function renderAnsi(d) {
   const allPriced = d.unpricedModels.length === 0;
   out.push(row(cols('TOTAL', String(d.totals.runs), human(d.totals.in), human(d.totals.out),
     human(d.totals.cacheRead), money(d.totals.costUsd, true) + (allPriced ? '' : '*'))));
+
+  if (d.lineup) {
+    const lnCols = (a, b, c) => ` ${clip(a, 12).padEnd(12)}${b.padStart(19)}${c.padStart(19)}`;
+    out.push(row(lnCols('LINEUP', 'CONFIGURED', 'OBSERVED')));
+    for (const r of d.lineup) {
+      const obs = r.observedModel ? `${short(r.observedModel)}${r.drift ? ' ⚠' : ''}` : '—';
+      out.push(row(lnCols(r.role, short(r.configured), obs)));
+    }
+    const drifted = d.lineup.filter((r) => r.drift);
+    if (drifted.length) {
+      out.push(row(` DRIFT     ${drifted.map((r) => `${r.role}: cfg ${short(r.configured)}, ran ${short(r.observedModel)}`).join(' · ')}`));
+    }
+  }
 
   const byName = new Map();
   for (const w of d.workflows) byName.set(w.name, (byName.get(w.name) || 0) + 1);
@@ -548,6 +612,11 @@ function renderHtml(d) {
       <td>${esc(r.loop)}</td><td>${r.rounds || '—'}</td><td>${esc(r.verdict || '—')}</td>
       <td class="dim">${esc(r.stoppedBy || '')}</td></tr>`).join('');
 
+  const lineupRows = (d.lineup || []).map((r) => `<tr><td class="k">${esc(r.role)}</td>
+      <td>${esc(short(r.configured))}</td>
+      <td class="${r.drift ? '' : 'dim'}">${r.observedModel ? esc(short(r.observedModel)) : '—'}${r.drift ? ' ⚠' : ''}</td>
+      <td class="dim">${r.observedRuns}</td></tr>`).join('');
+
   const learnRows = d.learnings.slice(0, 10).map((l) => `<tr><td class="k">${esc(l.date)}</td>
       <td>${esc(l.skill)}</td><td class="dim">${esc(l.entry)}</td></tr>`).join('');
 
@@ -602,6 +671,11 @@ function renderHtml(d) {
   </table></div>
   ${d.unpricedModels.length ? `<p class="sub">est.$ excludes unpriced models: ${esc(d.unpricedModels.join(', '))}</p>` : ''}
   ${d.introPricedModels.length ? `<p class="sub">priced at introductory rate: ${esc(d.introPricedModels.join(', '))}</p>` : ''}
+
+  ${section('Model line-up — configured vs. observed', lineupRows ? `<div class="scroll"><table>
+    <thead><tr><th>role</th><th>configured</th><th>observed</th><th>runs</th></tr></thead>
+    <tbody>${lineupRows}</tbody></table></div>
+    <p class="sub">⚠ = drift: the role ran on a different model family than model-lineup.json configures.</p>` : '')}
 
   <h2>Tokens per day</h2>
   <div class="chart">${bars}</div>

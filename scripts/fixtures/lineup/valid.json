@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "defaults": {
+    "architect":    { "model": "claude-fable-5" },
+    "orchestrator": { "model": "claude-sonnet-5" },
+    "implementer":  { "model": "claude-opus-4-8" },
+    "reviewer":     { "model": "claude-fable-5" },
+    "preflight":    { "model": "claude-sonnet-5" },
+    "scorer":       { "model": "claude-fable-5" },
+    "critic":       { "model": "claude-sonnet-5" },
+    "judge":        { "model": "claude-fable-5" }
+  },
+  "harness": {
+    "pi":   { "implementer": { "provider": "nvidia-nim", "model": "zai/glm-5.2" } },
+    "kilo": {}
+  }
+}
