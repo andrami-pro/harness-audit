@@ -1,0 +1,41 @@
+{
+  "run": "2026-01-09-skill-loop-demo-writer",
+  "loop": "skill-loop",
+  "skill": "demo-writer",
+  "evalTask": "ET-1",
+  "setup": {
+    "arms": "2 runs with-skill + 2 runs without-skill per round",
+    "blind": "the judge never learns which letter carries the skill",
+    "rubric": "5 criteria x 0-5 = /25"
+  },
+  "rounds": [
+    {
+      "n": 1,
+      "score": 15.0,
+      "startedAt": "2026-01-09T09:00:00.000Z",
+      "endedAt": "2026-01-09T09:20:00.000Z",
+      "tokens": { "in": 40000, "out": 6000 },
+      "arms": { "withSkill": [16, 14], "withoutSkill": [13, 13] },
+      "armTokens": {
+        "withSkill": { "in": 22000, "out": 3000 },
+        "withoutSkill": { "in": 18000, "out": 3000 }
+      },
+      "findings": []
+    },
+    {
+      "n": 2,
+      "score": 20.0,
+      "startedAt": "2026-01-09T10:00:00.000Z",
+      "endedAt": "2026-01-09T10:25:00.000Z",
+      "tokens": { "in": 44000, "out": 7000 },
+      "arms": { "withSkill": [22, 20], "withoutSkill": [15, 13] },
+      "armTokens": {
+        "withSkill": { "in": 26000, "out": 4500 },
+        "withoutSkill": { "in": 18000, "out": 2000 }
+      },
+      "findings": []
+    }
+  ],
+  "verdict": "IMPROVED",
+  "stoppedBy": "round-ceiling"
+}

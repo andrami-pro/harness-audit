@@ -157,6 +157,9 @@ Create `docs/harness-dev/loop-runs/` if it does not exist. Write
   "rubric": "harness-rubric.md",
   "rounds": [
     { "n": 1, "score": 84, "blockers": 2,
+      "startedAt": "2026-07-15T09:02:11Z",
+      "endedAt": "2026-07-15T09:48:55Z",
+      "tokens": { "in": 210000, "out": 24000 },
       "findings": [
         { "id": "R1-F1", "critic": "scorer", "severity": "blocker",
           "file": "src/lib/router.ts", "line": 0,
@@ -171,6 +174,11 @@ Create `docs/harness-dev/loop-runs/` if it does not exist. Write
 `severity`: `blocker` (a contract break — a failed blocker-class criterion, a false factual claim, a
 leaked secret, a broken build) · `major` (quality a client would notice) · `minor` (style).
 `critic`: `correctness | domain | safety | style | scorer`.
+
+`startedAt`, `endedAt` and `tokens` are the round's wall clock and what it cost, as the harness reported
+it when each Task returned. This loop is the expensive one, so the cost of a round is part of its result.
+Omit any field the harness did not surface — the dashboard reads an absent field as unmeasured and says
+so, and it has no way to tell a filled-in guess from a fact.
 
 Record **every** round, including the one that stopped the loop, and every finding of every round —
 not only the ones still open. The JSON is the run's evidence. A round with an empty `findings` array

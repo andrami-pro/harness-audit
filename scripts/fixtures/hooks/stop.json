@@ -1,0 +1,7 @@
+{
+  "hook_event_name": "Stop",
+  "session_id": "0f2c9b41-demo",
+  "transcript_path": "/home/demo/.claude/projects/demo/0f2c9b41-demo.jsonl",
+  "cwd": "/home/demo/projects/demo",
+  "stop_hook_active": false
+}

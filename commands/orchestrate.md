@@ -99,6 +99,9 @@ Create `docs/harness-dev/loop-runs/` if it does not exist. Write
   "loop": "orchestrate",
   "rounds": [
     { "n": 1, "score": null,
+      "startedAt": "2026-07-15T09:02:11Z",
+      "endedAt": "2026-07-15T09:24:03Z",
+      "tokens": { "in": 61000, "out": 8200 },
       "findings": [
         { "id": "R1-F1", "critic": "domain", "severity": "blocker",
           "file": "src/content/blog/es/empresa-ai-native.mdx", "line": 42,
@@ -113,6 +116,10 @@ Create `docs/harness-dev/loop-runs/` if it does not exist. Write
 `severity`: `blocker` (a contract break — locale contract, a false factual claim, a leaked secret, a
 broken build) · `major` (quality a client would notice) · `minor` (style).
 `critic`: `correctness | domain | safety | style | scorer`.
+
+`startedAt`, `endedAt` and `tokens` are the round's wall clock and what it cost, as the harness reported
+it when each Task returned. Omit any of them the harness did not surface — the dashboard reads an absent
+field as unmeasured and says so, and it has no way to tell a filled-in guess from a fact.
 `score` is `null` here: scoring needs a rubric, and this panel has critics instead. `/review-loop`
 fills it.
 

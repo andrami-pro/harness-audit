@@ -5,6 +5,7 @@
 
 const { execFileSync } = require('node:child_process');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 
 const ROOT = path.resolve(__dirname, '..');
@@ -198,6 +199,57 @@ check('hooks.json valid + every referenced script exists and parses', () => {
   return `${new Set(cmds).size} scripts`;
 });
 
+// The hook is the only writer of loop-telemetry.ndjson and the dashboard is the only reader: nothing
+// validates the line shape at runtime, and the hook swallows its own errors by design (a dashboard is
+// never worth failing a turn over). So a renamed field, a dropped agentType, or a line written for an
+// event the schema does not cover fails silently, in production, for weeks — the exact shape of escape
+// #4. This check is the only place that shape is asserted.
+//
+// Negative controls (2026-07-12, each applied, observed, reverted — all exit 1):
+//   `ts` dropped from the emitted line .............. "emitted line missing required key ts"
+//   EVENTS gate removed (every payload appended) .... "PreToolUse payload wrote a line — the hook must
+//                                                      only emit on SubagentStop|Stop"
+//   agentType stamped as p.agent_type ?? 'unknown' .. "Stop line carries agentType — an absent agent
+//                                                      type is a fact, not a hole to fill"
+check('loop-telemetry hook emits a schema-valid ndjson line', () => {
+  const script = path.join(ROOT, 'scripts/hooks/loop-telemetry.js');
+  mustExist('scripts/hooks/loop-telemetry.js');
+  execFileSync('node', ['--check', script], { stdio: 'pipe' });
+
+  const out = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'loop-telemetry-')), 'telemetry.ndjson');
+  const fire = (fixture) => execFileSync('node', [script], {
+    input: read(path.join('scripts/fixtures/hooks', fixture)),
+    env: { ...process.env, LOOP_TELEMETRY_FILE: out },
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+
+  fire('subagent-stop.json');
+  fire('stop.json');
+  fire('other-event.json');
+
+  const lines = fs.readFileSync(out, 'utf8').split('\n').filter(Boolean);
+  if (lines.length !== 2) {
+    throw new Error(`${lines.length} line(s) written, expected 2 — a PreToolUse payload wrote a line: the hook must only emit on SubagentStop|Stop`);
+  }
+
+  const KEYS = new Set(['event', 'ts', 'sessionId', 'agentType']);
+  const [sub, stop] = lines.map((l) => JSON.parse(l));
+  for (const line of [sub, stop]) {
+    for (const k of ['event', 'ts', 'sessionId']) {
+      if (typeof line[k] !== 'string' || !line[k]) throw new Error(`emitted line missing required key ${k}`);
+    }
+    for (const k of Object.keys(line)) if (!KEYS.has(k)) throw new Error(`emitted line carries unknown key ${k}`);
+    if (!Number.isFinite(Date.parse(line.ts))) throw new Error(`ts is not a parseable timestamp: ${line.ts}`);
+    if (line.sessionId !== '0f2c9b41-demo') throw new Error(`sessionId lost: ${line.sessionId}`);
+  }
+  if (sub.event !== 'SubagentStop' || stop.event !== 'Stop') throw new Error('event name not carried through');
+  if (sub.agentType !== 'implementer') throw new Error(`agentType lost: ${sub.agentType}`);
+  if ('agentType' in stop) throw new Error('Stop line carries agentType — an absent agent type is a fact, not a hole to fill');
+
+  fs.rmSync(path.dirname(out), { recursive: true, force: true });
+  return '2 lines · SubagentStop+agentType, Stop';
+});
+
 check('install.sh parses (sh -n)', () => {
   mustExist('install.sh');
   execFileSync('sh', ['-n', path.join(ROOT, 'install.sh')], { stdio: 'pipe' });
@@ -323,6 +375,195 @@ check('model-lineup.js rejects same-family reviewer/implementer fixtures', () =>
   }
 
   return `valid fixture resolves clean, ${rejected.length} same-family fixtures rejected (exit 2)`;
+});
+
+// The SAVINGS block is the one place this repo could lie at scale, so every path by which it could
+// print a number nobody measured is pinned here:
+//   · the A/B delta, recomputed from the raw arm scores and never trusted from the record's own `gap`;
+//   · the prediction tally, read from the ledger table only. The fixture's process-log.md carries the
+//     trap a real one carries: prose that still reads "Result: 0 escapes. VERIFIED." for a prediction
+//     the ledger records as FALSIFIED, kept unedited because the mis-measurement was the finding. A
+//     parser that greps the body scores that falsification as a success — the dishonesty D17 forbids;
+//   · the three ways of having no token Δ (never metered / metered per round but not per arm / one arm
+//     only), which must stay apart: a round total is both arms collapsed, so splitting it fabricates a
+//     Δ of 0, and an unmetered arm reads as 0 to anything that sums it — the Δ becomes the other arm;
+//   · the `{total}` shape, which is what a harness that never splits in/out can actually produce: both
+//     arms still ran, and refusing their Δ on a formatting technicality throws a measurement away;
+//   · the tally's `unknown`, which must reach the rendered line. A row the parser cannot read that is
+//     silently dropped reads as "0 falsified" — the ledger's falsification would vanish;
+//   · outcomes in Spanish as well as English: the plugin is English, the process-log it reads is not
+//     necessarily. An English-only parser turns a real Spanish ledger into a confident "0 falsified";
+//   · an absent ledger and one whose rows this parser cannot read, which are two different facts. One
+//     return value for both makes the block print a false why about a file that exists.
+//
+// Negative controls (2026-07-12, each applied, observed, reverted — all exit 1):
+//   the outcome matched against the whole document instead of the row's outcome cell ...............
+//     "predictions: 0 verified / 3 falsified / 0 pending / 0 unknown, expected 1/1/1/0" — the parser
+//     stops reading the ledger and starts reading prose, which is the failure this check exists for
+//   OUTCOME ordered verified-before-falsified, so a corrected row keeps its superseded word .........
+//     "predictions: 2 verified / 0 falsified / 1 pending / 0 unknown, expected 1/1/1/0" — the ledger's
+//     falsification read as a win, because the row that carries both words was scored on the wrong one
+//   abRuns trusting the record's own `gap` field instead of recomputing from the arms ...............
+//     "A/B deltaScore = undefined, expected 7 (mean 21 with-skill − mean 14 without)"
+//   armTokens falling back to the round's collapsed tokens, `last.armTokens || (last.tokens && {...})`
+//     — the plausible shortcut, not an impossible one ...............................................
+//     "round-metered A/B must report deltaTokens n/a, got 0 — a round total is both arms collapsed"
+//   OUTCOME reduced to its Spanish spellings (/falsad/, /verificad/, /pendiente/) ...................
+//     "predictions: 0 verified / 0 falsified / 0 pending / 3 unknown, expected 1/1/1/0"
+//   the `unknown` row dropped from renderSavings ...................................................
+//     "the render hides 1 unreadable row(s) — a dropped row reads as '0 falsified'"
+//   renderSavings printing a fixed "not recorded (v1 schema)" instead of the record's own reason ....
+//     "the unmetered reason never reaches the rendered line" — the v2 record was told it was v1
+//   armTotal reading in/out only, so a harness that reports one number per run measures nothing ......
+//     "total-shape A/B deltaTokens = 0, expected 9000 — a harness that reports one number per run
+//      still measured both arms" — 0, not n/a: the shape it cannot read sums to zero on both arms
+//   armTokens accepted with one arm present, the missing arm summed as 0 ............................
+//     "one-arm A/B must report deltaTokens n/a, got 30000 — a round total is both arms collapsed"
+//   parsePredictions returning the same `null` for an absent file and for a ledger it parsed no row
+//   from (`if (!rows.length) return null`) — the render then states "/iterate has never run here"
+//   about a process-log.md that exists and carries a falsification .................................
+//     "a present ledger this parser cannot read is reported as absent: 'PREDICT no process-log.md —
+//      /iterate has never run here'"
+check('loop-stats scores the savings fixture from the ledger, not the prose', () => {
+  const script = path.join(ROOT, 'scripts/loop-stats.js');
+  const stats = (repo, ...flags) => execFileSync('node', [script,
+    '--root', path.join(ROOT, 'scripts/fixtures/telemetry'), '--project', 'demo', '--repo', repo, ...flags],
+  { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+
+  const { savings } = JSON.parse(stats(path.join(ROOT, 'scripts/fixtures/repo'), '--json'));
+
+  const p = savings.predictions;
+  if (p.verified !== 1 || p.falsified !== 1 || p.pending !== 1 || p.unknown !== 0) {
+    throw new Error(`predictions: ${p.verified} verified / ${p.falsified} falsified / ${p.pending} pending / ${p.unknown} unknown, expected 1/1/1/0`);
+  }
+  if (p.rows.find((r) => r.version === 'v2').outcome !== 'falsified') {
+    throw new Error('the falsified prediction was scored from the superseded prose, not the ledger');
+  }
+
+  const [ab] = savings.ab;
+  if (!ab) throw new Error('A/B run lost — no counterfactual row');
+  if (ab.deltaScore !== 7) throw new Error(`A/B deltaScore = ${ab.deltaScore}, expected 7 (mean 21 with-skill − mean 14 without)`);
+  if (ab.scoreMax !== 25) throw new Error(`A/B scoreMax = ${ab.scoreMax}, expected 25`);
+  if (ab.deltaTokens !== 10500) throw new Error(`A/B deltaTokens = ${ab.deltaTokens}, expected 10500 (v2 per-arm tokens)`);
+
+  const arms = { withSkill: [20], withoutSkill: [10] };
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'loop-savings-'));
+  const runs = path.join(tmp, 'docs/harness-dev/loop-runs');
+  fs.mkdirSync(runs, { recursive: true });
+  // Neither record can yield a token counterfactual, and each must say a different true reason why:
+  // one was never metered, the other was metered per round — a total that already contains both arms.
+  fs.writeFileSync(path.join(runs, '2026-01-01-skill-loop-unmetered.json'),
+    JSON.stringify({ run: 'unmetered', loop: 'skill-loop', rounds: [{ n: 1, arms }] }));
+  fs.writeFileSync(path.join(runs, '2026-01-02-skill-loop-round-metered.json'), JSON.stringify({
+    run: 'round-metered',
+    loop: 'skill-loop',
+    rounds: [{ n: 1, arms, startedAt: '2026-01-02T10:00:00Z', endedAt: '2026-01-02T10:12:00Z', tokens: { in: 41000, out: 6200 } }],
+  }));
+  // A harness that reports one number per run and no in/out split still produced the counterfactual:
+  // both arms ran. Refusing its `{total}` shape would drop a measured Δ on a formatting technicality.
+  fs.writeFileSync(path.join(runs, '2026-01-03-skill-loop-total-shape.json'), JSON.stringify({
+    run: 'total-shape',
+    loop: 'skill-loop',
+    rounds: [{ n: 1, arms, armTokens: { withSkill: { total: 30000 }, withoutSkill: { total: 21000 } } }],
+  }));
+  // One arm metered is no counterfactual at all: the missing arm reads as 0 to any code that sums it,
+  // and the Δ becomes the whole cost of the arm that was measured.
+  fs.writeFileSync(path.join(runs, '2026-01-04-skill-loop-one-arm.json'), JSON.stringify({
+    run: 'one-arm',
+    loop: 'skill-loop',
+    rounds: [{ n: 1, arms, armTokens: { withSkill: { in: 26000, out: 4000 } } }],
+  }));
+  // The private ledger this dashboard was built for is written in Spanish, and one of its rows is a
+  // falsification. Plus a row whose outcome is neither language: it must surface as unreadable.
+  fs.writeFileSync(path.join(runs, 'process-log.md'), [
+    '| v | fecha | cambio | predicción | resuelve | resultado |',
+    '|---|---|---|---|---|---|',
+    '| v1 | 2026-01-02 | §1 | rondas bajan de 4 a 3 | la próxima corrida | **VERIFICADA** — 3 rondas |',
+    '| v2 | 2026-01-09 | §0 | escapes ≤ 1 | el próximo commit | **FALSADA — ≥3 escapes** |',
+    '| v3 | 2026-01-16 | §3 | se reporta, no se resuelve en silencio | la próxima fase | pendiente |',
+    '| v4 | 2026-01-23 | §2 | menos rondas | la próxima corrida | se verá |',
+    '',
+  ].join('\n'));
+
+  const out = JSON.parse(stats(tmp, '--json'));
+  const byRun = Object.fromEntries(out.savings.ab.map((a) => [a.run, a]));
+  const ansiTmp = stats(tmp);
+
+  const total = byRun['total-shape'];
+  if (!total || total.deltaTokens !== 9000) {
+    throw new Error(`total-shape A/B deltaTokens = ${total && total.deltaTokens}, expected 9000 — a harness that reports one number per run still measured both arms`);
+  }
+
+  for (const [run, reason] of [
+    ['unmetered', /no tokens recorded/i],
+    ['round-metered', /not per arm/i],
+    ['one-arm', /only one arm/i],
+  ]) {
+    const a = byRun[run];
+    if (!a) throw new Error(`A/B run ${run} lost`);
+    if (a.deltaTokens !== null) throw new Error(`${run} A/B must report deltaTokens n/a, got ${a.deltaTokens} — a round total is both arms collapsed`);
+    if (!reason.test(a.tokensReason || '')) throw new Error(`${run} A/B states a false reason: "${a.tokensReason}"`);
+    // The reason has to reach the screen, not just the JSON: a rendered reason that contradicts the
+    // record ("v1 schema") is a false why on a block whose whole contract is to show a true one.
+    if (!reason.test(ansiTmp)) throw new Error(`the ${run} reason never reaches the rendered line`);
+  }
+
+  const es = out.savings.predictions;
+  if (es.verified !== 1 || es.falsified !== 1 || es.pending !== 1 || es.unknown !== 1) {
+    throw new Error(`Spanish ledger: ${es.verified} verified / ${es.falsified} falsified / ${es.pending} pending / ${es.unknown} unknown, expected 1/1/1/1`);
+  }
+  if (!/1 unreadable/.test(ansiTmp)) {
+    const line = (ansiTmp.split('\n').find((l) => l.includes('PREDICT')) || '').trim();
+    throw new Error(`the render hides ${es.unknown} unreadable row(s) — a dropped row reads as "0 falsified": "${line}"`);
+  }
+  // A ledger whose columns this parser cannot read is not an absent ledger. The PRD never fixed the
+  // table's shape, so the row it carries a falsification in may parse to nothing here — and "no
+  // process-log.md, /iterate has never run" would then be a false why about a file that exists.
+  const blind = fs.mkdtempSync(path.join(os.tmpdir(), 'loop-blind-'));
+  const blindRuns = path.join(blind, 'docs/harness-dev/loop-runs');
+  fs.mkdirSync(blindRuns, { recursive: true });
+  fs.writeFileSync(path.join(blindRuns, 'process-log.md'), [
+    '| v | fecha | cambio | predicción | resultado |',
+    '|---|---|---|---|---|',
+    '| v1 | 2026-01-09 | §0 | escapes ≤ 1 | ❌ FALSADA — 10 findings |',
+    '',
+  ].join('\n'));
+  const blindAnsi = stats(blind);
+  const blindLine = (blindAnsi.split('\n').find((l) => l.includes('PREDICT')) || '').trim();
+  if (!/ledger unreadable/.test(blindAnsi) || /never run/.test(blindLine)) {
+    throw new Error(`a present ledger this parser cannot read is reported as absent: "${blindLine}"`);
+  }
+  fs.rmSync(blind, { recursive: true, force: true });
+  fs.rmSync(tmp, { recursive: true, force: true });
+
+  return `Δscore +${ab.deltaScore}/25 · Δtok +${ab.deltaTokens} · en+es ledgers · unreadable rows and unreadable ledger rendered`;
+});
+
+// A schema field no command writes is vapour: the dashboard reads it, a fixture in this very file
+// proves it renders, and no run in the wild will ever carry it. That is process.md §0 one layer up —
+// a capability nothing can feed is a wish, not a feature — and it is how the Δ tokens row shipped its
+// first round: green against a fixture the same diff had written, while `grep -rn armTokens commands/`
+// returned nothing. This check binds each consumer field to the command that has to produce it.
+//
+// Negative controls (2026-07-12, each applied, observed, reverted — both exit 1):
+//   `armTokens` struck from commands/skill-loop.md .. "skill-loop must instruct armTokens: the Δ tokens
+//                                                      row of loop-stats has no other producer"
+//   `startedAt` struck from commands/iterate.md ..... "iterate writes a loop-runs JSON but never
+//                                                      instructs the v2 round field(s): startedAt"
+check('every loop command produces the v2 schema the dashboard reads', () => {
+  const V2 = ['startedAt', 'endedAt', 'tokens'];
+  for (const cmd of ['orchestrate', 'iterate', 'review-loop', 'skill-loop']) {
+    const src = read(`commands/${cmd}.md`);
+    const missing = V2.filter((f) => !src.includes(`"${f}"`));
+    if (missing.length) {
+      throw new Error(`${cmd} writes a loop-runs JSON but never instructs the v2 round field(s): ${missing.join(', ')}`);
+    }
+  }
+  const ab = read('commands/skill-loop.md');
+  if (!ab.includes('"armTokens"') || !/withSkill[\s\S]{0,120}withoutSkill/.test(ab)) {
+    throw new Error('skill-loop must instruct armTokens: the Δ tokens row of loop-stats has no other producer');
+  }
+  return '4 commands instruct startedAt/endedAt/tokens · skill-loop instructs armTokens';
 });
 
 let failed = 0;

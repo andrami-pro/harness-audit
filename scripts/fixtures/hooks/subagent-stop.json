@@ -1,0 +1,8 @@
+{
+  "hook_event_name": "SubagentStop",
+  "session_id": "0f2c9b41-demo",
+  "transcript_path": "/home/demo/.claude/projects/demo/0f2c9b41-demo.jsonl",
+  "cwd": "/home/demo/projects/demo",
+  "agent_type": "implementer",
+  "stop_hook_active": false
+}

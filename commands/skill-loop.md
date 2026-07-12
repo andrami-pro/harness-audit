@@ -73,6 +73,13 @@ round, no other run's output.
 **Two runs per arm — not one, not three.** One run is a single draw from a noisy process: it cannot
 tell a skill from a lucky day. Three costs fifty percent more and narrows the interval by very little.
 
+**Record what each of the four runs cost.** The harness reports a run's token usage when its Task
+returns: write it down as it comes in, and at the close of the round sum the two runs of each arm into
+`armTokens` (§8). Both arms answered the same task on the same model, so the difference between those
+two sums is the only token counterfactual this system has — and a round total is the two arms already
+collapsed into one number, which can never yield it. If a run came back with no usage attached, leave
+`armTokens` out of the round and say so in the report: an unmeasured cost is `n/a`, never an estimate.
+
 ## 4. The blind judge
 
 One judge, one pass, four outputs, labelled `A1 A2 B1 B2`. It scores each on the pinned rubric, per
@@ -164,8 +171,15 @@ Create `docs/harness-dev/loop-runs/` if it does not exist. Write
   "evalTask": "ET-1",
   "rounds": [
     { "n": 1, "score": 21,
+      "startedAt": "2026-07-15T09:02:11Z",
+      "endedAt": "2026-07-15T09:31:40Z",
       "blindMap": { "A": "with-skill", "B": "without-skill" },
       "arms": { "withSkill": [21, 20], "withoutSkill": [14, 13] },
+      "armTokens": {
+        "withSkill": { "in": 26000, "out": 4500 },
+        "withoutSkill": { "in": 18000, "out": 2000 }
+      },
+      "tokens": { "in": 44000, "out": 6500 },
       "gap": 7,
       "change": "one line — the edit the improver applied to SKILL.md",
       "findings": [] }
@@ -178,6 +192,13 @@ Create `docs/harness-dev/loop-runs/` if it does not exist. Write
 `score` is the with-skill arm's mean, out of 25 — the headline number of the round. `gap` is what the
 loop is actually for. `blindMap` records which letter carried the skill, so the blinding is auditable
 after the fact instead of taken on trust.
+
+`startedAt`, `endedAt` and `tokens` are the round fields every loop writes. `armTokens` is this loop's
+alone, and it is what `loop-stats` turns into the Δ tokens it prints beside the Δ score: each arm is the
+sum of that arm's two runs. Write `in`/`out` when the harness reports the split and `{ "total": N }`
+when it reports only a total — a total split across `in`/`out` by hand is a number nobody measured.
+Omit `armTokens` when no usage came back at all: the dashboard then prints `n/a` and the reason, which
+is true, where a filled-in guess would not be.
 
 `verdict`: `IMPROVED` (final gap positive and grown since round 1) · `NO-VALUE` (gap within noise) ·
 `REGRESSED` (final gap below round 1). A measurement is not approved or rejected — it comes out how it

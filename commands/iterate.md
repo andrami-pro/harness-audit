@@ -162,6 +162,9 @@ Create `docs/harness-dev/loop-runs/` if it does not exist. Write
   "rubric": "harness-rubric.md",
   "rounds": [
     { "n": 1, "score": 78, "blockers": 1,
+      "startedAt": "2026-07-15T09:02:11Z",
+      "endedAt": "2026-07-15T09:37:20Z",
+      "tokens": { "in": 120000, "out": 15000 },
       "findings": [
         { "id": "R1-F1", "critic": "scorer", "severity": "blocker",
           "file": "src/lib/router.ts", "line": 0,
@@ -182,6 +185,10 @@ leaked secret, a broken build) · `major` (quality a client would notice) · `mi
 Record **every** round, and both trends: `score` is the app's, `processChange` is the process's. A round
 where the optimizer changed nothing records `"processChange": "none"` — that is a result, and it is the
 one that stops the loop.
+
+`startedAt`, `endedAt` and `tokens` are the round's wall clock and what it cost, as the harness reported
+it when each Task returned. Omit any field the harness did not surface — the dashboard reads an absent
+field as unmeasured and says so, and it has no way to tell a filled-in guess from a fact.
 
 ## 7. Report
 

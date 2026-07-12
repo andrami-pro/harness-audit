@@ -282,13 +282,121 @@ function parseWorkflows(sessionDir) {
   return { runs, turns };
 }
 
+// D17 — a "saving" exists only where a counterfactual was actually measured. Exactly three sources
+// qualify: (a) the two arms of a skill-loop A/B, both of which ran; (b) the optimizer's falsifiable
+// predictions, resolved in process-log.md; (c) rounds-to-green, and only as a labelled proxy. A
+// multiplier ("this saved you 3 hours", "2x productivity") is never one of them. A figure with no
+// counterfactual behind it gets no row — the block prints why it cannot show one instead.
+
+const mean = (xs) => xs.reduce((n, x) => n + x, 0) / xs.length;
+
+// An arm is recorded as the harness reported it: `in`/`out` where it splits the usage, `{total}` where
+// it only returns one number (commands/skill-loop.md §8). Both shapes are the same measurement; the
+// split is not reconstructed from a total, because a reconstructed split is a guess wearing two fields.
+const armTotal = (x) => (x && (x.total != null || x.in != null || x.out != null)
+  ? (x.total != null ? num(x.total) : num(x.in) + num(x.out))
+  : null);
+
+// Both arms ran the same eval-task, same model, same tools; the only difference is the skill. The
+// arithmetic is redone here from the raw arm scores rather than trusted from the record's own `gap`
+// field: a gate that believes a number it was handed is not a gate.
+function abRuns(records) {
+  const out = [];
+  for (const j of records) {
+    if (j.loop !== 'skill-loop' || !Array.isArray(j.rounds)) continue;
+    const rounds = j.rounds.filter((r) => r && r.arms
+      && Array.isArray(r.arms.withSkill) && r.arms.withSkill.length
+      && Array.isArray(r.arms.withoutSkill) && r.arms.withoutSkill.length);
+    if (!rounds.length) continue;
+
+    const last = rounds[rounds.length - 1];
+    const scoreMax = Number((/\/(\d+)/.exec((j.setup && j.setup.rubric) || '') || [])[1]) || null;
+
+    // Only per-arm totals are a token counterfactual. A round's own `tokens` is the two arms already
+    // collapsed into one number, so splitting it across the arms would fabricate a Δ of 0 — "the skill
+    // was free" — out of a quantity nobody measured. The three ways of having no Δ are reported apart,
+    // because a block whose contract is "show why it cannot measure" may not print a false why.
+    const t = last.armTokens || {};
+    const withSkill = armTotal(t.withSkill);
+    const withoutSkill = armTotal(t.withoutSkill);
+    const armTokens = withSkill !== null && withoutSkill !== null ? { withSkill, withoutSkill } : null;
+    const metered = rounds.some((r) => r.tokens && (r.tokens.in != null || r.tokens.out != null));
+    const tokensReason = armTokens ? null
+      : withSkill !== null || withoutSkill !== null ? 'only one arm metered — a Δ needs both'
+        : metered ? 'metered per round, not per arm'
+          : 'no tokens recorded on this run';
+
+    out.push({
+      run: j.run,
+      subject: j.skill || j.task || j.run,
+      rounds: rounds.length,
+      deltaScore: mean(last.arms.withSkill) - mean(last.arms.withoutSkill),
+      scoreMax,
+      deltaTokens: armTokens ? armTokens.withSkill - armTokens.withoutSkill : null,
+      tokensReason,
+    });
+  }
+  return out;
+}
+
+// The ledger is the table at the top of process-log.md, and only the table. The prose below it may
+// still carry the superseded "verified" of a prediction the ledger records as falsified — kept
+// unedited on purpose, because the mis-measurement is the finding. Reading the body would count that
+// falsification as a success, which is the exact dishonesty D17 exists to forbid. Falsification wins
+// any row that carries both markers.
+//
+// Outcomes are read in English and in Spanish: the plugin is English (D14), but the process-log it
+// reads is written by whoever runs the loop, in their language. An outcome in neither is `unknown` and
+// is rendered as such — a row this parser cannot read must never fall into the silent 0 of "falsified".
+const OUTCOME = [
+  ['falsified', /falsad|falsifi|❌/i],
+  ['verified', /verificad|verified|✅/i],
+  ['pending', /pendiente|pending|⏳/i],
+];
+//
+// Absent and unreadable are two different facts and get two different returns. Collapsing them into
+// one `null` makes the render state "the loop never ran here" about a file that exists and may carry
+// a falsification — a block whose contract is to show why it cannot measure may not print a false why.
+function parsePredictions(repo) {
+  const file = path.join(repo, 'docs', 'harness-dev', 'loop-runs', 'process-log.md');
+  const unreadable = (why) => ({ unreadable: why, verified: 0, falsified: 0, pending: 0, unknown: 0, rows: [] });
+  let text;
+  try { text = fs.readFileSync(file, 'utf8'); } catch (e) {
+    if (e.code === 'ENOENT') return null;
+    warn(`${file}: ${e.code}`);
+    return unreadable(e.code);
+  }
+
+  const rows = [];
+  for (const line of text.split('\n')) {
+    if (!line.trim().startsWith('|')) continue;
+    const cells = line.split('|').slice(1, -1).map((c) => c.trim());
+    if (cells.length < 6 || !/^v\d+$/.test(cells[0])) continue;
+    const result = cells[5];
+    const outcome = (OUTCOME.find(([, re]) => re.test(result)) || ['unknown'])[0];
+    rows.push({ version: cells[0], date: cells[1], change: cells[2], prediction: cells[3], outcome });
+  }
+  if (!rows.length) return unreadable('no ledger row parsed');
+
+  const tally = (o) => rows.filter((r) => r.outcome === o).length;
+  return {
+    verified: tally('verified'),
+    falsified: tally('falsified'),
+    pending: tally('pending'),
+    unknown: tally('unknown'),
+    rows,
+  };
+}
+
 // --repo: the loop's own paper trail. Findings JSON per run, plus the skill journals it wrote.
 function parseRepo(repo) {
   const loopRuns = [];
+  const records = [];
   const runsDir = path.join(repo, 'docs', 'harness-dev', 'loop-runs');
   for (const f of ls(runsDir).filter((f) => f.endsWith('.json'))) {
     const j = readJson(path.join(runsDir, f));
     if (!j) continue;
+    records.push(j);
     loopRuns.push({
       run: j.run || f.replace(/\.json$/, ''),
       loop: j.loop || 'unknown',
@@ -320,7 +428,19 @@ function parseRepo(repo) {
   };
   walk(repo, 0);
   learnings.sort((a, b) => b.date.localeCompare(a.date));
-  return { loopRuns, learnings };
+
+  // (c) rounds-to-green: a trend, not a saving. It is reported labelled and never priced — nobody
+  // measured what those rounds would have cost without the loop, so no counterfactual exists.
+  const green = loopRuns
+    .filter((r) => r.loop === 'develop-phase' && r.verdict === 'APROBADO' && r.rounds)
+    .sort((a, b) => String(a.date).localeCompare(String(b.date)));
+
+  const savings = {
+    ab: abRuns(records),
+    predictions: parsePredictions(repo),
+    roundsToGreen: green.length ? { proxy: true, trend: green.map((r) => r.rounds), runs: green.map((r) => r.run) } : null,
+  };
+  return { loopRuns, learnings, savings };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -414,7 +534,7 @@ function aggregate(args) {
     top: [...counts.values()].sort((a, b) => b.count - a.count).slice(0, args.top),
   };
 
-  const repo = args.repo ? parseRepo(args.repo) : { loopRuns: [], learnings: [] };
+  const repo = args.repo ? parseRepo(args.repo) : { loopRuns: [], learnings: [], savings: null };
   const agents = [...rows.values()].sort((a, b) => b.tokens - a.tokens);
 
   return {
@@ -429,6 +549,7 @@ function aggregate(args) {
     workflows,
     loopRuns: repo.loopRuns,
     learnings: repo.learnings,
+    savings: repo.savings,
     prompts: promptStats,
     lineup: buildLineup(args, agents),
     warnings: warnings.length,
@@ -504,6 +625,46 @@ function sparkline(timeline) {
   return bars.map((b) => SPARK[Math.max(0, Math.ceil((b.tokens / max) * 8) - 1)]).join('');
 }
 
+const signed = (n, digits = 1) => `${n >= 0 ? '+' : '−'}${Math.abs(n).toFixed(digits)}`;
+
+function renderSavings(s) {
+  const out = [];
+  if (!s) {
+    out.push(row(' SAVINGS   no counterfactual in scope — pass --repo <path>'));
+    return out;
+  }
+  out.push(row(' SAVINGS   measured only — no multipliers, no estimates'));
+
+  if (s.ab.length) {
+    // Every A/B run is printed, not a top-N: a two-armed run that measured nothing is the row this
+    // block most needs on screen, and a cap would drop it under the ones that came out well.
+    for (const a of s.ab) {
+      const denom = a.scoreMax ? `/${a.scoreMax}` : '';
+      out.push(row(`   A/B     ${clip(a.subject, 22).padEnd(22)}  Δscore ${signed(a.deltaScore)}${denom}`));
+      out.push(row(a.deltaTokens === null
+        ? `           Δtok n/a — ${a.tokensReason}`
+        : `           Δtok ${signed(a.deltaTokens, 0)} (with-skill − without)`));
+    }
+  } else {
+    out.push(row('   A/B     none — /skill-loop is the only two-armed loop'));
+  }
+
+  const p = s.predictions;
+  out.push(row(!p
+    ? '   PREDICT no process-log.md — /iterate has never run here'
+    : p.unreadable
+      ? `   PREDICT process-log.md present, ledger unreadable (${p.unreadable})`
+      : `   PREDICT ${p.verified} verified · ${p.falsified} falsified · ${p.pending} pending`));
+  // A row this parser could not read is shown, never dropped: dropping it reads as "0 falsified".
+  if (p && p.unknown) out.push(row(`           ${p.unknown} unreadable — outcome in no known wording`));
+
+  const g = s.roundsToGreen;
+  out.push(row(g
+    ? `   PROXY   rounds-to-green ${g.trend.join(' · ')} (proxy, not a saving)`
+    : '   PROXY   rounds-to-green: no approved develop-phase run'));
+  return out;
+}
+
 function renderAnsi(d) {
   const out = [];
   const date = d.generatedAt.slice(0, 10);
@@ -571,6 +732,8 @@ function renderAnsi(d) {
     if (w.resultLine) out.push(row(`   ${w.runId} · ${w.resultLine}`));
   }
 
+  out.push(...renderSavings(d.savings));
+
   const p = d.prompts;
   out.push(row(` PROMPTS   ${p.total} user turns · ${p.avgWords.toFixed(1)} words avg · ${p.sessionsPerDay.toFixed(1)} sess/day`));
   out.push(row(`           ${Math.round(p.followUpRate * 100)}% follow-ups (proxy: turn after agent turn)`));
@@ -578,7 +741,7 @@ function renderAnsi(d) {
     out.push(row(`   ×${t.count} «${t.sample.replace(/\s+/g, ' ')}»`));
   }
 
-  out.push(`└── v1 · savings need a counterfactual — see /skill-loop ┘`);
+  out.push(`└── v2 · measured counterfactuals only · no multipliers ─┘`);
   if (!allPriced) out.push(`  * est.$ excludes unpriced models: ${d.unpricedModels.join(', ')}`);
   if (d.introPricedModels.length) out.push(`  * priced at introductory rate: ${d.introPricedModels.join(', ')}`);
   return out.join('\n');
@@ -616,6 +779,28 @@ function renderHtml(d) {
       <td>${esc(short(r.configured))}</td>
       <td class="${r.drift ? '' : 'dim'}">${r.observedModel ? esc(short(r.observedModel)) : '—'}${r.drift ? ' ⚠' : ''}</td>
       <td class="dim">${r.observedRuns}</td></tr>`).join('');
+
+  const s = d.savings;
+  const abRows = (s && s.ab.length ? s.ab : []).map((a) => `<tr><td class="k">${esc(a.subject)}</td>
+      <td>${a.rounds}</td><td>${signed(a.deltaScore)}${a.scoreMax ? `/${a.scoreMax}` : ''}</td>
+      <td class="${a.deltaTokens === null ? 'dim' : ''}">${a.deltaTokens === null ? 'n/a' : signed(a.deltaTokens, 0)}</td>
+      <td class="dim">${esc(a.tokensReason || 'per-arm tokens recorded (v2)')}</td></tr>`).join('');
+
+  const predRows = (s && s.predictions ? s.predictions.rows : []).map((r) => `<tr><td class="k">${esc(r.version)}</td>
+      <td>${esc(r.date)}</td><td class="dim">${esc(r.change)}</td>
+      <td class="dim">${esc(clip(r.prediction, 70))}</td><td>${esc(r.outcome)}</td></tr>`).join('');
+
+  const savingsBody = s ? `${abRows ? `<div class="scroll"><table>
+    <thead><tr><th>A/B run</th><th>rounds</th><th>Δ score</th><th>Δ tokens</th><th>note</th></tr></thead>
+    <tbody>${abRows}</tbody></table></div>` : '<p class="sub">No two-armed run in scope — /skill-loop is the only loop that produces one.</p>'}
+    <p class="sub">${!s.predictions
+    ? 'No process-log.md — /iterate has never run in this repo.'
+    : s.predictions.unreadable
+      ? `process-log.md is present but its ledger is unreadable (${esc(String(s.predictions.unreadable))}) — <b>no prediction counted</b>, and that is not the same as none falsified.`
+      : `Optimizer predictions (process-log.md ledger): <b>${s.predictions.verified} verified · ${s.predictions.falsified} falsified · ${s.predictions.pending} pending · ${s.predictions.unknown} unreadable</b>`}<br>
+    ${s.roundsToGreen ? `Rounds-to-green: ${s.roundsToGreen.trend.join(' · ')} — <b>proxy, explicitly not a saving</b>: nobody measured what those rounds would have cost without the loop.` : 'Rounds-to-green: no approved develop-phase run in scope.'}<br>
+    Δ score and Δ tokens compare the two arms of an A/B that both ran. Nothing here is a multiplier, and
+    an unmeasured quantity is printed n/a with its reason — never estimated.</p>` : '<p class="sub">No counterfactual in scope — pass --repo &lt;path&gt; to read loop-runs and process-log.md.</p>';
 
   const learnRows = d.learnings.slice(0, 10).map((l) => `<tr><td class="k">${esc(l.date)}</td>
       <td>${esc(l.skill)}</td><td class="dim">${esc(l.entry)}</td></tr>`).join('');
@@ -688,6 +873,12 @@ function renderHtml(d) {
     <thead><tr><th>date</th><th>loop</th><th>rounds</th><th>verdict</th><th>stopped by</th></tr></thead>
     <tbody>${loopRows}</tbody></table></div>` : '')}
 
+  <h2>Savings — measured counterfactuals only</h2>
+  ${savingsBody}
+  ${section('Optimizer predictions', predRows ? `<div class="scroll"><table>
+    <thead><tr><th>v</th><th>date</th><th>change</th><th>prediction</th><th>outcome</th></tr></thead>
+    <tbody>${predRows}</tbody></table></div>` : '')}
+
   ${section('Learnings', learnRows ? `<div class="scroll"><table>
     <thead><tr><th>date</th><th>skill</th><th>entry</th></tr></thead>
     <tbody>${learnRows}</tbody></table></div>` : '')}
@@ -700,8 +891,9 @@ function renderHtml(d) {
     writes one too, and nothing in the format marks it apart from a keystroke — so these are turns, not keystrokes.</p>
   <div class="scroll"><table><tbody>${topRows}</tbody></table></div>
 
-  <footer>v1 · savings need a counterfactual — see /skill-loop. Every figure above is measured from
-  local transcripts; est.$ is list price × measured tokens, never a multiplier.</footer>
+  <footer>v2 · every figure above is measured from local transcripts and the repo's own loop records;
+  est.$ is list price × measured tokens, never a multiplier, and a saving with no counterfactual behind
+  it is not shown — the reason it cannot be shown is.</footer>
 </main>`;
 }
 
