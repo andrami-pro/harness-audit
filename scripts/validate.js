@@ -108,17 +108,21 @@ check('every agents/*.md has a frontmatter description', () => {
   return `${files.length} agent(s) checked`;
 });
 
-// Pins the command count the README's loop catalog promises (4: skill-loop, orchestrate, review-loop,
-// iterate — Loop 1 is a pattern, not a command, by design). A 5th command shipped without updating the
-// README catalog would drift silently; so would a command that lost its argument-hint, which is the
-// piece `/command` autocomplete and the SlashCommand tool both read to know how to call it.
+// Pins the command count the README's loop catalog promises (5: skill-loop, orchestrate, review-loop,
+// iterate, session-review — Loop 1 is a pattern, not a command, by design). A 6th command shipped without
+// updating the README catalog would drift silently; so would a command that lost its argument-hint, which
+// is the piece `/command` autocomplete and the SlashCommand tool both read to know how to call it.
+//
+// The cap is the anti-proliferation gate: five commands for the five loops that have one (Loop 1 is a
+// pattern, not a command), and a sixth file has to argue for itself in the PRD before it argues for
+// itself here. F10 raised the cap from 4 to 5 for session-review.
 //
 // Negative control (2026-07-12, both reverted): argument-hint stripped from commands/iterate.md — exit 1,
-// "commands/iterate.md frontmatter missing argument-hint"; a 5th command copied in — exit 1,
-// "commands/*.md = 5, expected exactly 4".
-check('exactly 4 loop commands, each with description + argument-hint', () => {
+// "commands/iterate.md frontmatter missing argument-hint"; a 6th command copied in — exit 1,
+// "commands/*.md = 6, expected exactly 5".
+check('exactly 5 loop commands, each with description + argument-hint', () => {
   const files = globMd('commands');
-  if (files.length !== 4) throw new Error(`commands/*.md = ${files.length}, expected exactly 4`);
+  if (files.length !== 5) throw new Error(`commands/*.md = ${files.length}, expected exactly 5`);
   for (const rel of files) {
     hasFrontmatterField(rel, 'description');
     hasFrontmatterField(rel, 'argument-hint');

@@ -7,7 +7,7 @@
 // parser depends on are pinned in scripts/fixtures/telemetry/ so validate.js sees the break.
 //
 //   node scripts/loop-stats.js [--project <slug>] [--root <dir>] [--repo <path>]
-//                              [--since 7d] [--html <out>] [--json]
+//                              [--since 7d] [--top 3] [--html <out>] [--json]
 
 'use strict';
 
@@ -47,7 +47,7 @@ const baseModel = (m) => String(m || 'unknown').replace(/\[[^\]]*\]$/, '').repla
 function parseArgs(argv) {
   const a = {
     root: path.join(os.homedir(), '.claude', 'projects'),
-    project: null, repo: null, sinceMs: null, html: null, json: false,
+    project: null, repo: null, sinceMs: null, html: null, json: false, top: 3,
   };
   for (let i = 0; i < argv.length; i++) {
     const flag = argv[i];
@@ -56,6 +56,11 @@ function parseArgs(argv) {
     else if (flag === '--repo') a.repo = argv[++i];
     else if (flag === '--html') a.html = argv[++i];
     else if (flag === '--json') a.json = true;
+    else if (flag === '--top') {
+      const n = Number.parseInt(argv[++i], 10);
+      if (Number.isInteger(n) && n > 0) a.top = n;
+      else warn('--top expects a positive integer — ignored, using 3');
+    }
     else if (flag === '--since') {
       const m = /^(\d+)d$/.exec(argv[++i] || '');
       if (m) a.sinceMs = Date.now() - Number(m[1]) * 864e5;
@@ -405,7 +410,7 @@ function aggregate(args) {
     avgWords: prompts.length ? words / prompts.length : 0,
     sessionsPerDay: perDay.size ? [...perDay.values()].reduce((n, s) => n + s.size, 0) / perDay.size : 0,
     followUpRate: prompts.length ? prompts.filter((p) => p.isFollowUp).length / prompts.length : 0,
-    top: [...counts.values()].sort((a, b) => b.count - a.count).slice(0, 3),
+    top: [...counts.values()].sort((a, b) => b.count - a.count).slice(0, args.top),
   };
 
   const repo = args.repo ? parseRepo(args.repo) : { loopRuns: [], learnings: [] };

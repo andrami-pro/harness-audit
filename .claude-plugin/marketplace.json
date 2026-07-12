@@ -8,7 +8,7 @@
     {
       "name": "harness-audit",
       "source": "./",
-      "description": "Harness audit methodology (four pillars, executable rubric, independent verifier) + the five loops that converge against it (/orchestrate, /skill-loop, /review-loop, /iterate, plus the stateless preflight pattern) + a zero-token telemetry dashboard (loop-stats.js) + write-time security guards."
+      "description": "Harness audit methodology (four pillars, executable rubric, independent verifier) + the six loops that converge against it (/orchestrate, /skill-loop, /review-loop, /iterate, /session-review, plus the stateless preflight pattern) + a zero-token telemetry dashboard (loop-stats.js) + write-time security guards."
     }
   ]
 }

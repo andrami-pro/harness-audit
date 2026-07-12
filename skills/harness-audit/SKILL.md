@@ -318,7 +318,7 @@ If the project has no PRD folder yet, use `TASKS.md` or the equivalent task-trac
 
 **Loop dispatch criteria — include this template in the audit report AND write it into the project's
 `AGENTS.md` (or its harness-specific delta file) so any session applies it without being asked.** It
-covers all five loops this package ships, not only `develop-phase`, at three levels — the difference
+covers all six loops this package ships, not only `develop-phase`, at three levels — the difference
 between the levels is who is allowed to spend the project's token budget:
 
 ```
@@ -355,14 +355,17 @@ Loop dispatch criteria
    approves or overrides to continue in a normal session.
 
 3. SUGGEST-ONLY — the agent may name these and say why they fit, but may
-   NEVER launch them itself. Both ship with disable-model-invocation: true
-   for exactly this reason — an auto-dispatched deep review burns a real
-   budget without consent.
+   NEVER launch them itself. All three ship with disable-model-invocation:
+   true for exactly this reason — an auto-dispatched deep review burns a
+   real budget without consent, and an auto-dispatched review of the human
+   is worse: it was never asked for.
      • /review-loop — whole-app or whole-corpus verification, rare and
        token-hungry. Say: "This looks like a /review-loop case (whole app,
        not one feature) — want me to run it?" and stop there.
      • /iterate — multi-requirement feature where the *process* itself is
        worth improving. Say so, then wait.
+     • /session-review — the operator loop. Name it after a session that
+       went in circles or before a harness review. The human fires it.
 
 Scheduled (optional, level between 1 and 3): /skill-loop on a weekly cadence
 once a skill earns it — set up via the scheduling mechanism your harness

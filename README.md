@@ -64,7 +64,7 @@ It detects the stack automatically, audits the four pillars, grades loop-readine
 
 A minimal harness beats an inflated one: trimming tooling tends to make agents faster, not weaker.
 
-## The five loops — which one do you need?
+## The six loops — which one do you need?
 
 | Your situation | Loop | Command | Cost | Stops when |
 |---|---|---|---|---|
@@ -73,6 +73,7 @@ A minimal harness beats an inflated one: trimming tooling tends to make agents f
 | "Four specialist reviewers on this draft/PR" | 3 · Multi-agent review | `/orchestrate <paths>` | medium | no new blocker/major (max 3) |
 | "Deep audit of the whole app — rare, token-hungry" | 4 · Verification | `/review-loop [max-iter]` · plus the `develop-phase` workflow the audit generates per repo | high | score ≥ 90 ∧ 0 blockers (max 5) |
 | "Improve the *process* that builds the product" | 5 · Workflow improvement | `/iterate <task>` | high | score ≥ 90 ∧ optimizer out of proposals (max 5) |
+| "Improve how *I* drive the agent — fully local" | 6 · Operator | `/session-review [--since 30d]` | med-low | single pass; re-run weekly |
 
 **Honesty rule for this table:** a loop only gets a row once it has at least one real, recorded run — a findings
 JSON (or, for the process loop, a settled prediction) in the operating repo's `docs/harness-dev/loop-runs/`.
@@ -153,6 +154,25 @@ one. Stops only when both subjects are still: score ≥ 90, zero blockers, and t
 *Recorded:* one settled entry in `process-log.md` — the optimizer's first bounded change to a real process
 spec, its prediction graded ✅ verified by the following phase.
 
+### Loop 6 · Operator — `/session-review [--since 30d] [--top 20]`
+
+Loops 1–5 improve the work. This one improves the person driving it — the loop the other five leave open.
+It reads the transcripts Claude Code already writes on your disk, counts what recurs (free — a script, not
+a context window), then spends **one** agent pass on the sampled top-N to say what the recurrence *means*.
+It returns **growth-edge cards**: the prompt you keep retyping (→ a skill), the correction you keep issuing
+(→ an `AGENTS.md` rule), the dispatch you keep doing by hand (→ a dispatch criterion). Its outputs are the
+other loops' inputs. It **proposes and never applies** — you promote, same contract the reviewer has with
+your `AGENTS.md`. Single pass; re-run it weekly.
+
+**Nothing leaves your machine.** No upload, no account, no proxy — the analysis runs where the transcripts
+already are. Your prompts are the rawest artifact you own; a dashboard is not worth trading them for.
+
+*Recorded:* a real 30-day run over 27 sessions / 165 human prompts — 5 cards, each with a verbatim quote
+and an event-deduplicated count. Two findings from that run are now rules of the command itself: prompts a
+loop writes to its own subagents are **byte-identical** to human keystrokes in the transcript (filter them
+by shape, or your top card is the harness admiring its reflection), and counts are **event** counts, not
+record counts (the same message sent twice in eight seconds is one correction).
+
 ### When NOT to use each one
 
 Loops are not free, and the wrong one is worse than none.
@@ -163,6 +183,7 @@ Loops are not free, and the wrong one is worse than none.
 | `/skill-loop` (2 arms × 2 runs × ≤ 4 rounds + judge) | med-high | a skill you use less than once a week |
 | `/review-loop` (critic fan-out × ≤ 5) | high · token-hungry | every commit. Only a large app or corpus, and rarely |
 | `/iterate` (builder + scorer + optimizer × ≤ 5) | high | bug fixes, one-file changes — a feature that converges in round 1 teaches the process nothing |
+| `/session-review` (free stats + 1 pass over top-N) | med-low | daily runs — a growth edge needs enough sessions to be an edge and not a bad afternoon |
 | `loop-stats.js` | free (local script, zero tokens) | — run it as often as you like |
 
 ### How loops activate
@@ -178,10 +199,14 @@ Three levels, and the difference between them is who is allowed to spend your bu
    Live visibility at dispatch; `loop-stats` gives it in retrospect.
 3. **Scheduled — optional.** `/skill-loop` on a weekly schedule, once a skill earns it.
 
-The two expensive loops are **manual-only**: `/review-loop` and `/iterate` ship with
-`disable-model-invocation: true`. A model may notice that a task is the right shape for one and say so in a
-line; it may never fire one. An auto-dispatched deep review burns a real budget without consent, and the
-guardrail is cheaper than the apology.
+Three loops are **manual-only**, shipping with `disable-model-invocation: true`. A model may notice that a
+task is the right shape for one and say so in a line; it may never fire one.
+
+- `/review-loop` and `/iterate`, because of **cost**. An auto-dispatched deep review burns a real budget
+  without consent, and the guardrail is cheaper than the apology.
+- `/session-review`, because of **consent**. It is cheap; that is not the point. Its subject is the human,
+  and an agent that decides on its own to analyze how you work has not saved you a step — it has reviewed
+  you without asking.
 
 ### Watch them run
 
@@ -196,6 +221,7 @@ node scripts/loop-stats.js --project <slug>       # a different project's teleme
 node scripts/loop-stats.js --root <dir>           # telemetry root (default: ~/.claude/projects)
 node scripts/loop-stats.js --repo <path>          # read loop-runs/ + LEARNINGS.md from another repo
 node scripts/loop-stats.js --since 7d             # window the report to the last N days
+node scripts/loop-stats.js --top 20               # how many recurring prompts to surface (default 3)
 node scripts/loop-stats.js --html out.html        # retro-terminal (CRT) report you can share
 node scripts/loop-stats.js --json                 # the same aggregate, machine-readable
 ```
