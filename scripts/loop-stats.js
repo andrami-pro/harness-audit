@@ -29,7 +29,7 @@ const PRICE_PER_MTOK = {
   'claude-fable-5': { in: 10, out: 50 },
   'claude-mythos-5': { in: 10, out: 50 },
   'claude-opus-4-5': { in: 5, out: 25 },
-  'claude-sonnet-5': { in: 3, out: 15 },
+  'claude-sonnet-5': { in: 3, out: 15, intro: { in: 2, out: 10, until: '2026-08-31' } },
   'claude-sonnet-4-6': { in: 3, out: 15 },
   'claude-sonnet-4-5': { in: 3, out: 15 },
   'claude-haiku-4-5': { in: 1, out: 5 },
@@ -88,7 +88,10 @@ function readJson(file) {
   catch (e) { warn(`${path.basename(file)}: ${e.code || 'unparseable'} — skipped`); return null; }
 }
 
-const ls = (dir) => { try { return fs.readdirSync(dir); } catch { return []; } };
+const ls = (dir) => {
+  try { return fs.readdirSync(dir); }
+  catch (e) { if (e.code !== 'ENOENT') warn(`${dir}: ${e.code}`); return []; }
+};
 
 // Zero-token records are Claude Code's synthetic placeholders, not model calls.
 function usageOf(rec) {
@@ -107,10 +110,18 @@ function usageOf(rec) {
   return usage.tokens > 0 ? usage : null;
 }
 
-function costOf(model, u) {
+// Priced by the record's own timestamp, not today's — an intro-window run still bills at intro rate late.
+function priceFor(model, ts) {
   const p = PRICE_PER_MTOK[baseModel(model)];
-  if (!p) return null;
-  return (u.in * p.in + u.out * p.out + u.cacheRead * p.in * 0.1 + u.cw5 * p.in * 1.25 + u.cw1 * p.in * 2) / 1e6;
+  if (!p || !p.intro) return p || null;
+  const when = Number.isFinite(Date.parse(ts)) ? Date.parse(ts) : Date.now();
+  return when <= Date.parse(`${p.intro.until}T23:59:59Z`) ? { ...p.intro, isIntro: true } : p;
+}
+
+function costOf(price, u) {
+  if (!price) return null;
+  return (u.in * price.in + u.out * price.out + u.cacheRead * price.in * 0.1
+    + u.cw5 * price.in * 1.25 + u.cw1 * price.in * 2) / 1e6;
 }
 
 // Tool results, meta caveats, slash-command wrappers and injected reminders all arrive under the same
@@ -245,7 +256,9 @@ function parseWorkflows(sessionDir) {
     let verdict = null;
     if (record.result && typeof record.result.approved === 'boolean') {
       verdict = record.result.approved ? 'APROBADO' : 'RECHAZADO';
-    } else if (record.status) verdict = String(record.status).toUpperCase();
+    }
+    // A run status ("completed") is not a verdict — kept apart and lowercased, never APROBADO/RECHAZADO.
+    const state = !verdict && record.status ? String(record.status).toLowerCase() : null;
 
     runs.push({
       runId: wfId,
@@ -254,6 +267,7 @@ function parseWorkflows(sessionDir) {
       durationMs: Math.max(...stamps) - startedAt,
       rounds,
       verdict,
+      state,
       tokens,
       resultLine,
       agents,
@@ -331,6 +345,13 @@ function aggregate(args) {
     workflows = workflows.concat(wf.runs);
   }
 
+  // Unparseable timestamps can't be windowed or bucketed — keeping them lands a bar under literal "undefined".
+  turns = turns.filter((t) => {
+    if (Number.isFinite(Date.parse(t.ts))) return true;
+    warn(`turn with unparseable timestamp (${t.agentType}·${t.model}) — skipped`);
+    return false;
+  });
+
   const inWindow = (ts) => args.sinceMs === null || Date.parse(ts) >= args.sinceMs;
   turns = turns.filter((t) => inWindow(t.ts));
   prompts = prompts.filter((p) => inWindow(p.ts));
@@ -342,12 +363,15 @@ function aggregate(args) {
   // would let a renamed subkey reprice every 1h write as a 5m one without changing any visible total.
   const totals = { runs: 0, in: 0, out: 0, cacheRead: 0, cacheWrite: 0, cacheWrite5m: 0, cacheWrite1h: 0, tokens: 0, costUsd: 0 };
   const unpriced = new Set();
+  const introPriced = new Set();
   for (const t of turns) {
     const model = baseModel(t.model);
     const key = `${t.agentType}·${model}`;
     const r = rows.get(key) || { agentType: t.agentType, model, runs: 0, in: 0, out: 0, cacheRead: 0, cacheWrite: 0, tokens: 0, costUsd: 0, priced: true };
-    const c = costOf(model, t.usage);
+    const price = priceFor(model, t.ts);
+    const c = costOf(price, t.usage);
     if (c === null) { r.priced = false; unpriced.add(model); }
+    else if (price.isIntro) introPriced.add(`${model} ($${price.in}/$${price.out} thru ${price.until})`);
     r.runs++; r.in += t.usage.in; r.out += t.usage.out;
     r.cacheRead += t.usage.cacheRead; r.cacheWrite += t.usage.cw5 + t.usage.cw1;
     r.tokens += t.usage.tokens; r.costUsd += c || 0;
@@ -393,6 +417,7 @@ function aggregate(args) {
     agents: [...rows.values()].sort((a, b) => b.tokens - a.tokens),
     totals,
     unpricedModels: [...unpriced],
+    introPricedModels: [...introPriced],
     timeline: [...days.entries()].sort().map(([date, tokens]) => ({ date, tokens })),
     workflows,
     loopRuns: repo.loopRuns,
@@ -450,7 +475,7 @@ function renderAnsi(d) {
   const last = d.workflows[0];
   const lastName = last && last.name !== last.runId ? ` ${clip(last.name, 16)}` : '';
   out.push(row(last
-    ? ` LAST RUN  ${last.runId.slice(0, 9)}${lastName} · ${last.rounds ? `${last.rounds} rd · ` : ''}${last.verdict || 'in flight'}`
+    ? ` LAST RUN  ${last.runId.slice(0, 9)}${lastName} · ${last.rounds ? `${last.rounds} rd · ` : ''}${last.verdict || last.state || 'in flight'}`
     : ' LAST RUN  none in window'));
 
   if (d.workflows.length) {
@@ -459,7 +484,7 @@ function renderAnsi(d) {
     out.push(row(wfCols('WORKFLOW', 'WHEN', 'DUR', 'RD', 'TOKENS', 'VERDICT')));
     for (const w of d.workflows.slice(0, 5)) {
       out.push(row(wfCols(w.name, w.startedAt.slice(5, 10), duration(w.durationMs),
-        w.rounds ? String(w.rounds) : '—', human(w.tokens), w.verdict || '—')));
+        w.rounds ? String(w.rounds) : '—', human(w.tokens), w.verdict || w.state || '—')));
     }
   }
 
@@ -486,6 +511,7 @@ function renderAnsi(d) {
 
   out.push(`└── v1 · savings need a counterfactual — see /skill-loop ┘`);
   if (!allPriced) out.push(`  * est.$ excludes unpriced models: ${d.unpricedModels.join(', ')}`);
+  if (d.introPricedModels.length) out.push(`  * priced at introductory rate: ${d.introPricedModels.join(', ')}`);
   return out.join('\n');
 }
 
@@ -510,7 +536,7 @@ function renderHtml(d) {
       <td class="k">${esc(w.runId)}</td><td>${esc(w.name)}</td>
       <td>${esc(w.startedAt.slice(0, 16).replace('T', ' '))}</td>
       <td>${duration(w.durationMs)}</td><td>${w.rounds || '—'}</td>
-      <td>${human(w.tokens)}</td><td>${esc(w.verdict || '—')}</td>
+      <td>${human(w.tokens)}</td><td class="${w.verdict ? '' : 'dim'}">${esc(w.verdict || w.state || '—')}</td>
       <td class="dim">${esc(clip(w.resultLine || '', 60))}</td></tr>`).join('');
 
   const loopRows = d.loopRuns.slice(0, 10).map((r) => `<tr><td class="k">${esc(r.date || '?')}</td>
@@ -559,7 +585,7 @@ function renderHtml(d) {
 </style>
 <main>
   <h1>LOOP-STATS ▓ ${esc(d.project)}</h1>
-  <p class="sub">${esc(d.generatedAt.slice(0, 16).replace('T', ' '))} · window: ${esc(d.window)} · ${d.totals.runs} agent runs · ${human(d.totals.tokens)} tokens${d.warnings ? ` · ${d.warnings} skipped lines` : ''}</p>
+  <p class="sub">${esc(d.generatedAt.slice(0, 16).replace('T', ' '))} · window: ${esc(d.window)} · ${d.totals.runs} agent runs · ${human(d.totals.tokens)} tokens${d.warnings ? ` · ${d.warnings} parse warnings` : ''}</p>
 
   <h2>Tokens by agent × model</h2>
   <div class="scroll"><table>
@@ -570,6 +596,7 @@ function renderHtml(d) {
       <td>${human(d.totals.cacheWrite)}</td><td>${d.totals.costUsd.toFixed(2)}</td></tr></tfoot>
   </table></div>
   ${d.unpricedModels.length ? `<p class="sub">est.$ excludes unpriced models: ${esc(d.unpricedModels.join(', '))}</p>` : ''}
+  ${d.introPricedModels.length ? `<p class="sub">priced at introductory rate: ${esc(d.introPricedModels.join(', '))}</p>` : ''}
 
   <h2>Tokens per day</h2>
   <div class="chart">${bars}</div>
@@ -608,8 +635,8 @@ function main() {
   catch (e) { process.stderr.write(`loop-stats: ${e.message}\n`); process.exit(1); }
 
   if (args.html) {
-    fs.writeFileSync(args.html, renderHtml(data));
-    process.stderr.write(`loop-stats: wrote ${args.html}\n`);
+    try { fs.writeFileSync(args.html, renderHtml(data)); process.stderr.write(`loop-stats: wrote ${args.html}\n`); }
+    catch (e) { process.stderr.write(`loop-stats: cannot write ${args.html}: ${e.code}\n`); process.exit(1); }
   }
   process.stdout.write(args.json ? `${JSON.stringify(data, null, 2)}\n` : `${renderAnsi(data)}\n`);
 }

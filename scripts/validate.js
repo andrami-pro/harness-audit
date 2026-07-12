@@ -202,6 +202,26 @@ check('loop-stats reconstructs the pinned telemetry fixture', () => {
   return `${d.totals.runs} runs · ${d.workflows.length} workflow · $${d.totals.costUsd.toFixed(2)} est.`;
 });
 
+// The clean fixture above only proves the happy path — a check that can only PASS is not a gate
+// (process.md §0). This second fixture pins a truncated line and a non-JSON line, so a regression that
+// turns readJsonl's skip-with-warning into a crash breaks CI, not a reverted manual mutation.
+//
+// Negative control: readJsonl's per-line try/catch removed (JSON.parse(line) left unguarded) —
+// the truncated line now throws past parseSession into aggregate(), which aborts the whole run instead
+// of skipping the one line: `loop-stats: Unterminated string in JSON at position 169 (line 1 column 170)`,
+// exit 1 — and this check fails with it. Reverted (2026-07-12).
+check('loop-stats degrades gracefully on the broken telemetry fixture', () => {
+  const script = path.join(ROOT, 'scripts/loop-stats.js');
+  const raw = execFileSync('node', [script, '--root', path.join(ROOT, 'scripts/fixtures/telemetry'),
+    '--project', 'demo-broken', '--json'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  const d = JSON.parse(raw);
+
+  if (d.warnings !== 2) throw new Error(`warnings = ${d.warnings}, expected 2 (truncated line + non-JSON line)`);
+  if (d.totals.runs !== 1) throw new Error(`totals.runs = ${d.totals.runs}, expected 1 — only the clean turn should survive`);
+
+  return `${d.warnings} warnings · ${d.totals.runs} run survived`;
+});
+
 let failed = 0;
 for (const r of results) {
   failed += r.ok ? 0 : 1;
