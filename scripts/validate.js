@@ -35,7 +35,8 @@ const hasFrontmatterField = (rel, field) => {
   const s = read(rel);
   if (!/^---\n/.test(s)) throw new Error(`${rel} missing frontmatter`);
   const fm = s.split('---')[1] ?? '';
-  if (!new RegExp(`${field}:\\s*\\S+`).test(fm)) throw new Error(`${rel} frontmatter missing ${field}`);
+  // `\s` spans the newline: `field:\s*\S+` reads the NEXT key's name as this field's value.
+  if (!new RegExp(`^${field}:[ \\t]*\\S`, 'm').test(fm)) throw new Error(`${rel} frontmatter missing ${field}`);
 };
 
 check('plugin.json valid + required fields', () => {
@@ -53,11 +54,8 @@ check('marketplace.json valid + lists the plugin', () => {
 });
 
 check('SKILL.md exists with name + description frontmatter', () => {
-  const s = read('skills/harness-audit/SKILL.md');
-  if (!/^---\n/.test(s)) throw new Error('no frontmatter');
-  const fm = s.split('---')[1];
-  if (!/name:\s*\S+/.test(fm)) throw new Error('frontmatter missing name');
-  if (!/description:\s*\S+/.test(fm)) throw new Error('frontmatter missing description');
+  hasFrontmatterField('skills/harness-audit/SKILL.md', 'name');
+  hasFrontmatterField('skills/harness-audit/SKILL.md', 'description');
 });
 
 check('companion templates present', () => {
