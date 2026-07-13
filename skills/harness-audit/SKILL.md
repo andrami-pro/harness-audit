@@ -238,7 +238,23 @@ baked into this skill.
    proceeding with an unconfirmed contradiction.
 5. **Unknown model id?** `unknownModels` in the output is a warning, not a blocker — note it in the audit
    report and continue.
-6. Carry the resolved `{role: model}` map into Step 4b instead of the hardcoded Opus/Fable/Sonnet names.
+6. **Re-stamp the audited project's own agent role files.** `resolveLineup()`'s output already carries a
+   `stamp` value per role — the exact string `install.sh --lineup` writes into a frontmatter `model:`
+   field. Apply that same value here, because this is the one path `install.sh` cannot reach: a project
+   that received harness-audit via `/plugin marketplace add` + `/plugin install` never runs `install.sh`,
+   so without this step its own `.claude/agents/*.md` would keep whatever `model:` they were created with
+   forever, no matter what the human's line-up says. For every file in the audited project's
+   `.claude/agents/` (or the harness's equivalent folder) whose `name:` frontmatter matches a role in
+   `model-lineup.js`'s `ROLES` list (`implementer`, `reviewer`, `orchestrator`, `preflight`, `scorer`,
+   `critic`, `judge`, `architect`) and that role is present in `resolved`, edit that file's `model:` line to
+   `resolved[role].stamp`. Skip a role absent from `resolved` (nothing configured for it — leave the file
+   alone) and a file whose `name:` matches nothing in `ROLES` (a project-specific agent keeps whatever
+   `model:` it already has; this step only re-stamps roles it can identify by name). Only reach this step
+   once step 3 raised no HARD violation and step 4's SOFT violations, if any, are confirmed or the project
+   line-up already carries the exception — never re-stamp under an open, unresolved contradiction. This
+   applies identically regardless of which branch got you here: a line-up step 1 found already in place, or
+   one step 2 just wrote with consent — existing or fresh, the project's own agents end up carrying it.
+7. Carry the resolved `{role: model}` map into Step 4b instead of the hardcoded Opus/Fable/Sonnet names.
 
 ### Step 4b — Emit the model-by-role develop-phase workflow (ALWAYS)
 

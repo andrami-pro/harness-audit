@@ -1,0 +1,12 @@
+{
+  "//": "Copy to private-terms.json (gitignored) and fill in. These are the terms that must NEVER reach a public file: client names, prospect names, your private domain contract, internal project codenames. validate.js hunts them in commands/, agents/, benchmarks/ and fixtures/ before you publish.",
+  "//substring": "Matched anywhere, including glued to a neighbour (`acme` fires on `acme_agent`). This is the default: a leak rarely arrives surrounded by spaces.",
+  "substring": [
+    "acme-corp",
+    "internal-codename"
+  ],
+  "//fenced": "Matched only when NOT surrounded by letters. Use for short terms that hide inside innocent words — a bare `xx-yy` would fire on `files-config`.",
+  "fenced": [
+    "xx-yy"
+  ]
+}

@@ -1,6 +1,6 @@
 ---
 name: domain-critic
-description: The domain seat on the critic panel — the only one that has to be taught. Enforces the project's domain contract: locale/market fit, parity between locales, URL and slug conventions, and who the artifact is written for. Ships as a template; customize the Domain contract section, or shadow this file from your project. Use inside /orchestrate or /review-loop; it never edits.
+description: "The domain seat on the critic panel — the only one that has to be taught. Enforces the project's domain contract: locale/market fit, parity between locales, URL and slug conventions, and who the artifact is written for. Ships as a template; customize the Domain contract section, or shadow this file from your project. Use inside /orchestrate or /review-loop; it never edits."
 tools: Read, Grep, Glob, Bash
 model: sonnet
 ---

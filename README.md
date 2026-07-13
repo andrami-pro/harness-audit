@@ -97,6 +97,43 @@ It detects the stack automatically, audits the four pillars, grades loop-readine
 
 A minimal harness beats an inflated one: trimming tooling tends to make agents faster, not weaker.
 
+## The default model line-up (and why you can't just delete `model:`)
+
+Every file in `agents/` ships with a `model:` field — `sonnet` on the four critics
+(`correctness-critic.md`, `domain-critic.md`, `safety-critic.md`, `style-critic.md`), `fable` on the
+scorer. Those are not a preference baked in for convenience; they are this repo's **default** line-up,
+checked into the template so the plugin works the moment you install it, before it knows anything about
+your harness or your provider.
+
+**Why not just delete the field and let every agent inherit whatever model your session happens to be
+running?** Because a single HARD guardrail (D25a) stands on it: the reviewer/critic role must never
+share a model family with the implementer role, or "independent review" collapses into self-critique
+wearing a different badge — Pillar 2 (multi-agent role separation) falls apart in silence, not with an
+error. Delete `model:` everywhere and every agent — the shipped critics and scorer, and whatever
+`implementer.md` / `reviewer.md` your own project defines in its `.claude/agents/` — runs in whatever
+model expanded it, the same "no field, no opinion" behavior the 5 loop commands already rely on (none of
+them carries a `model:` field either — see [Compatibility across harnesses](#compatibility-across-harnesses)).
+Push that same default-to-the-session behavior onto the agents that are supposed to check each other's
+work, and a reviewer stops being a second pair of eyes: it becomes a mirror of the implementer, because
+both just became the one model your session is running.
+
+**How to change the defaults for your context** (three ways, one shared schema):
+
+1. `./install.sh --target <name> --lineup` — resolves `~/.agents/model-lineup.json` (global) merged with
+   `.agents/model-lineup.json` (this project) and re-stamps every `model:` field before copying the files.
+2. The `harness-audit` skill's own onboarding step (SKILL.md Step 4a) — the first time it audits a project
+   with no `model-lineup.json` anywhere, it proposes a default line-up, states the independence rule above
+   in one line, and writes `~/.agents/model-lineup.json` only with your explicit consent (never silently).
+   On every audit after that, it re-stamps your project's own `.claude/agents/*.md` from whatever line-up
+   already exists — the path that covers a plugin install (`/plugin marketplace add` + `/plugin install`),
+   which never runs `install.sh` at all.
+3. Edit `~/.agents/model-lineup.json` by hand — `scripts/model-lineup.js` (`resolveLineup`, `familyOf`,
+   `hardViolation`, `softViolations`) is the one place that schema is read and validated; nothing else in
+   this repo reimplements the resolution.
+
+Whichever path you use, `scripts/model-lineup.js` rejects (exit `2`, not confirmable) any line-up where
+the reviewer/critic and the implementer resolve to the same model family.
+
 ## Compatibility across harnesses
 
 This methodology has four layers, and they cross to Claude Code / OpenCode / Kilo Code / Pi at four

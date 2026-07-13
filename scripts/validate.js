@@ -10,12 +10,18 @@ const path = require('node:path');
 
 const ROOT = path.resolve(__dirname, '..');
 const results = [];
+// Three states, not two. A check that could not run is not a check that passed: counting it green is
+// how a gate reports "all clear" over ground nobody looked at. `skip(reason)` renders ⊘ and is excluded
+// from the pass count, so the summary can never claim coverage it does not have.
+class Skipped extends Error {}
+const skip = (reason) => { throw new Skipped(reason); };
 const check = (name, fn) => {
   try {
     const detail = fn();
-    results.push({ name, ok: true, detail: detail || '' });
+    results.push({ name, state: 'pass', detail: detail || '' });
   } catch (e) {
-    results.push({ name, ok: false, detail: e.message.split('\n')[0] });
+    if (e instanceof Skipped) results.push({ name, state: 'skip', detail: e.message });
+    else results.push({ name, state: 'fail', detail: e.message.split('\n')[0] });
   }
 };
 const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
@@ -109,6 +115,32 @@ check('every agents/*.md has a frontmatter description', () => {
   return `${files.length} agent(s) checked`;
 });
 
+// Claude Code parses frontmatter leniently, so an unquoted scalar carrying `: ` inside it — every
+// `Cost: medium` in a description — works here and breaks everywhere else: GitHub renders a YAML error
+// instead of the file, and Pi's strict loader drops the command without a word. Three loops shipped
+// invisible on Pi for exactly this. The lenient host is the one that lets it through, so the gate has
+// to be stricter than the host it runs on.
+//
+// Negative control (2026-07-13, reverted): quotes stripped from commands/orchestrate.md's description
+// — exit 1, "commands/orchestrate.md: 'description' is an unquoted YAML scalar containing ': '".
+check('every frontmatter survives a STRICT YAML parser (GitHub, Pi), not just a lenient one', () => {
+  const files = [...globMd('commands'), ...globMd('agents')];
+  if (!files.length) throw new Error('nothing scanned — the gate would pass vacuously');
+  for (const rel of files) {
+    const m = /^---\n([\s\S]*?)\n---/.exec(read(rel));
+    if (!m) throw new Error(`${rel}: no frontmatter block`);
+    for (const line of m[1].split('\n')) {
+      const kv = /^([\w-]+):\s*(.*)$/.exec(line);
+      if (!kv) continue;
+      const value = kv[2];
+      if (value && !/^["'[{]/.test(value) && /:\s/.test(value)) {
+        throw new Error(`${rel}: '${kv[1]}' is an unquoted YAML scalar containing ': ' — GitHub errors, Pi drops it silently`);
+      }
+    }
+  }
+  return `${files.length} frontmatter block(s) strict-YAML safe`;
+});
+
 // Pins the command count the README's loop catalog promises (5: skill-loop, orchestrate, review-loop,
 // iterate, session-review — Loop 1 is a pattern, not a command, by design). A 6th command shipped without
 // updating the README catalog would drift silently; so would a command that lost its argument-hint, which
@@ -161,31 +193,43 @@ check('README documents Graphify as a prerequisite', () => {
   }
 });
 
-// Each pattern is a leak that reached a public file, or the private contract that is the reason
-// anyone would pay for the audit. A leak glues itself to its neighbours: the one that shipped inside a
-// benchmark fixture was `REDACTED_agent`, where `\b` finds no boundary at all — so these names match as
-// substrings, not as words. `xx-yy` is the single exception: it hides inside innocent hyphenation
-// (`files-config`, `types-core`), so it alone is fenced against adjacent letters.
-const PRIVATE_LEAKS = [
-  /(?<![a-z])es[-_]co(?![a-z])/i,
-  /REDACTED/i,
-  /persona-a|persona-b|persona-c|persona-d/i,
-  /persona-e|persona-f|persona-g|persona-h/i,
-  /REDACTED|REDACTED|REDACTED|REDACTED/i,
-];
+// The terms this gate hunts are, by definition, the ones that must never appear in a public file —
+// so they cannot live in this file either. Writing your clients' names into the door that guards them
+// publishes them. They load from `private-terms.json`, which is gitignored; `private-terms.example.json`
+// ships the shape and nothing else. A fork inherits the gate, never the terms.
+//
+// Matching is substring, not word: the leak that shipped inside a benchmark fixture was glued to its
+// neighbour (`<name>_agent`), where a word boundary finds nothing. A term listed under `fenced` is the
+// exception — one that hides inside innocent hyphenation and must not fire on it.
+function loadPrivateTerms() {
+  const file = path.join(ROOT, 'private-terms.json');
+  if (!fs.existsSync(file)) return null;
+  const cfg = JSON.parse(fs.readFileSync(file, 'utf8'));
+  const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return [
+    ...(cfg.substring || []).map((t) => new RegExp(esc(t), 'i')),
+    ...(cfg.fenced || []).map((t) => new RegExp(`(?<![a-z])${esc(t)}(?![a-z])`, 'i')),
+  ];
+}
 
-// Negative control — «persona-a» planted in the telemetry fixture: exit 1, sess-0001.jsonl:2 (2026-07-12).
+// Negative control — a term from private-terms.json planted in the telemetry fixture: exit 1,
+// sess-0001.jsonl:2 (2026-07-12). Re-verified 2026-07-13 after the terms moved out of this file.
 check('no private contract leaks in commands/, agents/, benchmarks/, fixtures/', () => {
+  const leaks = loadPrivateTerms();
+  // No terms file is not a pass. A gate that reports green because it was given nothing to look for is
+  // the exact failure this repo keeps finding: absence of evidence read as evidence of absence.
+  if (!leaks) skip('no private-terms.json — nothing was scanned (copy private-terms.example.json to enable)');
+  if (!leaks.length) throw new Error('private-terms.json has no terms — the gate would pass vacuously');
   const files = [...walk('commands'), ...walk('agents'), ...walk('benchmarks'), ...walk('scripts/fixtures')];
   if (!files.length) throw new Error('nothing scanned — the gate would pass vacuously');
   for (const rel of files) {
     read(rel).split('\n').forEach((line, i) => {
-      for (const re of PRIVATE_LEAKS) {
-        if (re.test(line)) throw new Error(`${rel}:${i + 1} leaks private contract — matched ${re}`);
+      for (const re of leaks) {
+        if (re.test(line)) throw new Error(`${rel}:${i + 1} leaks a private term (pattern withheld — see private-terms.json)`);
       }
     });
   }
-  return `${files.length} files scanned`;
+  return `${files.length} files scanned against ${leaks.length} private term(s)`;
 });
 
 check('hooks.json valid + every referenced script exists and parses', () => {
@@ -375,6 +419,58 @@ check('model-lineup.js rejects same-family reviewer/implementer fixtures', () =>
   }
 
   return `valid fixture resolves clean, ${rejected.length} same-family fixtures rejected (exit 2)`;
+});
+
+// The shipped `model:` values in agents/*.md are the exact thing a reader opening one of those files
+// on GitHub reacts to — "why is this hardcoded?" — so the README has to answer it where that reader
+// lands, in the vocabulary the code actually enforces, not a softer paraphrase. Grounded three ways so
+// none of the three assertions below can drift from what's real: the tiers named come from the actual
+// frontmatter (not a hardcoded guess), the independence wording is checked against hardViolation()'s
+// real message, and the "why not delete it" consequence has to name the mechanism (inherits the
+// session's model) and the concrete failure mode (mirror), not just assert "independence" as a virtue.
+//
+// Negative control (2026-07-13, reverted): "D25a" deleted from the README section's independence
+// sentence — exit 1, "README never explains the independence guardrail in the vocabulary
+// model-lineup.js actually uses (family / D25a)".
+check("README documents the default model line-up and why `model:` can't just be deleted", () => {
+  const t = read('README.md');
+  if (!/## The default model line-up/i.test(t)) throw new Error('README lost the model-line-up disclosure section');
+  const section = t.split(/## The default model line-up[^\n]*\n/i)[1].split(/\n## /)[0];
+
+  const tiers = new Set();
+  for (const rel of globMd('agents')) {
+    const m = /^model:\s*(\S+)/m.exec(read(rel).split('---')[1] || '');
+    if (m) tiers.add(m[1]);
+  }
+  if (!tiers.size) throw new Error('no agents/*.md carries a model: field — nothing to disclose (this check is stale)');
+  for (const tier of tiers) {
+    if (!new RegExp(`\\b${tier}\\b`).test(section)) {
+      throw new Error(`README's model-line-up section never names the "${tier}" tier agents/*.md actually ships`);
+    }
+  }
+
+  const { hardViolation } = require(path.join(ROOT, 'scripts/model-lineup.js'));
+  const sameFamily = {
+    reviewer: { model: 'claude-sonnet-4-5', family: 'claude-sonnet' },
+    implementer: { model: 'claude-sonnet-4-5', family: 'claude-sonnet' },
+  };
+  const msg = hardViolation(sameFamily);
+  if (!msg || !/family/i.test(msg) || !/D25a/.test(msg)) {
+    throw new Error("hardViolation()'s message no longer mentions family/D25a — the fixture grounding this check is stale");
+  }
+  if (!/family/i.test(section) || !/D25a/.test(section)) {
+    throw new Error('README never explains the independence guardrail in the vocabulary model-lineup.js actually uses (family / D25a)');
+  }
+
+  const CONSEQUENCE = /delet\w*[\s\S]{0,400}(inherit|session)|(?:inherit|session)[\s\S]{0,400}delet\w*/i;
+  if (!CONSEQUENCE.test(section)) {
+    throw new Error('README never explains what deleting model: actually does (every agent inherits the session model) — it only asserts the guardrail without the mechanism');
+  }
+  if (!/mirror/i.test(section)) {
+    throw new Error('README never names the concrete failure mode (reviewer becomes a mirror of the implementer)');
+  }
+
+  return `${tiers.size} model tier(s) named (${[...tiers].join(', ')}), independence wording matched to model-lineup.js, deletion consequence explained`;
 });
 
 // The SAVINGS block is the one place this repo could lie at scale, so every path by which it could
@@ -848,10 +944,13 @@ check("install.sh --target pi installs templates Pi can actually load", () => {
   return `${promptFiles.length} prompt(s) Pi's strict-YAML loader accepts + ${agentFiles.length} agents · session-review correctly withheld`;
 });
 
-let failed = 0;
+const GLYPH = { pass: '✓', fail: '✗', skip: '⊘' };
+let failed = 0, skipped = 0;
 for (const r of results) {
-  failed += r.ok ? 0 : 1;
-  console.log(`${r.ok ? '✓' : '✗'} ${r.name}${r.detail ? ` — ${r.detail}` : ''}`);
+  if (r.state === 'fail') failed++;
+  if (r.state === 'skip') skipped++;
+  console.log(`${GLYPH[r.state]} ${r.name}${r.detail ? ` — ${r.detail}` : ''}`);
 }
-console.log(`${results.length - failed}/${results.length} checks passed`);
+const passed = results.length - failed - skipped;
+console.log(`${passed}/${results.length} checks passed${skipped ? ` · ${skipped} NOT VERIFIED (⊘ above — not green, just unrun)` : ''}`);
 process.exit(failed ? 1 : 0);
