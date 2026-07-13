@@ -1,7 +1,7 @@
 {
   "name": "harness-audit",
   "description": "Audit any repo's agent harness against four pillars and emit an executable rubric a loop can converge against, then ships the six loops that converge against it (stateless verification, skill learning, multi-agent review, deep verification, workflow improvement, operator session review) plus a zero-token telemetry dashboard. Ships write-time security guards (destructive-command gate, secret scan, no-verify block).",
-  "version": "2.1.0",
+  "version": "2.4.0",
   "author": {
     "name": "Andrés Ramírez · andrami",
     "url": "https://andrami.pro"
