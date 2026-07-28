@@ -23,6 +23,7 @@ const os = require('node:os');
 // 2x (1-hour TTL). A model id absent from this map renders `n/a` — an invented price is worse than
 // no price in a dashboard whose whole claim is that it doesn't invent numbers.
 const PRICE_PER_MTOK = {
+  'claude-opus-5': { in: 5, out: 25 },
   'claude-opus-4-8': { in: 5, out: 25 },
   'claude-opus-4-7': { in: 5, out: 25 },
   'claude-opus-4-6': { in: 5, out: 25 },
