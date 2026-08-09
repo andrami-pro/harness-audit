@@ -386,7 +386,23 @@ if [ "$LINEUP_REQUESTED" -eq 1 ]; then
       *)
         mkdir -p "$CMD_DEST" "$AGENT_DEST"
         cp -R "$ROOT_DIR"/commands/. "$CMD_DEST"/
-        cp -R "$ROOT_DIR"/agents/. "$AGENT_DEST"/
+        # Agents are copied one by one, and an existing project file that DIFFERS is kept rather than
+        # overwritten. README §domain-critic tells you to customize that seat by dropping a file of the
+        # same name into .claude/agents/ — and the `cp -R agents/.` that used to be here deleted it
+        # without a word, inside the one command a user runs in order to pin their own models. Measured
+        # against a planted fixture, not reasoned about: the custom body was gone after one run.
+        KEPT=0
+        for a in "$ROOT_DIR"/agents/*.md; do
+          [ -f "$a" ] || continue
+          AGENT_FILE="$AGENT_DEST/$(basename "$a")"
+          if [ -f "$AGENT_FILE" ] && ! cmp -s "$a" "$AGENT_FILE"; then
+            echo "⚠ kept your $(basename "$a") — it differs from the plugin's copy and was NOT overwritten"
+            KEPT=$((KEPT + 1))
+            continue
+          fi
+          cp "$a" "$AGENT_FILE"
+        done
+        [ "$KEPT" -gt 0 ] && echo "  ($KEPT customized agent(s) preserved — diff against $ROOT_DIR/agents/ to pick up the newer version by hand)"
         # The commands call `node "${CLAUDE_PLUGIN_ROOT:-.claude}/scripts/loop-gate.js"`. That variable
         # is set only inside the Claude Code plugin runtime, so a copied-commands install falls back to
         # `.claude/scripts` — and until this copy existed, that path held nothing: /orchestrate and
@@ -408,23 +424,55 @@ if [ "$LINEUP_REQUESTED" -eq 1 ]; then
     # process-optimizer is intentionally absent — its model is pinned to sonnet (D8) and the
     # line-up never touches it. commands/*.md carry no model: field at all (they run in the
     # session's own model by design), so only agents/ is stamped.
+    # The role→file map covers the PROJECT's own agents too, not just the plugin's. It did not, and
+    # implementer.md and reviewer.md — the two roles the entire D25a independence rule is about — were
+    # the two files this loop skipped: a line-up could resolve clean while the only agents it actually
+    # governs kept whatever model they shipped with. process-optimizer.md stays out on purpose (D8
+    # pins it to sonnet; the line-up never touches it).
     STAMPED=0
+    NO_FRONTMATTER=0
     for f in "$AGENT_DEST"/*.md; do
       [ -f "$f" ] || continue
       case "$(basename "$f")" in
         correctness-critic.md|domain-critic.md|safety-critic.md|style-critic.md) ROLE=critic ;;
         scorer.md) ROLE=scorer ;;
-        skill-improver.md) ROLE=implementer ;;
+        skill-improver.md|implementer.md) ROLE=implementer ;;
+        reviewer.md) ROLE=reviewer ;;
+        orchestrator.md) ROLE=orchestrator ;;
+        architect.md) ROLE=architect ;;
+        preflight.md) ROLE=preflight ;;
+        judge.md) ROLE=judge ;;
         *) ROLE="" ;;
       esac
       [ -n "$ROLE" ] || continue
       STAMP="$(lineup_get "(d.resolved['$ROLE'] && d.resolved['$ROLE'].stamp) || ''")"
       [ -n "$STAMP" ] || continue
+      # No frontmatter at all is not a stamping problem, it is a REGISTRATION problem: Claude Code
+      # keys subagents on the `---` block's name/description, so a file without one is not an agent
+      # with a missing model — it is a file the harness never loads. Stamping it would write a model:
+      # line into prose and leave the agent just as absent. Found in the wild, in a repo whose
+      # implementer and reviewer had both been silently inert.
+      if [ "$(head -n 1 "$f")" != "---" ]; then
+        echo "⚠ $(basename "$f") has NO frontmatter — Claude Code does not register it as a subagent at all."
+        echo "  Nothing to stamp. Add a --- block with name: and description: before it can run."
+        NO_FRONTMATTER=$((NO_FRONTMATTER + 1))
+        continue
+      fi
       if grep -q '^model:' "$f"; then
         sed -i "s#^model:.*#model: $STAMP#" "$f"
-        STAMPED=$((STAMPED + 1))
+      else
+        # An agent with no model: line inherits whatever model expanded it — which for implementer and
+        # reviewer means both become the session's model, and "independent review" turns into one
+        # model reviewing itself. The line-up has an opinion; write it in.
+        awk -v m="model: $STAMP" '
+          NR == 1 && $0 == "---" { print; infm = 1; next }
+          infm && $0 == "---"    { print m; print; infm = 0; next }
+          { print }
+        ' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
       fi
+      STAMPED=$((STAMPED + 1))
     done
+    [ "$NO_FRONTMATTER" -gt 0 ] && echo "⚠ $NO_FRONTMATTER agent file(s) above are inert until they get a frontmatter block."
     if [ -n "$CMD_DEST" ]; then
       echo "✓ commands/ + agents/ installed at $CMD_DEST and $AGENT_DEST — $STAMPED agent(s) re-stamped for target '$TARGET'"
     else

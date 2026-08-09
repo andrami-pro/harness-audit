@@ -1163,6 +1163,89 @@ check('README and install.sh both disclose every capability the port table destr
   return `${rows} capability row(s) across ${targets.length} targets, disclosed in README + install.sh`;
 });
 
+// D25a is enforced on the LINE-UP (model-lineup.js exits 2 on a same-family reviewer/implementer) —
+// but a validated line-up governs nothing until it reaches the agent files, and for a long time it did
+// not: the stamper's role→file map knew only the plugin's own agents, so implementer.md and
+// reviewer.md, the two files the whole rule exists for, were the two it skipped. In a real project both
+// were found still carrying `model: opus`, which is the independence property failing silently with a
+// green line-up sitting beside it. An agent with no `model:` line at all was skipped too — and that is
+// the same failure wearing different clothes, because both roles then inherit the session's model.
+//
+// The other half of this check is destruction: `cp -R agents/.` overwrote a project's customized
+// domain-critic.md — the exact file README §domain-critic tells you to write — inside the one command
+// a user runs to pin their own models.
+//
+// Negative controls (2026-08-10, each applied, observed, reverted — all exit 1):
+//   implementer.md|reviewer.md removed from the stamper's case arms .................................
+//     "implementer.md has no model: line after --lineup — it inherits the session model, and so does
+//      reviewer.md, which is the independence property collapsing in silence" — not the predicted
+//      "kept model: sonnet": the fixture's implementer ships with no model: at all, which is the shape
+//      the real project had, so an unmapped role and a dropped insert branch fail identically. Both
+//      end in the same place and it is the place that matters: two roles on one model.
+//   the cmp -s guard removed, `cp` restored to unconditional .......................................
+//     "install.sh overwrote a customized domain-critic.md — the file README tells users to write"
+//   the awk insert branch dropped (only `grep -q '^model:'` files stamped) ..........................
+//     "implementer.md has no model: line after --lineup — it inherits the session model, and so does
+//      reviewer.md, which is the independence property collapsing in silence"
+check('install.sh --lineup stamps the project roles and never clobbers a customized agent', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-stamp-'));
+  const agents = path.join(tmp, '.claude/agents');
+  fs.mkdirSync(path.join(tmp, '.agents'), { recursive: true });
+  fs.mkdirSync(agents, { recursive: true });
+
+  // A project line-up so this check does not depend on whatever the machine's global file says.
+  fs.writeFileSync(path.join(tmp, '.agents/model-lineup.json'), JSON.stringify({
+    version: 1,
+    defaults: {
+      architect: { model: 'claude-fable-5' }, orchestrator: { model: 'claude-fable-5' },
+      implementer: { model: 'claude-opus-5' }, reviewer: { model: 'claude-fable-5' },
+      preflight: { model: 'claude-sonnet-5' }, scorer: { model: 'claude-fable-5' },
+      critic: { model: 'claude-sonnet-5' }, judge: { model: 'claude-fable-5' },
+    },
+  }));
+
+  const MARK = 'CUSTOM-DOMAIN-CONTRACT-DO-NOT-CLOBBER';
+  const fm = (name, extra) => `---\nname: ${name}\ndescription: "fixture"\n${extra}---\n\nbody\n`;
+  fs.writeFileSync(path.join(agents, 'domain-critic.md'), fm('domain-critic', 'model: sonnet\n').replace('body', MARK));
+  fs.writeFileSync(path.join(agents, 'implementer.md'), fm('implementer', ''));      // no model: at all
+  fs.writeFileSync(path.join(agents, 'reviewer.md'), fm('reviewer', 'model: opus\n')); // same family as implementer
+  fs.writeFileSync(path.join(agents, 'no-frontmatter.md'), '# not an agent\nprose\n');
+
+  execFileSync('sh', [path.join(ROOT, 'install.sh'), '--target', 'claude', '--lineup',
+    '--skip-graphify', '--yes'], { cwd: tmp, stdio: 'pipe' });
+
+  const modelOf = (f) => {
+    const src = fs.readFileSync(path.join(agents, f), 'utf8');
+    const block = /^---\n([\s\S]*?)\n---/.exec(src);
+    return block ? (/^model:\s*(\S+)/m.exec(block[1]) || [])[1] : undefined;
+  };
+
+  if (!fs.readFileSync(path.join(agents, 'domain-critic.md'), 'utf8').includes(MARK)) {
+    throw new Error('install.sh overwrote a customized domain-critic.md — the file README tells users to write');
+  }
+
+  const impl = modelOf('implementer.md');
+  const rev = modelOf('reviewer.md');
+  if (!impl) {
+    throw new Error('implementer.md has no model: line after --lineup — it inherits the session model, and so does reviewer.md, which is the independence property collapsing in silence');
+  }
+  if (impl !== 'opus') throw new Error(`implementer.md kept model: ${impl} — the stamper skipped the role D25a is about`);
+  if (!rev) throw new Error('reviewer.md lost its model: line');
+  // The property, not the literal: whatever the line-up resolves to, these two may never be the same.
+  const { familyOf } = require(path.join(ROOT, 'scripts/model-lineup.js'));
+  const ALIAS = { fable: 'claude-fable-5', opus: 'claude-opus-5', sonnet: 'claude-sonnet-5', haiku: 'claude-haiku-4-5-20251001' };
+  const famOf = (a) => familyOf({ model: ALIAS[a] || a });
+  if (famOf(impl) === famOf(rev)) {
+    throw new Error(`after --lineup, implementer (${impl}) and reviewer (${rev}) resolve to the same family ${famOf(impl)} — D25a passed on the line-up and failed on the files`);
+  }
+  if (modelOf('no-frontmatter.md') !== undefined) {
+    throw new Error('a file with no frontmatter was stamped — Claude Code never registers it, so the model: line is decoration on prose');
+  }
+
+  fs.rmSync(tmp, { recursive: true, force: true });
+  return `implementer=${impl} · reviewer=${rev} (${famOf(impl)} ≠ ${famOf(rev)}) · custom agent preserved · frontmatter-less file left alone`;
+});
+
 const GLYPH = { pass: '✓', fail: '✗', skip: '⊘' };
 let failed = 0, skipped = 0;
 for (const r of results) {
