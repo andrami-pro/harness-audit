@@ -387,6 +387,19 @@ if [ "$LINEUP_REQUESTED" -eq 1 ]; then
         mkdir -p "$CMD_DEST" "$AGENT_DEST"
         cp -R "$ROOT_DIR"/commands/. "$CMD_DEST"/
         cp -R "$ROOT_DIR"/agents/. "$AGENT_DEST"/
+        # The commands call `node "${CLAUDE_PLUGIN_ROOT:-.claude}/scripts/loop-gate.js"`. That variable
+        # is set only inside the Claude Code plugin runtime, so a copied-commands install falls back to
+        # `.claude/scripts` — and until this copy existed, that path held nothing: /orchestrate and
+        # /review-loop ran ungated in exactly the install mode you choose in order to pin your own
+        # models. Copying the scripts beside the commands is what removes that trade-off.
+        SCRIPT_DEST="$(dirname "$CMD_DEST")/scripts"
+        mkdir -p "$SCRIPT_DEST"
+        for s in "$ROOT_DIR"/scripts/*.js; do [ -f "$s" ] && cp "$s" "$SCRIPT_DEST"/; done
+        echo "✓ scripts/ copied to $SCRIPT_DEST — the loop gate resolves without the plugin runtime"
+        if [ "$TARGET" = "claude-user" ]; then
+          echo "⚠ user-level install: the commands fall back to the PROJECT's ./.claude/scripts, not to"
+          echo "  $SCRIPT_DEST. Per project, either install the plugin or re-run this with --target claude."
+        fi
         ;;
     esac
 

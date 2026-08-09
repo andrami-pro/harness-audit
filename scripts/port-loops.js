@@ -240,9 +240,9 @@ const PI_COMMAND_BODY_SUBSTITUTIONS = [
   // a command that looks like a gate and silently does nothing — the exact failure this port refuses (it
   // is why /session-review is withheld outright). Degraded to the hand-check instead, and disclosed:
   // README §Compatibility carries the capability row, and HARNESS_CAPABILITIES below is its authority.
-  ['```bash\nnode "${CLAUDE_PLUGIN_ROOT}/scripts/loop-gate.js" resume docs/harness-dev/loop-runs/<run-slug>/\n```',
+  ['```bash\nnode "${CLAUDE_PLUGIN_ROOT:-.claude}/scripts/loop-gate.js" resume docs/harness-dev/loop-runs/<run-slug>/\n```',
     '```text\nThis target does not install the plugin\'s loop-gate.js. Check the run directory by hand:\nlist docs/harness-dev/loop-runs/<run-slug>/ and read the round-<n>.json files it holds. Rounds must\nbe the contiguous sequence 1..n; a gap, an unreadable file, or an aggregate JSON already present is\nAMBIGUOUS_RUN_STATE — stop and hand it to the human rather than reconciling it yourself.\n```'],
-  ['```bash\nnode "${CLAUDE_PLUGIN_ROOT}/scripts/loop-gate.js" check-findings <file> --root . --seat <seat>\n```',
+  ['```bash\nnode "${CLAUDE_PLUGIN_ROOT:-.claude}/scripts/loop-gate.js" check-findings <file> --root . --seat <seat>\n```',
     '```text\nThis target does not install the plugin\'s loop-gate.js. Check each seat\'s JSON by hand against the\ncontract in its agent file: the fixed severity ladder (blocker|major|minor), a "file" that exists in\nthe repo, a "line" inside that file (0 = file-wide), a non-empty summary and fix, and no "id" or\n"critic" the seat assigned itself. This is a real loss: the checks are mechanical, and a chair doing\nthem by eye is the party the gate existed to be independent of.\n```'],
 ];
 

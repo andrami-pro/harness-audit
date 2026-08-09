@@ -38,7 +38,7 @@ that dies in round 2 of a panel has already paid for round 1, and the only way t
 written it down.
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/loop-gate.js" resume docs/harness-dev/loop-runs/<run-slug>/
+node "${CLAUDE_PLUGIN_ROOT:-.claude}/scripts/loop-gate.js" resume docs/harness-dev/loop-runs/<run-slug>/
 ```
 
 **If that command is not available**, list the run directory yourself and read the `round-<n>.json`
@@ -90,7 +90,7 @@ Write each seat's raw reply to `docs/harness-dev/loop-runs/<run-slug>/raw/<round
 run the gate over it before a single finding enters the aggregate:
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/loop-gate.js" check-findings <file> --root . --seat <seat>
+node "${CLAUDE_PLUGIN_ROOT:-.claude}/scripts/loop-gate.js" check-findings <file> --root . --seat <seat>
 ```
 
 **If that command is not available** — the install has these commands but not the plugin's `scripts/`,

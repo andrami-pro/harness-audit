@@ -1047,6 +1047,13 @@ check('loop-gate refuses malformed seat output and computes the gate arithmetic'
 //   Bash(node:*) struck from commands/review-loop.md's allowed-tools ...............................
 //     "review-loop calls node but its allowed-tools does not permit it — the gate would be denied at
 //      the first round"
+//   the `:-` default stripped back to a bare ${CLAUDE_PLUGIN_ROOT} in commands/orchestrate.md ......
+//     three checks fired at once, which is the correct shape for this one: the two Pi-port checks
+//     ("pi-ported command body still reads CLAUDE_PLUGIN_ROOT", ".pi/prompts/orchestrate.md: installed
+//     to Pi but its body reads ${CLAUDE_PLUGIN_ROOT}") plus this one, "orchestrate calls loop-gate.js
+//     through a bare ${CLAUDE_PLUGIN_ROOT} — a copied-commands install is silently ungated again".
+//     Verified end to end as well: `install.sh --target claude --lineup` in a clean repo, then the
+//     command's own line with the variable unset — `NO_RUN`, exit 0, gate resolved from .claude/scripts.
 //   the "report the run as ungated" sentence struck from commands/orchestrate.md ...................
 //     "orchestrate never says what to do when loop-gate.js is absent — a copied-commands install
 //      crashes on the missing script and the chair is left with no instruction, so an ungated run
@@ -1079,8 +1086,19 @@ check('the panel loops actually run their seats through loop-gate', () => {
     if (!/If that command is not available/.test(src) || !/ungated/.test(src)) {
       throw new Error(`${cmd} never says what to do when loop-gate.js is absent — a copied-commands install crashes on the missing script and the chair is left with no instruction, so an ungated run reports as a gated one`);
     }
+    // A BARE ${CLAUDE_PLUGIN_ROOT} forced a choice nobody should have to make: install the plugin and
+    // get the gate but not your own model line-up, or copy the commands locally and get the line-up
+    // but not the gate. The `:-` default removes it — the copied install resolves `.claude/scripts`,
+    // which install.sh now populates. Reintroducing a bare reference silently restores the trade-off.
+    if (/\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/loop-gate/.test(src)) {
+      throw new Error(`${cmd} calls loop-gate.js through a bare \${CLAUDE_PLUGIN_ROOT} — that resolves to nothing outside the plugin runtime, so a copied-commands install is silently ungated again`);
+    }
   }
-  return '2 panel loops gate their seats, resume their runs, may run node, and degrade honestly without the gate';
+  const inst = read('install.sh');
+  if (!/SCRIPT_DEST/.test(inst) || !/scripts\/\*\.js/.test(inst)) {
+    throw new Error('install.sh copies commands/ without copying scripts/ beside them — the commands\' .claude/scripts fallback would point at an empty directory');
+  }
+  return '2 panel loops gate their seats, resume their runs, degrade honestly, and resolve the gate with or without the plugin';
 });
 
 // F13 — the capability table is the authority on what the port destroys, and its whole purpose is that
