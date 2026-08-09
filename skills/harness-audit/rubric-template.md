@@ -61,6 +61,60 @@ State: PASS
 Pillar: 4 · Fix cost: —
 ```
 
+## Criteria for a multi-agent harness
+
+Emit these when the project runs more than one agent against the same repo — a panel, a pipeline, a
+loop with a reviewer seat. Each one exists because a real swarm design either got it right or got
+bitten by it, and each is checkable the same way everything else here is.
+
+```markdown
+## R<N> — An agent that finds the harness broken STOPS; it never repairs it
+Check: `grep -ciE "stop and report|do not (repair|rebuild|re-?launch) (the )?(harness|swarm|scripts)" AGENTS.md .claude/agents/*.md` → ≥ 1
+State: FAIL (actual: 0)
+Pillar: 2 · Fix cost: low
+
+## R<N+1> — A blocked agent escalates to the human, not sideways to another agent
+Check: `grep -ciE "stop and ask|escalate to the human|ask for clarification" AGENTS.md .claude/agents/*.md` → ≥ 1
+State: PASS
+Pillar: 2 · Fix cost: low
+
+## R<N+2> — The harness can tell slow work from hung work
+Check: `grep -crE "timeout|SIGTERM|--max-time" .github/workflows/ package.json scripts/ | awk -F: '{s+=$2} END {print s+0}'` → ≥ 1
+State: FAIL (actual: 0)
+Pillar: 3 · Fix cost: medium
+
+## R<N+3> — No lock a dead process can hold forever
+Check: `grep -rlE "\.lock|mkdir .*lock" scripts/ | xargs -r grep -LiE "stale|ttl|mtime|kill -0" | wc -l` → 0
+State: PASS (actual: 0 lock sites without a stale path)
+Pillar: 3 · Fix cost: medium
+
+## R<N+4> — Agent-authored commits say which role wrote them
+Check: `git log --no-merges -n 50 --format=%B | grep -ciE "^(By|Agent|Co-Authored-By) " ` → ≥ 1
+State: FAIL (actual: 0)
+Pillar: 4 · Fix cost: low
+```
+
+Why each one is a criterion and not a preference:
+
+- **Self-repair** — an agent that notices its own helper scripts are missing and rebuilds them is an
+  agent editing the thing that judges it. The failure is silent by construction: the harness comes
+  back up, and nobody learns it was ever down. Stop and report is the only safe move, and it has to be
+  written where the agent reads it.
+- **Sideways escalation** — a free channel between agents fills with negotiation, and two agents that
+  can talk each other out of a finding are one agent. Bound the channel (a schema, a severity ladder,
+  a length cap) and route ambiguity to the human, who is the only party with the authority to change
+  the task.
+- **Slow vs hung** — the failure nobody instruments. A stalled agent produces exactly what a working
+  one produces while it thinks: nothing. Without a timeout or a progress signal, the loop waits
+  forever and the run is scored as if it had merely been thorough.
+- **Stale locks** — a lock with no TTL and no liveness check turns one crashed process into a
+  permanently wedged queue. If the project holds locks at all, each site needs a way out that does not
+  require a human noticing.
+- **Commit byline** — the cheapest provenance there is. Without it, `git log` cannot answer which role
+  wrote a line, and no dashboard can join a commit to the loop that produced it. Only score this one
+  when agents in the project actually commit; where a human commits every change, mark it
+  `applies: false` rather than handing it a free pass.
+
 ## The golden rule
 
 Before closing the rubric, run this meta-check on each entry: *"Can an agent with no context run the Check and reach the same verdict I did?"* If the answer is no, rewrite the criterion or drop it.

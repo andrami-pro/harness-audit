@@ -1,0 +1,24 @@
+{
+  "rubric": "harness-rubric.md",
+  "excluded": ["scripts/fixtures/telemetry — pinned test data, outside this task's scope"],
+  "criteria": [
+    { "id": "S1", "source": "structural", "class": "blocker", "applies": false, "pass": false,
+      "evidence": "no code in the diff — docs only, so the code-judo rule has nothing to bind to" },
+    { "id": "S2", "source": "structural", "class": "blocker", "applies": true, "pass": true,
+      "evidence": "largest file touched: scripts/validate.js — wc -l → 957" },
+    { "id": "S3", "source": "structural", "class": "blocker", "applies": true, "pass": false,
+      "evidence": "three new one-off branches in the round dispatcher, no abstraction extracted" },
+    { "id": "P1-2", "source": "rubric", "class": "quality", "applies": true, "pass": true,
+      "evidence": "wc -l < AGENTS.md → 122 ≤ 200" },
+    { "id": "P5-1", "source": "rubric", "class": "quality", "applies": true, "pass": false,
+      "evidence": "ls ~/.claude/skills | wc -l → 35, threshold ≤ 15" }
+  ],
+  "findings": [
+    { "severity": "blocker", "file": "scripts/validate.js", "line": 18,
+      "summary": "the round dispatcher grew three ad-hoc branches instead of a table",
+      "fix": "lift the three cases into the existing check registry" },
+    { "severity": "minor", "file": "README.md", "line": 0,
+      "summary": "the skill count is over the documented threshold",
+      "fix": "prune the unused skills or raise the threshold on purpose" }
+  ]
+}

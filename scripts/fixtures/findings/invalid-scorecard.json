@@ -1,0 +1,14 @@
+{
+  "rubric": "harness-rubric.md",
+  "criteria": [
+    { "id": "S2", "source": "structural", "class": "critical", "applies": true, "pass": true,
+      "evidence": "a class the contract does not have" },
+    { "id": "S3", "source": "structural", "class": "blocker", "applies": "yes", "pass": false,
+      "evidence": "applies as a string, which is truthy to anything that does not check" },
+    { "id": "P1-2", "source": "rubric", "class": "quality", "applies": false, "pass": false,
+      "evidence": "" },
+    { "id": "P5-1", "source": "rubric", "class": "quality", "applies": true, "pass": false,
+      "evidence": "threshold missed", "weight": 3 }
+  ],
+  "findings": []
+}

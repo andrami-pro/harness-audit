@@ -233,6 +233,17 @@ const PI_COMMAND_BODY_SUBSTITUTIONS = [
     'confirm them with the human directly — ask in your reply and wait for their answer\nbefore spending a token'],
   // session-review.md: a single Task call to one agent, not a table row.
   ['Send **one** `Task` to a single agent', 'Run **one** `subagent` call to a single agent'],
+  // orchestrate.md, review-loop.md: both shell out to the plugin's own loop-gate.js — the deterministic
+  // seam that refuses a seat's malformed findings and refuses to guess a half-written run's state. No
+  // target but Claude Code installs this repo's scripts/, and `${CLAUDE_PLUGIN_ROOT}` is a Claude Code
+  // plugin-runtime variable that expands to nothing anywhere else. Ported verbatim, both blocks would be
+  // a command that looks like a gate and silently does nothing — the exact failure this port refuses (it
+  // is why /session-review is withheld outright). Degraded to the hand-check instead, and disclosed:
+  // README §Compatibility carries the capability row, and HARNESS_CAPABILITIES below is its authority.
+  ['```bash\nnode "${CLAUDE_PLUGIN_ROOT}/scripts/loop-gate.js" resume docs/harness-dev/loop-runs/<run-slug>/\n```',
+    '```text\nThis target does not install the plugin\'s loop-gate.js. Check the run directory by hand:\nlist docs/harness-dev/loop-runs/<run-slug>/ and read the round-<n>.json files it holds. Rounds must\nbe the contiguous sequence 1..n; a gap, an unreadable file, or an aggregate JSON already present is\nAMBIGUOUS_RUN_STATE — stop and hand it to the human rather than reconciling it yourself.\n```'],
+  ['```bash\nnode "${CLAUDE_PLUGIN_ROOT}/scripts/loop-gate.js" check-findings <file> --root . --seat <seat>\n```',
+    '```text\nThis target does not install the plugin\'s loop-gate.js. Check each seat\'s JSON by hand against the\ncontract in its agent file: the fixed severity ladder (blocker|major|minor), a "file" that exists in\nthe repo, a "line" inside that file (0 = file-wide), a non-empty summary and fix, and no "id" or\n"critic" the seat assigned itself. This is a real loss: the checks are mechanical, and a chair doing\nthem by eye is the party the gate existed to be independent of.\n```'],
 ];
 
 function transformCommandPi(fm, body) {
@@ -246,6 +257,108 @@ function transformCommandPi(fm, body) {
   let outBody = body;
   for (const [from, to] of PI_COMMAND_BODY_SUBSTITUTIONS) outBody = outBody.split(from).join(to);
   return { fm: out, dropped: [], body: outBody };
+}
+
+// What the port DESTROYS, per target, as data — because until now the same facts lived in three places
+// that had no way to disagree out loud: this file's transforms, install.sh's echo blocks, and README
+// §Compatibility. Three copies of a caveat drift, and the one that drifts is always the one the user
+// reads. So the table is the authority: install.sh prints it (`--capabilities <target>`) instead of
+// hardcoding its own wording, and validate.js binds every row to the README prose that has to disclose
+// it. Adding a row here fails the gate until the README carries it too.
+//
+// `readmeMarker` is a regex source, matched against README §Compatibility — not against the whole file.
+// A caveat that is technically present three sections away from the install instructions is a caveat
+// hidden from the person who needs it.
+//
+// Only losses the PORT causes belong here. Claude Code-only conveniences the port never touches (the
+// hooks, the dashboard) are documented in the README and are not this table's subject.
+const CAP_MODEL_ALIAS = {
+  id: 'model-alias',
+  readmeMarker: 'model:',
+  warning: [
+    "⚠ The 'model:' line in each ported agent is still a Claude alias (sonnet/fable/opus), which this",
+    '  target cannot resolve. Re-run with --lineup to stamp real provider/model ids, or edit by hand.',
+  ],
+};
+
+const CAP_LOOP_GATE = {
+  id: 'loop-gate',
+  readmeMarker: 'loop-gate',
+  warning: [
+    '⚠ /orchestrate and /review-loop lose their deterministic gate. On Claude Code both shell out to',
+    "  the plugin's scripts/loop-gate.js, which refuses a seat's findings when they anchor at a file",
+    '  that does not exist or a line past the end of one, recomputes the score from the criteria table,',
+    '  and refuses to guess the state of a half-written run. This target installs no scripts/, so those',
+    '  steps are ported as hand-checks the chair performs on itself — which is the party the gate was',
+    '  independent of. The rounds still run; the arithmetic and the anchor checks are no longer verified.',
+  ],
+};
+
+const OPENCODE_KILO_LOST = [
+  {
+    id: 'manual-only-veto',
+    readmeMarker: 'disable-model-invocation',
+    warning: [
+      '⚠ The manual-only guardrail does NOT cross over. In Claude Code, /review-loop,',
+      "  /iterate and /session-review ship with 'disable-model-invocation: true' — the model",
+      '  may suggest them, never fire them. Neither OpenCode nor Kilo Code has an equivalent',
+      '  field, so on this target all three are auto-dispatchable by the model: two of them',
+      '  are token-hungry, and /session-review analyses YOU. Put the restriction in your',
+      '  AGENTS.md and check it holds — nothing enforces it locally anymore.',
+    ],
+  },
+  {
+    id: 'allowed-tools',
+    readmeMarker: 'allowed-tools',
+    warning: [
+      "⚠ SKILL.md's 'allowed-tools' is ignored by this target, silently — no error, no log line.",
+      '  Any skill whose safety story leans on that field loses the guardrail the moment it crosses.',
+    ],
+  },
+  CAP_MODEL_ALIAS,
+  CAP_LOOP_GATE,
+];
+
+const HARNESS_CAPABILITIES = {
+  opencode: { label: 'OpenCode', lost: OPENCODE_KILO_LOST },
+  'kilo-loops': { label: 'Kilo Code', lost: OPENCODE_KILO_LOST },
+  pi: {
+    label: 'Pi',
+    // Pi does NOT lose the manual-only veto — a prompt template only expands on a typed /name, so the
+    // guarantee holds with no field to carry it. A row here would be a caveat about nothing.
+    //
+    // /session-review's withholding is also absent on purpose, and it is the one loss with a mechanism
+    // of its own already: run() reports it per file at port time from PI_UNPORTABLE_COMMANDS, and
+    // validate.js binds that same constant to the README. A row here would print it a second time —
+    // and two mechanisms disclosing one fact is how they start disagreeing.
+    lost: [
+      {
+        id: 'websearch-correctness',
+        readmeMarker: 'correctness-critic[\\s\\S]{0,300}WebSearch',
+        warning: [
+          '⚠ correctness-critic lost WebSearch (pi-subagents has no verified equivalent builtin).',
+          '  Its whole job is checking claims against the web; on Pi it cannot. Install',
+          '  pi-web-access and add its tools to that agent\'s frontmatter, or do not rely on it here.',
+        ],
+      },
+      {
+        id: 'model-alias',
+        readmeMarker: 'model:`? line is still a Claude Code alias on Pi',
+        warning: [
+          "⚠ The 'model:' line in each ported agent (and none of the commands, which carry no",
+          '  model: field) is still a Claude alias (sonnet/fable/opus), which pi-subagents cannot',
+          '  resolve. Re-run with --lineup to stamp real provider/model ids, or edit by hand.',
+        ],
+      },
+      CAP_LOOP_GATE,
+    ],
+  },
+};
+
+function capabilityReport(target) {
+  const cap = HARNESS_CAPABILITIES[target];
+  if (!cap) throw new Error(`port-loops.js: no capability data for target '${target}'`);
+  return cap.lost.map((l) => l.warning.join('\n')).join('\n\n');
 }
 
 function destDirsFor(target) {
@@ -302,8 +415,20 @@ function main() {
   const opt = (name, def) => { const i = argv.indexOf(name); return i === -1 || i === argv.length - 1 ? def : argv[i + 1]; };
   const target = opt('--target', null);
   const root = opt('--root', process.cwd());
+  // install.sh's loss warnings are this table read aloud, not a second copy of it.
+  const capTarget = opt('--capabilities', null);
+  if (capTarget) {
+    try {
+      process.stdout.write(`${capabilityReport(capTarget)}\n`);
+    } catch (e) {
+      process.stderr.write(`${e.message}\n`);
+      process.exit(1);
+    }
+    return;
+  }
   if (!target) {
-    process.stderr.write('usage: port-loops.js --target <opencode|kilo-loops|pi> [--root <repoRoot>]\n');
+    process.stderr.write('usage: port-loops.js --target <opencode|kilo-loops|pi> [--root <repoRoot>]\n'
+      + '       port-loops.js --capabilities <opencode|kilo-loops|pi>\n');
     process.exit(1);
   }
   try {
@@ -333,4 +458,5 @@ module.exports = {
   parseFrontmatter, serializeFrontmatter, transformCommandOpenCodeKilo, transformAgentOpenCodeKilo,
   transformAgentPi, transformCommandPi, PI_COMMAND_DROPPED_FIELDS, PI_COMMAND_BODY_SUBSTITUTIONS,
   PI_UNPORTABLE_COMMANDS, destDirsFor, TOOL_MAP, parseToolList, run,
+  HARNESS_CAPABILITIES, capabilityReport,
 };

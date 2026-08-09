@@ -1,7 +1,7 @@
 ---
 description: Loop 4 — deep verification. The four critics AND the scorer read the whole app or the whole corpus, round after round, until the score clears 90 with zero blockers or the iteration ceiling stops it. This is the thermonuclear read. It is TOKEN-HUNGRY by construction and it is meant to be run rarely — on a codebase or a body of content that has already grown, never on a commit. For one feature, you want develop-phase, not this. You may suggest this command; you may never launch it yourself.
 argument-hint: "[max-iterations, default 5]"
-allowed-tools: Task, Read, Write, Edit, Grep, Glob, Bash(graphify:*), Bash(git diff:*), Bash(git status:*), Bash(git ls-files:*), Bash(mkdir:*), Bash(date:*)
+allowed-tools: Task, Read, Write, Edit, Grep, Glob, Bash(graphify:*), Bash(git diff:*), Bash(git status:*), Bash(git ls-files:*), Bash(mkdir:*), Bash(date:*), Bash(node:*)
 disable-model-invocation: true
 ---
 
@@ -53,6 +53,28 @@ repo root by default; whatever path the human named otherwise. If there is no ru
 this loop cannot open a gate it has no standard for, and the four critics on their own are
 `/orchestrate`, which is cheaper and already exists.
 
+Name the run — `<YYYY-MM-DD>-review-loop-<slug>` — and use that one slug for the run directory, the
+round files and the findings JSON.
+
+**Then check whether that run is already in progress.** Rounds are files, not conversation: a chair
+that dies in round 2 of a panel has already paid for round 1, and the only way to keep it is to have
+written it down. On this loop that is not a convenience — a lost round of a five-seat deep read is the
+single most expensive thing this package can waste.
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/loop-gate.js" resume docs/harness-dev/loop-runs/<run-slug>/
+```
+
+**If that command is not available**, list the run directory yourself and read the `round-<n>.json`
+files it holds. The rule that matters survives the missing script: unless what you find is plainly the
+contiguous sequence `1..n`, stop and hand it to the human rather than reconciling it.
+
+`NO_RUN` → start at round 1. `RESUME_FROM: <n>` → round `n` is the next one: read the round files
+already on disk for what is open, and never re-dispatch a round that is recorded. `RUN_COMPLETE` →
+that slug has published a verdict; pick another slug or stop. **`AMBIGUOUS_RUN_STATE` (exit 2) → stop
+and hand the human the files it listed.** Do not reconcile it yourself — a loop that repairs its own
+half-written state resumes into a round nobody chose, and it reports the result as if someone had.
+
 ## 2. The round — five seats, in parallel (up to MAX_ITERATIONS)
 
 Launch all five in **one message, five Task calls**. They run in parallel and they must not see each
@@ -92,26 +114,58 @@ Never hand any seat: the previous round's findings, the fixes you applied, your 
 artifacts, or another seat's output. Independence is the whole point — the moment they share context,
 five seats collapse into one.
 
-## 3. Aggregate — and do the arithmetic yourself
+**Re-anchor before every round after the first: re-read the prompt templates above in this file and
+send them unchanged.** The seats are fresh each round and cannot drift; you are not. By round 4 of a
+deep read you are holding every finding, every score and every fix, and the natural thing to do with
+all that context is to be helpful with it — a clause about what the last round found, a hint about
+which file to start with. Each of those is the independence leak, arriving as a courtesy rather than
+as a decision. The round number and the file list are the only two things that change between rounds.
 
-Collect the four finding arrays and the one scorecard.
+## 3. Aggregate — gate every seat, and let the gate do the arithmetic
 
-Give every finding an `id` of `R<round>-F<k>` (k restarts each round) and its `critic` field
-(`correctness` | `domain` | `safety` | `style` | `scorer`) — the seats do not set these.
+Write each seat's raw reply to `docs/harness-dev/loop-runs/<run-slug>/raw/<round>-<seat>.json`, then
+run the gate over it before a single finding enters the aggregate:
 
-Then **recompute the score from the scorer's `criteria` table.** Do not take its headline on trust:
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/loop-gate.js" check-findings <file> --root . --seat <seat>
+```
+
+**If that command is not available** — the install has these commands but not the plugin's `scripts/`,
+which is what a copied-commands install looks like — say so once, in one line, and check each seat's
+JSON yourself against the contract in its agent file: the fixed severity ladder, a `file` that exists
+in the repo, a `line` inside that file, a non-empty summary and fix, and no `id`/`critic` the seat
+assigned itself. Then **say in the report that the run was ungated.** A missing gate is not a passing
+gate, and a crash from a missing script is not a verdict.
+
+Exit 0 → aggregate it. **Exit 2 → do not aggregate it, and do not repair it yourself.** Re-dispatch
+that one seat with the gate's error list appended verbatim to its prompt: the errors are written to be
+acted on without help, and a chair paraphrasing them is a chair guessing what the seat meant. A seat
+that fails the gate twice is a finding about the panel — record it, and carry on with the others.
+
+The gate is deterministic and costs no tokens. It refuses a finding anchored at a file that is not in
+the repo or at a line past the end of a real one, a severity outside the fixed ladder, and a seat that
+assigned its own `id` or `critic`. None of those are visible to a chair reading JSON as prose, and the
+first two are exactly what a fabricated finding looks like from the inside.
+
+Give every gated finding an `id` of `R<round>-F<k>` (k restarts each round) and its `critic` field
+(`correctness` | `domain` | `safety` | `style` | `scorer`) — the seats do not set these, and the gate
+rejects them if they try.
+
+**The score comes from the gate, not from you and not from the scorer's headline.** Run over the
+scorecard, `check-findings` prints the two numbers this loop gates on:
 
 ```
-weight(blocker) = 3        weight(quality) = 1
-
-score    = round( 100 × Σ(weight × pass) / Σ(weight) )    over every criterion with applies: true
-blockers = how many blocker-class criteria came back pass: false
+SCORE: 86/100 · BLOCKERS: 1
 ```
 
-The formula is deterministic and it is short. An agent that does its own arithmetic is an agent whose
-arithmetic nobody checked, and this number is a gate. If your recount disagrees with the scorer's
-headline, **your recount wins** — and say so in the report, because a scorer that cannot add up is a
-finding of its own.
+It computes them from the `criteria` table with the same weights the scorer's own file states —
+`blocker` 3, `quality` 1, over every criterion with `applies: true` — and it is the only party in the
+round that is neither writing the artifacts nor grading them. Take those two numbers. If they
+disagree with the scorer's own headline, **the gate wins**, and say so in the report: a scorer whose
+table does not support its number is a finding of its own, and one the human should hear about.
+
+Arithmetic is the one part of a gate that never needed judgment, and until now it was being done by
+whichever model was holding the chair.
 
 `blockers` counts failed blocker-class **criteria**. A `blocker`-severity finding from one of the four
 critics is a defect in the artifacts, not a failed rubric criterion — it goes in the fix round, and it
@@ -126,6 +180,13 @@ otherwise apply them yourself. Either way, apply **all** of the round's findings
 minor together. Then go to round n+1.
 
 The fixer gets the findings. The seats never do.
+
+**Close the round on disk before you open the next one.** Write
+`docs/harness-dev/loop-runs/<run-slug>/round-<n>.json` — the round object exactly as §6 specifies it,
+one round per file. That file is what `resume` counts, and it is the only thing that survives a chair
+that dies mid-run. Write it after the fix round, so a resumed run never re-applies fixes that already
+landed. Numbering is contiguous from 1: `resume` refuses a gap rather than guessing which round is
+missing.
 
 ## 5. Stop
 
@@ -149,6 +210,10 @@ round burns tokens to hide that.
 
 Create `docs/harness-dev/loop-runs/` if it does not exist. Write
 `docs/harness-dev/loop-runs/<YYYY-MM-DD>-review-loop-<slug>.json` — `<slug>` names the surface.
+
+This is the aggregate, written once at the end: every `round-<n>.json` from §4, in order, under
+`rounds`. Writing it is what turns the run directory from in-progress into `RUN_COMPLETE`, so write it
+only when the loop has actually stopped.
 
 ```json
 {

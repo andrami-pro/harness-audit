@@ -944,6 +944,207 @@ check("install.sh --target pi installs templates Pi can actually load", () => {
   return `${promptFiles.length} prompt(s) Pi's strict-YAML loader accepts + ${agentFiles.length} agents · session-review correctly withheld`;
 });
 
+// loop-gate.js is the one step in a loop that no agent wrote, so it is the one step whose failure
+// nothing else would report: a chair reading a seat's JSON as prose cannot see that `line: 900` is past
+// the end of a 40-line file, and it will aggregate that finding and hand it to a human as evidence.
+// The fixtures pin each defect class the gate exists to refuse, and the scorecard pins the arithmetic —
+// the number the gate opens on, now computed instead of produced by whichever model holds the chair.
+//
+// Negative controls (2026-08-09, each applied, observed, reverted — all exit 1). The observed message
+// is quoted, not the one predicted when the control was written; two of the three came back different:
+//   anchorError's fs.existsSync branch removed (a path is trusted if it is a non-empty string) ......
+//     "malformed findings exited 1, expected 2 (repair-and-retry)" — NOT the predicted "did not catch
+//     the anchor". Without the guard, statSync threw ENOENT uncaught and the gate DIED on a bad
+//     finding instead of reporting it: a seat's malformed reply would have taken the whole round with
+//     it, a worse failure than the one the control was aimed at, and visible only by running it. The
+//     fs calls in anchorError were wrapped in try/catch because of this control, and re-running it
+//     against the hardened gate then produced the message originally aimed for: "the gate did not
+//     catch an anchor at a file not in the repo". Both runs are recorded: the first found the bug.
+//   scoreOf counting `applies: false` criteria into the denominator .................................
+//     "gate arithmetic drifted: SCORECARD OK: 5 criteria (11 weight counted) | SCORE: 36/100 ·
+//     BLOCKERS: 2" — predicted 40/100; the real drift is larger and it moves the BLOCKER count too,
+//     because a criterion with nothing to bind to starts failing a gate it was never part of.
+//   the `applies: false with no evidence` rule struck from checkScorecard .........................
+//     "the gate lets an unjustified applies:false through — the one exit a criterion has" (as predicted)
+check('loop-gate refuses malformed seat output and computes the gate arithmetic', () => {
+  const script = path.join(ROOT, 'scripts/loop-gate.js');
+  mustExist('scripts/loop-gate.js');
+  execFileSync('node', ['--check', script], { stdio: 'pipe' });
+
+  const run = (args) => {
+    try {
+      return { status: 0, out: execFileSync('node', [script, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }), err: '' };
+    } catch (e) {
+      return { status: e.status, out: e.stdout || '', err: e.stderr || '' };
+    }
+  };
+  const gate = (fixture) => run(['check-findings', path.join(ROOT, 'scripts/fixtures/findings', fixture), '--root', ROOT, '--seat', 'style']);
+
+  const ok = gate('valid-findings.json');
+  if (ok.status !== 0) throw new Error(`the gate rejected valid findings: ${ok.err.split('\n')[0]}`);
+
+  const bad = gate('invalid-findings.json');
+  if (bad.status !== 2) throw new Error(`malformed findings exited ${bad.status}, expected 2 (repair-and-retry)`);
+  for (const [needle, why] of [
+    ['reserved key "id"', 'a seat that named its own finding'],
+    ['does not exist: scripts/does-not-exist.js', 'an anchor at a file not in the repo'],
+    ['past the end of README.md', 'an anchor past the end of a real file'],
+    ['severity "critical"', 'a severity outside the fixed ladder'],
+    ['unknown key "confidence"', 'a key the contract does not have'],
+    ['missing "fix"', 'a finding that names no action'],
+  ]) {
+    if (!bad.err.includes(needle)) throw new Error(`the gate did not catch ${why} (no "${needle}" in its report)`);
+  }
+
+  const card = gate('valid-scorecard.json');
+  if (card.status !== 0) throw new Error(`the gate rejected a valid scorecard: ${card.err.split('\n')[0]}`);
+  // 5 criteria, one applies:false. Counted weight = 3+3+1+1 = 8; passed = 3+1 = 4 -> 50, one failed blocker.
+  if (!/SCORE: 50\/100 · BLOCKERS: 1/.test(card.out)) throw new Error(`gate arithmetic drifted: ${card.out.trim().replace(/\n/g, ' | ')}`);
+
+  const badCard = gate('invalid-scorecard.json');
+  if (badCard.status !== 2) throw new Error(`malformed scorecard exited ${badCard.status}, expected 2`);
+  if (!/applies: false with no evidence/.test(badCard.err)) {
+    throw new Error('the gate lets an unjustified applies:false through — the one exit a criterion has');
+  }
+  if (!/FAILED but "findings" is empty/.test(badCard.err)) {
+    throw new Error('the gate lets a failed criterion through with no finding — a score with no fix behind it');
+  }
+
+  // resume: a half-written run is either resumable or it is a question for a human. It is never
+  // something to reconcile, which is the one behaviour that would silently restart a paid-for round.
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'loop-resume-'));
+  const mk = (name, files) => {
+    const d = path.join(tmp, name);
+    fs.mkdirSync(d, { recursive: true });
+    for (const [f, body] of Object.entries(files)) fs.writeFileSync(path.join(d, f), body);
+    return d;
+  };
+  const states = [
+    ['NO_RUN', mk('empty', {}), 0, /NO_RUN/],
+    ['resumable', mk('two', { 'round-1.json': '{"n":1}', 'round-2.json': '{"n":2}' }), 0, /COMPLETED_ROUNDS: 2\nRESUME_FROM: 3/],
+    ['complete', mk('done', { 'round-1.json': '{"n":1}', '2026-01-01-orchestrate-x.json': '{"verdict":"APROBADO"}' }), 0, /RUN_COMPLETE/],
+    ['gap', mk('gap', { 'round-1.json': '{"n":1}', 'round-3.json': '{"n":3}' }), 2, /AMBIGUOUS_RUN_STATE/],
+    ['unreadable', mk('broken', { 'round-1.json': '{"n":1}', 'round-2.json': '{"n":2' }), 2, /AMBIGUOUS_RUN_STATE/],
+  ];
+  for (const [name, dir, wantStatus, wantText] of states) {
+    const r = run(['resume', dir]);
+    if (r.status !== wantStatus) throw new Error(`resume/${name} exited ${r.status}, expected ${wantStatus}`);
+    if (!wantText.test(r.out + r.err)) throw new Error(`resume/${name} reported "${(r.out + r.err).trim().split('\n')[0]}"`);
+  }
+  fs.rmSync(tmp, { recursive: true, force: true });
+
+  return `6 defect classes refused · SCORE/BLOCKERS computed · ${states.length} resume states`;
+});
+
+// A gate nothing calls is the same vapour as a schema field nothing writes (see the v2-schema check
+// above): loop-gate.js could pass every fixture in this file while no loop in the repo ever ran it.
+// This binds each half of the gate to the commands that have to produce the call.
+//
+// Negative controls (2026-08-09, each applied, observed, reverted — both exit 1):
+//   the check-findings block struck from commands/orchestrate.md ...................................
+//     "orchestrate dispatches seats but never gates their JSON — loop-gate.js check-findings has no
+//      producer"
+//   Bash(node:*) struck from commands/review-loop.md's allowed-tools ...............................
+//     "review-loop calls node but its allowed-tools does not permit it — the gate would be denied at
+//      the first round"
+//   the "report the run as ungated" sentence struck from commands/orchestrate.md ...................
+//     "orchestrate never says what to do when loop-gate.js is absent — a copied-commands install
+//      crashes on the missing script and the chair is left with no instruction, so an ungated run
+//      reports as a gated one". Added after shipping the gate one version with this hole open: the
+//      gate reached two loops that install.sh copies WITHOUT scripts/, and nothing said so.
+check('the panel loops actually run their seats through loop-gate', () => {
+  for (const cmd of ['orchestrate', 'review-loop']) {
+    const src = read(`commands/${cmd}.md`);
+    if (!/loop-gate\.js" check-findings/.test(src)) {
+      throw new Error(`${cmd} dispatches seats but never gates their JSON — loop-gate.js check-findings has no producer`);
+    }
+    if (!/loop-gate\.js" resume/.test(src)) {
+      throw new Error(`${cmd} never checks for a run already in progress — a chair that dies mid-run re-pays for every round`);
+    }
+    if (!/round-<n>\.json/.test(src)) {
+      throw new Error(`${cmd} never writes a per-round file — resume has nothing to count and always reports NO_RUN`);
+    }
+    if (!/AMBIGUOUS_RUN_STATE/.test(src)) {
+      throw new Error(`${cmd} never says what to do when the run state is ambiguous — the one case that must reach a human`);
+    }
+    if (!/Bash\(node:\*\)/.test(src)) {
+      throw new Error(`${cmd} calls node but its allowed-tools does not permit it — the gate would be denied at the first round`);
+    }
+    // `${CLAUDE_PLUGIN_ROOT}` only resolves inside the Claude Code plugin runtime, and install.sh
+    // copies commands/ and agents/ into a project WITHOUT ever copying scripts/. So a copied-commands
+    // install runs `node "/scripts/loop-gate.js"` and gets a module-not-found stack trace — which is
+    // neither of the two exit codes the command tells the chair how to read. Every gate call has to
+    // carry its own fallback, and the run has to be REPORTED as ungated: silence there turns a missing
+    // gate into a passing one, which is the failure mode this whole file exists to refuse.
+    if (!/If that command is not available/.test(src) || !/ungated/.test(src)) {
+      throw new Error(`${cmd} never says what to do when loop-gate.js is absent — a copied-commands install crashes on the missing script and the chair is left with no instruction, so an ungated run reports as a gated one`);
+    }
+  }
+  return '2 panel loops gate their seats, resume their runs, may run node, and degrade honestly without the gate';
+});
+
+// F13 — the capability table is the authority on what the port destroys, and its whole purpose is that
+// install.sh and README §Compatibility stop being two independent retellings of the same caveats. So
+// every row has to reach the reader in both places: the README in prose, install.sh by printing the
+// table rather than its own copy. A row added here with no README disclosure fails this gate.
+//
+// Negative controls (2026-08-09, each applied, observed, reverted — all exit 1):
+//   the loop-gate paragraph struck from README §Compatibility .....................................
+//     FIRST RUN: exit 0. The control DID NOT BITE. The marker was still satisfied by the matrix row
+//     naming the same feature, so a README that had deleted the entire explanation still passed —
+//     the identical trap the guardrail check above records falling into, repeated one check later by
+//     someone who had just read that comment. The matrix rows are now stripped before matching, and
+//     only then did it fire: "opencode: README §Compatibility never discloses the lost capability
+//     'loop-gate'". Recorded because the check was decoration for the length of one edit, and nothing
+//     but the control said so.
+//   install.sh's `node "$PORTER" --capabilities` calls replaced with the old inline echo blocks .....
+//     "install.sh no longer prints the capability table — its warnings are a second copy of it again"
+//   HARNESS_CAPABILITIES.pi.lost emptied ..........................................................
+//     "pi declares no lost capability — the table would pass vacuously"
+check('README and install.sh both disclose every capability the port table destroys', () => {
+  const port = require(path.join(ROOT, 'scripts/port-loops.js'));
+  const t = read('README.md');
+  if (!/## Compatibility across harnesses/.test(t)) throw new Error('README lost the compatibility matrix section');
+  const compatFull = t.split('## Compatibility across harnesses')[1].split(/\n## /)[0];
+  // The MATRIX ROWS ARE STRIPPED before matching, and that is the whole point of this check rather
+  // than an optimisation. Its first version matched the section as a whole, and the negative control
+  // for the newest row (delete the loop-gate paragraph) PASSED: the marker was still satisfied by the
+  // table cell that names the same feature. A cell reading "⚠️ degraded" is a fact a reader skims past
+  // without learning the consequence — the same lesson the guardrail check above records learning the
+  // hard way, arriving one check later. So the disclosure must live in prose, where the loss is
+  // explained, and a matrix row alone can no longer stand in for it.
+  const compat = compatFull.split('\n').filter((l) => !l.trim().startsWith('|')).join('\n');
+
+  const targets = Object.entries(port.HARNESS_CAPABILITIES);
+  if (!targets.length) throw new Error('HARNESS_CAPABILITIES is empty — this check would pass vacuously');
+
+  let rows = 0;
+  for (const [target, cap] of targets) {
+    if (!cap.lost || !cap.lost.length) throw new Error(`${target} declares no lost capability — the table would pass vacuously`);
+    const report = port.capabilityReport(target);
+    for (const lost of cap.lost) {
+      rows += 1;
+      if (!lost.readmeMarker || !lost.warning || !lost.warning.length) {
+        throw new Error(`${target}/${lost.id} is missing its readmeMarker or its warning text`);
+      }
+      // Matched against the section a reader lands on from the install instructions, never the whole
+      // file: a caveat three sections away is a caveat hidden from the person who needs it.
+      if (!new RegExp(lost.readmeMarker, 'i').test(compat)) {
+        throw new Error(`${target}: README §Compatibility never discloses the lost capability '${lost.id}'`);
+      }
+      if (!report.includes(lost.warning[0])) {
+        throw new Error(`${target}: capabilityReport() drops the warning for '${lost.id}' — install-time silence on a real loss`);
+      }
+    }
+  }
+
+  const inst = read('install.sh');
+  if (!/--capabilities/.test(inst)) {
+    throw new Error('install.sh no longer prints the capability table — its warnings are a second copy of it again');
+  }
+  return `${rows} capability row(s) across ${targets.length} targets, disclosed in README + install.sh`;
+});
+
 const GLYPH = { pass: '✓', fail: '✗', skip: '⊘' };
 let failed = 0, skipped = 0;
 for (const r of results) {

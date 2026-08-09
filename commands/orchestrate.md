@@ -1,7 +1,7 @@
 ---
 description: "Loop 3 — the critic panel. Four specialist critics (correctness, domain, safety, style) review the given artifacts in parallel, findings are aggregated, fixes are applied, repeat until a round adds no new blocker or major. Dispatch this when a change touches published or customer-facing content, marketing copy, multi-locale text, or factual/regulated claims — and whenever a diff is broad enough that one reviewer would miss a whole class of defect. Do NOT dispatch it for typos or code-only diffs; that is your normal review or develop-phase. Cost: medium (4 critics x up to 3 rounds)."
 argument-hint: <paths, PR ref, or a description of the artifacts to review>
-allowed-tools: Task, Read, Write, Edit, Grep, Glob, Bash(graphify:*), Bash(git diff:*), Bash(git status:*), Bash(mkdir:*), Bash(date:*)
+allowed-tools: Task, Read, Write, Edit, Grep, Glob, Bash(graphify:*), Bash(git diff:*), Bash(git status:*), Bash(mkdir:*), Bash(date:*), Bash(node:*)
 ---
 
 # /orchestrate — the critic panel (Loop 3)
@@ -30,6 +30,27 @@ Read the graph before you read the files: `graphify query "<what the artifacts t
 scoped subgraph and costs a fraction of a grep sweep. If the project has no `graphify-out/graph.json`,
 skip it and move on.
 
+Name the run — `<YYYY-MM-DD>-orchestrate-<slug>` — and use that one slug for the run directory, the
+round files and the findings JSON.
+
+**Then check whether that run is already in progress.** Rounds are files, not conversation: a chair
+that dies in round 2 of a panel has already paid for round 1, and the only way to keep it is to have
+written it down.
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/loop-gate.js" resume docs/harness-dev/loop-runs/<run-slug>/
+```
+
+**If that command is not available**, list the run directory yourself and read the `round-<n>.json`
+files it holds. The rule that matters survives the missing script: unless what you find is plainly the
+contiguous sequence `1..n`, stop and hand it to the human rather than reconciling it.
+
+`NO_RUN` → start at round 1. `RESUME_FROM: <n>` → round `n` is the next one: read the round files
+already on disk for what is open, and never re-dispatch a round that is recorded. `RUN_COMPLETE` →
+that slug has published a verdict; pick another slug or stop. **`AMBIGUOUS_RUN_STATE` (exit 2) → stop
+and hand the human the files it listed.** Do not reconcile it yourself — a loop that repairs its own
+half-written state resumes into a round nobody chose, and it reports the result as if someone had.
+
 ## 2. Round — four critics, in parallel (max 3 rounds)
 
 Launch all four in **one message, four Task calls** — they must run in parallel and must not see
@@ -56,10 +77,42 @@ Never pass a critic: the previous round's findings, the fixes you applied, your 
 artifacts, or another critic's output. Independence is the whole point of a panel — the moment they
 share context, four seats collapse into one.
 
-## 3. Aggregate
+**Re-anchor before every round after the first: re-read the prompt template above in this file and
+send it unchanged.** The critics are fresh each round and cannot drift; you are not. By round 3 you
+are holding every finding, every fix and every reply, and the natural thing to do with all that
+context is to be helpful with it — a clause about what the last round found, a hint about where to
+look. Each of those is the independence leak, arriving as a courtesy rather than as a decision. The
+round number and the file list are the only two things that change between rounds.
 
-Collect the four JSON arrays. Assign each finding an `id` of `R<round>-F<k>` (k restarts per round)
-and the `critic` field (`correctness` | `domain` | `safety` | `style`) — the critics do not set these.
+## 3. Aggregate — but gate each seat's JSON first
+
+Write each seat's raw reply to `docs/harness-dev/loop-runs/<run-slug>/raw/<round>-<seat>.json`, then
+run the gate over it before a single finding enters the aggregate:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/loop-gate.js" check-findings <file> --root . --seat <seat>
+```
+
+**If that command is not available** — the install has these commands but not the plugin's `scripts/`,
+which is what a copied-commands install looks like — say so once, in one line, and check each seat's
+JSON yourself against the contract in its agent file: the fixed severity ladder, a `file` that exists
+in the repo, a `line` inside that file, a non-empty summary and fix, and no `id`/`critic` the seat
+assigned itself. Then **say in the report that the run was ungated.** A missing gate is not a passing
+gate, and a crash from a missing script is not a verdict.
+
+Exit 0 → aggregate it. **Exit 2 → do not aggregate it, and do not repair it yourself.** Re-dispatch
+that one seat with the gate's error list appended verbatim to its prompt: the errors are written to be
+acted on without help, and a chair paraphrasing them is a chair guessing what the seat meant. A seat
+that fails the gate twice is a finding about the panel — record it, and carry on with the others.
+
+The gate is deterministic and costs no tokens. It refuses a finding anchored at a file that is not in
+the repo or at a line past the end of a real one, a severity outside the fixed ladder, and a seat that
+assigned its own `id` or `critic`. None of those are visible to a chair reading JSON as prose, and the
+first two are exactly what a fabricated finding looks like from the inside.
+
+Collect the four gated JSON arrays. Assign each finding an `id` of `R<round>-F<k>` (k restarts per
+round) and the `critic` field (`correctness` | `domain` | `safety` | `style`) — the critics do not set
+these, and the gate rejects them if they try.
 
 A finding is **new** if it does not restate a finding from the previous round: same seat, same file,
 same defect. Judge by meaning, not by string equality. A finding the fixer failed to resolve stays
@@ -73,6 +126,13 @@ yourself. Either way: apply **all** findings of the round — blocker, major and
 Then go to round n+1.
 
 The fixer gets the findings. The critics never do.
+
+**Close the round on disk before you open the next one.** Write
+`docs/harness-dev/loop-runs/<run-slug>/round-<n>.json` — the round object exactly as §6 specifies it,
+one round per file. That file is what `resume` counts, and it is the only thing that survives a chair
+that dies mid-run. Write it after the fix round, so a resumed run never re-applies fixes that already
+landed. Numbering is contiguous from 1: `resume` refuses a gap rather than guessing which round is
+missing.
 
 ## 5. Stop
 
@@ -92,6 +152,10 @@ Open minors never block: they are reported, not gated.
 
 Create `docs/harness-dev/loop-runs/` if it does not exist. Write
 `docs/harness-dev/loop-runs/<YYYY-MM-DD>-orchestrate-<slug>.json` — `<slug>` names the artifacts.
+
+This is the aggregate, written once at the end: every `round-<n>.json` from §4, in order, under
+`rounds`. Writing it is what turns the run directory from in-progress into `RUN_COMPLETE`, so write it
+only when the loop has actually stopped.
 
 ```json
 {

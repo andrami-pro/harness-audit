@@ -1,0 +1,13 @@
+[
+  { "id": "R1-F1", "critic": "style", "severity": "critical", "file": "README.md", "line": 1,
+    "summary": "a seat that named its own finding and invented a severity",
+    "fix": "let the chair assign id/critic and use the fixed ladder" },
+  { "severity": "major", "file": "scripts/does-not-exist.js", "line": 12,
+    "summary": "anchored at a file that is not in the repo",
+    "fix": "anchor it where the defect is" },
+  { "severity": "major", "file": "README.md", "line": 999999,
+    "summary": "anchored past the end of a real file",
+    "fix": "cite the line the defect is actually on" },
+  { "severity": "minor", "file": "README.md", "line": 3, "confidence": 0.4,
+    "summary": "carries a key the contract does not have, and no fix" }
+]

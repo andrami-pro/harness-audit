@@ -238,17 +238,11 @@ case "$TARGET" in
 
     case "$TARGET" in
       opencode|kilo-loops)
+        # Every loss below is printed from HARNESS_CAPABILITIES in port-loops.js, which is also what
+        # validate.js binds the README's disclosures to. One table, three readers — an install-time
+        # warning can no longer drift away from the caveat the README makes.
         echo ""
-        echo "⚠ The manual-only guardrail does NOT cross over. In Claude Code, /review-loop,"
-        echo "  /iterate and /session-review ship with 'disable-model-invocation: true' — the model"
-        echo "  may suggest them, never fire them. Neither OpenCode nor Kilo Code has an equivalent"
-        echo "  field, so on this target all three are auto-dispatchable by the model: two of them"
-        echo "  are token-hungry, and /session-review analyses YOU. Put the restriction in your"
-        echo "  AGENTS.md and check it holds — nothing enforces it locally anymore."
-        echo ""
-        echo "⚠ The 'model:' line in each ported agent is still a Claude alias (sonnet/fable/opus),"
-        echo "  which this target cannot resolve. Re-run with --lineup to stamp real provider/model"
-        echo "  ids, or edit the files by hand."
+        node "$PORTER" --capabilities "$TARGET"
         ;;
       pi)
         echo ""
@@ -273,14 +267,11 @@ case "$TARGET" in
         echo "  the model (no builtin tool, no pi-subagents tool) lets it invoke one itself. So"
         echo "  /review-loop and /iterate stay human-fired on Pi, unlike on OpenCode/Kilo Code where"
         echo "  the equivalent field is dropped outright."
+        # Same table, same reason as the OpenCode/Kilo branch above: the capability losses are read
+        # from port-loops.js, not restated here. The three notes above stay inline because none of them
+        # is a loss — trust, shadowing and the preserved veto are facts about how Pi loads things.
         echo ""
-        echo "⚠ correctness-critic lost WebSearch (pi-subagents has no verified equivalent builtin)."
-        echo "  Its whole job is checking claims against the web; on Pi it cannot. Install"
-        echo "  pi-web-access and add its tools to that agent's frontmatter, or do not rely on it here."
-        echo ""
-        echo "⚠ The 'model:' line in each ported agent (and none of the commands, which carry no"
-        echo "  model: field) is still a Claude alias (sonnet/fable/opus), which pi-subagents cannot"
-        echo "  resolve. Re-run with --lineup to stamp real provider/model ids, or edit by hand."
+        node "$PORTER" --capabilities pi
         ;;
     esac
     ;;

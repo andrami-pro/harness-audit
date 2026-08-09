@@ -146,6 +146,7 @@ different rates. Read this before assuming a layer "just works" on a harness you
 | The 5 loop commands | ✅ native (Task tool) | ✅ native (Task tool) | ✅ native (Task tool) | ⚠️ **4 of 5** as prompt templates, via a third-party extension — `/session-review` does not port, see below |
 | The 7 agents | ✅ native | ✅ native | ✅ native | ✅ via the same third-party extension |
 | Manual-only guardrail (`disable-model-invocation`) | ✅ enforced | ❌ **no equivalent — dropped** | ❌ **no equivalent — dropped** | ✅ **preserved by construction — see below** |
+| Deterministic loop gate (`loop-gate.js`) | ✅ native | ⚠️ **degraded to a hand-check** | ⚠️ **degraded to a hand-check** | ⚠️ **degraded to a hand-check** |
 | Hooks + dashboard (`loop-stats.js`) | ✅ native | 📖 documented, not automated | 📖 documented, not automated | 📖 documented, not automated |
 
 **Loops on Pi, in full — read this before you install:** Pi's core ships with no sub-agent support at
@@ -228,6 +229,18 @@ either harness; there is no error, no log line, nothing to grep for. Pi, via the
 [`@gotgenes/pi-permission-system`](https://github.com/gotgenes/pi-permission-system) extension, is the
 one target that actually enforces a tool-permission field at runtime — but that is a different,
 non-bundled piece from `pi-subagents`, and this repo does not depend on it.
+
+**The deterministic loop gate degrades on every target but Claude Code.** `/orchestrate` and
+`/review-loop` shell out to this plugin's `scripts/loop-gate.js` twice per run: once to refuse a
+critic's findings that anchor at a file which is not in the repo or at a line past the end of a real
+one, or that carry a severity outside the fixed ladder — and once to refuse to *guess* the state of a
+half-written run rather than reconciling it silently. On the scorer's scorecard the same call also
+recomputes `SCORE` and `BLOCKERS` from the criteria table, so the number the gate opens on is produced
+by arithmetic instead of by whichever model is holding the chair. None of these targets installs this
+repo's `scripts/`, and `${CLAUDE_PLUGIN_ROOT}` expands to nothing outside the Claude Code plugin
+runtime, so the port rewrites both steps into hand-checks the chair performs **on itself** — which is
+precisely the party the gate exists to be independent of. The rounds, the stop conditions and the
+findings aggregation are unaffected; what is lost is the only step in the loop that no agent wrote.
 
 **Hooks and the dashboard are Claude Code-only by design** — they are ~20 lines of hook glue per
 harness, each with a different plugin API (Claude Code's hooks are an external command reading JSON
@@ -422,12 +435,53 @@ round in a file, not a chat turn (`LEARNINGS.md`, a findings JSON, `process.md` 
 Full rationale for why the verifier has to be independent and why memory has to mature past raw notes:
 [WHITEPAPER.md — Pillar 4, Loop Design](WHITEPAPER.md#pillar-4--loop-design-rubrics--continuous-memory).
 
+### The one step in a loop no agent wrote — `scripts/loop-gate.js`
+
+Every loop above has the same costume seam: a seat emits JSON, and a chair — a model — reads it,
+trusts it, and aggregates it. Nothing between the two can say no. A finding that anchors at a file
+which is not in the repo, or at line 900 of a 40-line file, is indistinguishable from a real one once
+it is inside the findings JSON, and it will be reported to a human as evidence. That is what a
+fabricated finding looks like from the inside, and it is invisible to a chair reading JSON as prose.
+
+`/orchestrate` and `/review-loop` now call the gate twice per run. It costs zero tokens.
+
+```bash
+node scripts/loop-gate.js check-findings <seat.json> --root . --seat correctness
+node scripts/loop-gate.js resume docs/harness-dev/loop-runs/<run-slug>/
+```
+
+**`check-findings`** refuses the defect classes the seats' own agent files already forbid but nothing
+measured: an anchor at a file that does not exist or a line past the end of a real one, a severity
+outside the fixed ladder, a key the contract does not have, a seat that assigned its own `id`/`critic`,
+and — on the scorer's scorecard — a criterion parked at `applies: false` with no justification, or a
+failed criterion with no finding behind it. Exit `2` means repair and retry: the errors are numbered
+and written to be acted on by the seat itself, so the chair re-dispatches with the list appended
+verbatim instead of paraphrasing what it thinks went wrong.
+
+On a scorecard the same call also prints `SCORE: <n>/100 · BLOCKERS: <m>`, computed from the criteria
+table with the weights the scorer's own file states. **Arithmetic is the one part of a gate that never
+needed judgment**, and until now it was being done by whichever model happened to be holding the chair.
+The gate still decides nothing — `score ≥ 90 ∧ blockers = 0` remains the chair's call, on two numbers
+it no longer produces itself.
+
+**`resume`** makes a run's rounds files instead of conversation. Each round writes
+`docs/harness-dev/loop-runs/<run-slug>/round-<n>.json` as it closes, so a chair that dies in round 2 of
+a five-seat deep read does not re-pay for round 1. It answers `NO_RUN`, `RESUME_FROM: <n>`, or
+`RUN_COMPLETE` — and when the state is not one of those three (a gap in the sequence, an unreadable
+round file), it answers **`AMBIGUOUS_RUN_STATE`, lists the files, and exits 2**. It never reconciles.
+A loop that repairs its own half-written state resumes into a round nobody chose and reports the
+result as though someone had.
+
+The gate is Claude Code-only; every other target degrades it to a hand-check the chair performs on
+itself. See [Compatibility across harnesses](#compatibility-across-harnesses).
+
 ## Repo layout
 
 ```
 .claude-plugin/     plugin + marketplace manifests
 skills/harness-audit/   SKILL.md + rubric-template.md + verifier-protocol.md (the portable part)
 hooks/ + scripts/hooks/ security guards (plugin install only)
+scripts/loop-gate.js    the deterministic seam inside a loop — see below
 scripts/validate.js     this package's own preflight gate — run `node scripts/validate.js` before releasing
 install.sh              multi-IDE skill installer
 WHITEPAPER.md           full rationale, benchmarks provenance, and theory

@@ -1,0 +1,8 @@
+[
+  { "severity": "blocker", "file": "README.md", "line": 42,
+    "summary": "the install snippet names a marketplace that does not exist",
+    "fix": "point it at the published marketplace id" },
+  { "severity": "minor", "file": "scripts/validate.js", "line": 0,
+    "summary": "the gate reports skips and passes in one count",
+    "fix": "separate the two in the summary line" }
+]
