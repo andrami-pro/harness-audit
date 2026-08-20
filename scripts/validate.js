@@ -421,6 +421,88 @@ check('model-lineup.js rejects same-family reviewer/implementer fixtures', () =>
   return `valid fixture resolves clean, ${rejected.length} same-family fixtures rejected (exit 2)`;
 });
 
+// D25c — `check` is the only thing in this repo that reads the *live* model registry, and it exists
+// because a line-up can be perfectly valid JSON, pass every guardrail above, and still name a model
+// no provider serves. That is not hypothetical: `~/.agents/model-lineup.json` shipped
+// `nvidia-nim/zai/glm-5.2` for months (the real pair is `nvidia/z-ai/glm-5.2`) and the only symptom
+// was a scorer dispatch that hung 120s and exited 1 — no error naming the model.
+//
+// The catalog is pinned to a fixture, not read from `pi --list-models`, so this check means the same
+// thing on a machine without pi installed. The live path is exercised by hand; the parse is shared.
+//
+// Negative controls — each mutation applied, observed, reverted (2026-08-20, both exit 1):
+//   squash() → identity (exact string compare for suggestions) ....................................
+//     still exit 1, but the message lost "did you mean nvidia/z-ai/glm-5.2?" → the check would name
+//     a problem without naming the fix, which is the whole value here.
+//   catalogProblems() skipping entries whose provider is unknown ..................................
+//     nvidia-nim/zai/glm-5.2 passed silently, exit 0 → "check accepted a model no catalog serves".
+check('model-lineup.js check catches a lineup naming a model no provider serves', () => {
+  const script = path.join(ROOT, 'scripts/model-lineup.js');
+  const catalog = path.join(ROOT, 'scripts/fixtures/lineup/catalog-pi.txt');
+  mustExist('scripts/fixtures/lineup/catalog-pi.txt');
+  mustExist('scripts/fixtures/lineup/invalid-catalog-miss.json');
+
+  execFileSync('node', [script, 'check', '--file', path.join(ROOT, 'scripts/fixtures/lineup/valid.json'),
+    '--catalog', catalog], { stdio: 'pipe' });
+
+  let status = null;
+  let stderr = '';
+  try {
+    execFileSync('node', [script, 'check', '--file', path.join(ROOT, 'scripts/fixtures/lineup/invalid-catalog-miss.json'),
+      '--catalog', catalog], { stdio: 'pipe' });
+  } catch (e) { status = e.status; stderr = String(e.stderr || ''); }
+  if (status === null) throw new Error('check accepted a lineup naming a model no catalog serves (invalid-catalog-miss.json)');
+  if (status !== 1) throw new Error(`invalid-catalog-miss.json: expected exit 1, got ${status}`);
+  if (!stderr.includes('nvidia/z-ai/glm-5.2')) {
+    throw new Error(`check named the problem but not the fix — stderr lacks the corrected id: ${stderr.trim()}`);
+  }
+
+  // A machine without pi must not fail the line-up it cannot read a catalog for.
+  const skipped = execFileSync('node', [script, 'check', '--file', path.join(ROOT, 'scripts/fixtures/lineup/valid.json'),
+    '--catalog', path.join(ROOT, 'scripts/fixtures/lineup/does-not-exist.txt')], { encoding: 'utf8' });
+  if (!/SKIPPED/.test(skipped)) throw new Error(`an unreadable catalog should SKIP, not pass silently: ${skipped.trim()}`);
+
+  return 'valid lineup passes · wrong pair rejected (exit 1) and the corrected id named · unreadable catalog skips';
+});
+
+// The editor is the only way a model id is supposed to enter the line-up, so its non-TTY path is the
+// one this check can reach: it must print the matrix and run the same gates, never open raw mode.
+// (A TUI that grabbed stdin here would hang the preflight instead of failing it.)
+//
+// Negative controls — each mutation applied, observed, reverted (2026-08-20):
+//   the isTTY guard in main() removed .................. process.stdin.setRawMode threw
+//     "The "process.stdin" property must be TTY" → the check failed, which is the point: a pipe must
+//     never reach the interactive path.
+//   paint() always returning the escape wrapper ........ the piped matrix carried \x1b[2m around every
+//     cell → "static output must be pipe-safe" fired.
+check('lineup-ui prints and validates the matrix without a TTY', () => {
+  const script = path.join(ROOT, 'scripts/lineup-ui.js');
+  mustExist('scripts/lineup-ui.js');
+  mustExist('bin/lineup');
+  execFileSync('node', ['--check', script], { stdio: 'pipe' });
+
+  const catalog = path.join(ROOT, 'scripts/fixtures/lineup/catalog-pi.txt');
+  const out = execFileSync('node', [script, '--global', path.join(ROOT, 'scripts/fixtures/lineup/valid.json'),
+    '--catalog', catalog], { encoding: 'utf8' });
+  for (const role of ['architect', 'implementer', 'reviewer', 'judge']) {
+    if (!out.includes(role)) throw new Error(`the printed matrix is missing the ${role} row`);
+  }
+  if (!out.includes('nvidia/z-ai/glm-5.2')) throw new Error('the printed matrix does not show the pi override');
+  if (out.includes('\x1b[')) throw new Error('static output must be pipe-safe — it still carries ANSI escapes');
+  if (!/✓/.test(out)) throw new Error(`a valid lineup should print the ok marker: ${out}`);
+
+  let status = null;
+  let bad = '';
+  try {
+    bad = execFileSync('node', [script, '--global', path.join(ROOT, 'scripts/fixtures/lineup/invalid-catalog-miss.json'),
+      '--catalog', catalog], { encoding: 'utf8' });
+  } catch (e) { status = e.status; bad = String(e.stdout || ''); }
+  if (status !== 1) throw new Error(`a lineup naming a nonexistent model must exit 1 from the viewer, got ${status}`);
+  if (!bad.includes('nvidia/z-ai/glm-5.2')) throw new Error('the viewer flagged the bad entry without naming the corrected id');
+
+  return 'matrix printed pipe-safe · valid lineup ✓ · unknown model exits 1 and names the fix';
+});
+
 // The shipped `model:` values in agents/*.md are the exact thing a reader opening one of those files
 // on GitHub reacts to — "why is this hardcoded?" — so the README has to answer it where that reader
 // lands, in the vocabulary the code actually enforces, not a softer paraphrase. Grounded three ways so

@@ -1,0 +1,4 @@
+#!/bin/sh
+# Editor del line-up de modelos (rol x harness). Atajo de:
+#   node <repo>/scripts/model-lineup.js ui
+exec node "$(CDPATH= cd -- "$(dirname -- "$0")/../scripts" && pwd)/model-lineup.js" ui "$@"

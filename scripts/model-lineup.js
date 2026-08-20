@@ -14,6 +14,16 @@
 //               confirmable: the caller must reject, not prompt.
 //     Exit 1  — usage error or unreadable file.
 //
+//   node model-lineup.js check [--global <path>] [--project <path>] [--catalog <path>]
+//     Validates every provider-qualified entry against the live `pi --list-models` catalog.
+//     Exit 0 — all present, or no catalog reachable. Exit 1 — an entry names a model nothing serves.
+//
+//   node model-lineup.js ui [--global <path>]
+//     Editor de la matriz rol x harness. Sin TTY imprime la matriz y valida, sin editar.
+//
+//   node model-lineup.js ollama-sync
+//     Regenera el bloque `ollama` de ~/.pi/agent/models.json desde `ollama list`.
+//
 //   node model-lineup.js record-exception --project <path> --role <r> --model <m> --note <text>
 //     Appends a confirmed SOFT-guardrail exception to the PROJECT lineup file (creating it if
 //     needed) under confirmedExceptions[]. Never touches the global file or any invariant check.
@@ -237,17 +247,131 @@ function cmdRecordException(argv) {
   process.stdout.write(`${JSON.stringify(written, null, 2)}\n`);
 }
 
+// D25c — the catalog check. `provider` and `model` are free strings in the lineup file; nothing in
+// resolve() can tell `nvidia-nim/zai/glm-5.2` (which no registry serves) from `nvidia/z-ai/glm-5.2`
+// (which Pi serves today), so a typo there does not fail loudly — it fails at dispatch, minutes in,
+// as a timeout with no diagnosis. This check reads the catalog from the harness itself
+// (`pi --list-models`, the same registry Pi resolves against) and matches every provider-qualified
+// entry against it.
+//
+//   node model-lineup.js check [--global <path>] [--project <path>] [--file <path>] [--catalog <path>]
+//     Exit 0 — every checkable entry exists (or no catalog is reachable: a machine without pi
+//              installed cannot be told its line-up is wrong).
+//     Exit 1 — an entry names a provider/model pair the catalog does not have.
+//
+// Only `harness.<multi-provider target>` entries are checked. `defaults` holds bare Anthropic ids
+// aimed at Claude Code, whose registry is NOT Pi's — Pi lists no `claude-opus-5` — and failing a
+// working line-up over that would make the check a liar.
+function loadCatalog(catalogPath) {
+  let text = null;
+  if (catalogPath) {
+    try { text = fs.readFileSync(catalogPath, 'utf8'); }
+    catch (e) { return { pairs: null, reason: `cannot read ${catalogPath}: ${e.message}` }; }
+  } else {
+    try {
+      text = require('node:child_process')
+        .execFileSync('pi', ['--list-models'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    } catch { return { pairs: null, reason: 'pi --list-models unavailable (pi not installed or not on PATH)' }; }
+  }
+  const pairs = new Set();
+  const providers = new Set();
+  for (const line of String(text).split('\n')) {
+    const m = line.trim().match(/^(\S+)\s+(\S+)/);
+    if (!m || m[1] === 'provider') continue;   // skip the header row
+    pairs.add(`${m[1]}/${m[2]}`);
+    providers.add(m[1]);
+  }
+  return pairs.size ? { pairs, providers } : { pairs: null, reason: 'catalog parsed to zero models' };
+}
+
+// Same id, different punctuation, is the failure this check exists for (`zai/` vs `z-ai/`), so the
+// suggestion is matched on the id with every non-alphanumeric character removed rather than on an
+// edit distance — it names the intended model exactly instead of ranking three plausible ones.
+const squash = (s) => String(s).toLowerCase().replace(/[^a-z0-9]/g, '');
+
+function catalogProblems(lineup, catalog) {
+  const problems = [];
+  for (const [target, roles] of Object.entries(lineup.harness || {})) {
+    if (!MULTI_PROVIDER_TARGETS.has(target)) continue;
+    for (const [role, entry] of Object.entries(roles || {})) {
+      if (!entry || !entry.provider) continue;
+      const provider = String(entry.provider).trim();
+      const model = String(entry.model || '').trim();
+      const pair = `${provider}/${model}`;
+      if (catalog.pairs.has(pair)) continue;
+      const wanted = squash(model);
+      const suggestions = [...catalog.pairs].filter((p) => {
+        const i = p.indexOf('/');
+        return squash(p.slice(i + 1)) === wanted;
+      });
+      problems.push({ target, role, pair, providerKnown: catalog.providers.has(provider), suggestions });
+    }
+  }
+  return problems;
+}
+
+function cmdCheck(argv) {
+  const filePath = opt(argv, '--file', null);
+  let lineup;
+  try {
+    lineup = filePath
+      ? readJsonSafe(filePath)
+      : mergeLineups(readJsonSafe(opt(argv, '--global', null)), readJsonSafe(opt(argv, '--project', null)));
+  } catch (e) {
+    process.stderr.write(`model-lineup.js: ${e.message}\n`);
+    process.exit(1);
+  }
+  if (!lineup || (!lineup.defaults && !lineup.harness)) {
+    process.stderr.write('model-lineup.js: no lineup found (checked --file, --global and --project paths)\n');
+    process.exit(1);
+  }
+
+  const catalog = loadCatalog(opt(argv, '--catalog', null));
+  if (!catalog.pairs) {
+    process.stdout.write(`model-lineup.js check: SKIPPED — ${catalog.reason}\n`);
+    process.exit(0);
+  }
+
+  const problems = catalogProblems(lineup, catalog);
+  if (!problems.length) {
+    process.stdout.write(`model-lineup.js check: ok — every provider-qualified entry exists in a catalog of ${catalog.pairs.size} models\n`);
+    process.exit(0);
+  }
+  for (const p of problems) {
+    const hint = p.suggestions.length
+      ? ` — did you mean ${p.suggestions.join(' or ')}?`
+      : p.providerKnown
+        ? ` — provider "${p.pair.slice(0, p.pair.indexOf('/'))}" exists but serves no such model`
+        : ` — provider "${p.pair.slice(0, p.pair.indexOf('/'))}" is not in the catalog`;
+    process.stderr.write(`model-lineup.js check: harness.${p.target}.${p.role} = ${p.pair} not found${hint}\n`);
+  }
+  process.exit(1);
+}
+
 function main() {
   const [cmd, ...argv] = process.argv.slice(2);
   if (cmd === 'resolve') return cmdResolve(argv);
   if (cmd === 'record-exception') return cmdRecordException(argv);
-  process.stderr.write(`model-lineup.js: unknown command '${cmd || ''}' — usage: resolve | record-exception\n`);
+  if (cmd === 'check') return cmdCheck(argv);
+  if (cmd === 'ui' || cmd === 'ollama-sync') {
+    // The editor lives in its own file: it is TTY code (raw mode, redraws) and this one is required
+    // by validate.js, install.sh and loop-stats.js, none of which should load a terminal UI to read a
+    // model id. `ollama-sync` rides along because it edits the catalog this editor reads.
+    process.argv = [process.argv[0], require('node:path').join(__dirname, 'lineup-ui.js'),
+      ...(cmd === 'ollama-sync' ? ['ollama-sync'] : []), ...argv];
+    return require('./lineup-ui.js').main();
+  }
+  process.stderr.write(`model-lineup.js: unknown command '${cmd || ''}' — usage: resolve | check | ui | ollama-sync | record-exception\n`);
   process.exit(1);
 }
 
-if (require.main === module) main();
 
 module.exports = {
   ROLES, baseModel, familyOf, isKnownModel, mergeLineups, resolveLineup,
   hardViolation, softViolations, recordException, MULTI_PROVIDER_TARGETS, KNOWN_INVARIANTS,
+  loadCatalog, catalogProblems,
 };
+
+// Exported before main() runs: lineup-ui.js requires this file, and this file dispatches `ui` into
+// lineup-ui.js — a cycle where whichever side runs first must already have published its exports.
+if (require.main === module) main();

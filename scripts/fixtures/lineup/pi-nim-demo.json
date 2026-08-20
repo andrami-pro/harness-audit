@@ -11,8 +11,8 @@
     "judge":        { "model": "claude-fable-5" }
   },
   "harness": {
-    "pi":     { "implementer": { "provider": "nvidia-nim", "model": "zai/glm-5.2" } },
-    "claude": { "implementer": { "provider": "nvidia-nim", "model": "zai/glm-5.2" } },
+    "pi":     { "implementer": { "provider": "nvidia", "model": "z-ai/glm-5.2" } },
+    "claude": { "implementer": { "provider": "nvidia", "model": "z-ai/glm-5.2" } },
     "kilo":   {}
   }
 }

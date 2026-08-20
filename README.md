@@ -127,12 +127,25 @@ both just became the one model your session is running.
    On every audit after that, it re-stamps your project's own `.claude/agents/*.md` from whatever line-up
    already exists — the path that covers a plugin install (`/plugin marketplace add` + `/plugin install`),
    which never runs `install.sh` at all.
-3. Edit `~/.agents/model-lineup.json` by hand — `scripts/model-lineup.js` (`resolveLineup`, `familyOf`,
+3. `./bin/lineup` (or `node scripts/model-lineup.js ui`) — a terminal editor for the role x harness
+   matrix. Every value is picked from the live catalog (`pi --list-models`), never typed, and a save is
+   refused while either gate below is red. Without a TTY the same command prints the matrix, validates it
+   and exits — usable in a pipe or a subagent. `node scripts/model-lineup.js ollama-sync` refreshes the
+   `ollama` block of `~/.pi/agent/models.json` from `ollama list`, so the catalog matches what the local
+   server actually serves.
+4. Edit `~/.agents/model-lineup.json` by hand — `scripts/model-lineup.js` (`resolveLineup`, `familyOf`,
    `hardViolation`, `softViolations`) is the one place that schema is read and validated; nothing else in
    this repo reimplements the resolution.
 
 Whichever path you use, `scripts/model-lineup.js` rejects (exit `2`, not confirmable) any line-up where
 the reviewer/critic and the implementer resolve to the same model family.
+
+A second gate catches the other way a line-up breaks: `node scripts/model-lineup.js check` matches every
+provider-qualified entry against the live catalog and exits `1` when one names a model nothing serves —
+naming the corrected id. The failure it exists for is silent: a line-up reading
+`nvidia-nim/zai/glm-5.2` (the real pair is `nvidia/z-ai/glm-5.2`) is valid JSON, passes every other check,
+and surfaces only as a dispatch that hangs and exits 1 with no mention of the model. On a machine without
+`pi` installed the check reports SKIPPED rather than failing a line-up it cannot verify.
 
 ## Compatibility across harnesses
 
