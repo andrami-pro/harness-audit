@@ -1,0 +1,3 @@
+# Long
+
+This document has grown past the point where a reader can hold it in one sitting. It restates rules that live elsewhere, retells the incident that produced each rule, and appends a paragraph every time something goes wrong, because appending is always easier than relocating. Each paragraph is defensible on its own. Together they are the reason nobody reads this file any more, and the reason the rules it carries stopped binding anyone. A budget does not judge the prose. It only refuses the next paragraph until an earlier one moves to the tier that owns it, which is the decision review keeps deferring and a gate cannot. That is the whole mechanism, and it is enough to keep this page readable.

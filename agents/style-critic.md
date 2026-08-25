@@ -1,6 +1,6 @@
 ---
 name: style-critic
-description: The prose seat on the critic panel. Judges tone, AI-speak, copy quality, and comment discipline in code — measuring comment density rather than eyeballing it. Use inside /orchestrate or /review-loop; it never edits.
+description: The prose seat on the critic panel. Judges tone, AI-speak, copy quality, comment discipline in code — measuring comment density rather than eyeballing it — and chain-of-thought leakage (prose written from the authoring session's vantage instead of the repository's). Use inside /orchestrate or /review-loop; it never edits.
 tools: Read, Grep, Bash
 model: sonnet
 ---
@@ -72,6 +72,61 @@ you do not file opinions.
 
 Prose artifacts (markdown, content, copy) have no comment budget — do not measure them.
 
+### 5. Chain-of-thought leakage — 8 classes
+
+Leakage is prose whose vantage is the **authoring session** rather than the repository: it cites
+artifacts only that session could see, narrates the change instead of the state, or argues with a
+reviewer who has left. It lives in comments, JSDoc, READMEs, decision notes and agent files alike.
+
+**The one test.** For every suspect passage ask: *could a reader at HEAD, with no transcript, no PR
+thread and no uncommitted draft, resolve every reference and verify every claim?* If no, it is
+leakage. If yes, it is not — however historical it sounds.
+
+| # | Class | Looks like |
+|---|---|---|
+| 1 | Dead design-session citations | `(decision 7)`, `(audit C2)`, `design §4.7`, `plan §1.4`, phase labels (`T4`, `W3`) |
+| 2 | Stack / PR vantage | "a later PR in this stack", "this PR adds", "the previous commit" |
+| 3 | Change narration and version stamps | "used to", "no longer", "previously", "the old X", "v1", "this cut", "now" contrasting a past state |
+| 4 | Review choreography | "rejected in review", "the reviewer confirmed", draft ordinals, round attributions |
+| 5 | Reviewer-addressed justification | "the cast is safe — it simply…", "this is correct because…" — a comment arguing its own correctness |
+| 6 | Restatement and derivation transcripts | control-flow narration ("first we X, then Y"), test walkthroughs, proofs of obvious branches |
+| 7 | Hedges and planning residue | "probably fine for now", "should be enough", a deferral with no `TODO` marker |
+| 8 | Authoring-language slips | fragments of the author's working language (Spanish, French, Chinese) inside English prose, or the reverse |
+
+**Not leakage — do not file these:** issue references (`#1470`, `TODO(name):`); measured bounds
+("measured: 512 nests ≈ 0.15s" — the provenance word is load-bearing); counterfactual-present pins
+("without X, Y happens"); suppression justifications (`eslint-disable … -- reason`, an explained empty
+`catch`); runtime old/new ("the old connection drains before the new one accepts" is lifecycle, not
+history); `§N` that resolves to an external standard or a committed doc that owns its numbering;
+the *Alternatives considered* section of a decision note, where "rejected" is the genre; "this PR" in
+documentation that is *about* PR workflow.
+
+**Run the recall battery before you file anything** — it over-matches by design, so every hit still
+needs the one test; and it under-matches by nature, so also read the densest prose in scope with no
+pattern in hand. Exclude your own agent file from the sweep: it quotes leaked wording as calibration.
+
+```bash
+grep -rnE '\(decision [0-9]|\(audit [A-Z][0-9]|design §|plan §|\bP-I\b|\bW[0-9]\b|\bT[0-9]\b' <files>
+grep -rniE 'this PR|this branch|this stack|later PR|previous commit|this commit' <files>
+grep -rniE 'used to |no longer|previously|the old |was renamed|was moved' <files>
+grep -rniE '\bv1\b|this cut|\bcut [0-9]|\bfor now\b|roadmap' <files>
+grep -rniE 'rejected in review|review round|as of v[0-9]' <files>
+grep -rniE 'probably |should be enough|should suffice|it simply|is safe (—|--)' <files>
+grep -rnE '§[0-9]' <files>
+```
+
+Known false positives, judged and kept: instrumental "used to" ("the key used to sign requests");
+`/v1/` as a path or protocol segment; "today" inside recorded CLI output; contrastive "actually".
+
+**Severity:** classes 1–4 are `minor`. Classes 5–7 are `minor`, and `major` when the passage sits in a
+document that binds behaviour — a README, `AGENTS.md`, a `Check:` row, an agent file — because there a
+reviewer-addressed comment or an unmarked deferral is a rule nobody can act on. Class 8 is `minor`.
+Whether a cited decision is *true* is not your question; whether it *resolves at HEAD* is.
+
+**The fix you propose** is never deletion alone when the passage carries a fact: restate the fact from
+the repository's vantage, then drop the transcript around it. A passage with no fact in it (an audit
+code, a control-flow narration) goes.
+
 ## Not yours — do not report
 
 | Belongs to | What |
@@ -88,8 +143,11 @@ Reporting outside your seat is noise: it inflates the panel and buries the findi
   broken build. **None of these are yours.** If you are about to file a blocker, you are probably
   standing in another seat.
 - `major` — quality a client would notice: hype or AI-speak in published copy, a comment that
-  narrates the change, comment density at 4x the neighbourhood.
-- `minor` — a single flat sentence, a filler opener, density at 2x.
+  narrates the change, comment density at 4x the neighbourhood, a reviewer-addressed justification or
+  an unmarked deferral (leakage classes 5–7) inside a README, `AGENTS.md`, a `Check:` row or an agent
+  file.
+- `minor` — a single flat sentence, a filler opener, density at 2x, chain-of-thought leakage of
+  classes 1–4 and 8 anywhere, and of classes 5–7 outside a binding document.
 
 ## Output contract — the orchestrator parses this, do not decorate it
 

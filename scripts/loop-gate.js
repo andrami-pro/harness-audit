@@ -12,6 +12,7 @@
 // list rather than the chair paraphrasing the problem back at it.
 //
 //   node loop-gate.js check-findings <file|-> [--root <repo>] [--seat <name>]
+//   node loop-gate.js check-handoff <file|-> [--seat <name>]
 //   node loop-gate.js resume <run-dir>
 //
 // Exit codes are the contract, not the prose: 0 = usable, 2 = the caller must repair and retry,
@@ -32,6 +33,12 @@ const SEVERITIES = new Set(['blocker', 'major', 'minor']);
 const CRITERION_KEYS = ['id', 'source', 'class', 'applies', 'pass', 'evidence'];
 const CLASSES = new Set(['blocker', 'quality']);
 const WEIGHT = { blocker: 3, quality: 1 };
+// A handoff is what a builder seat REPORTS at the end of its round: where it thinks the work stands,
+// and what it can point at. The gate checks the shape — a status from the fixed set, evidence that is
+// not empty, a blocker named exactly when the status is blocked — and nothing more. A handoff that
+// passes this gate has been reported by the worker, not certified by anyone; the chair says so.
+const HANDOFF_KEYS = ['status', 'summary', 'evidence', 'blocker'];
+const HANDOFF_STATUSES = new Set(['complete', 'continue', 'blocked']);
 
 const FINDING_SHAPE = [
   'Expected shape — a JSON array, one object per finding, and nothing else in the reply:',
@@ -48,6 +55,14 @@ const SCORECARD_SHAPE = [
   '                    "applies": true, "pass": true, "evidence": "<a command and its output, or file:line>" } ],',
   '    "findings": [ { "severity": "...", "file": "...", "line": 0, "summary": "...", "fix": "..." } ] }',
   'At least one finding per FAILED criterion. Do not set "id" or "critic" on a finding.',
+].join('\n');
+
+const HANDOFF_SHAPE = [
+  'Expected shape — a JSON object, and nothing else in the reply:',
+  '  { "status": "complete|continue|blocked", "summary": "one sentence: where the work stands",',
+  '    "evidence": ["<a command and its output, or file:line>", "..."],',
+  '    "blocker": "<only when status is blocked: what stops the work, in one sentence>" }',
+  'A handoff is what the seat reports; the gate checks its shape, it does not certify it.',
 ].join('\n');
 
 const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -180,6 +195,36 @@ function checkScorecard(card, root) {
   return { errors, totals: errors.length ? null : scoreOf(card.criteria) };
 }
 
+function checkHandoff(h) {
+  const errors = [];
+  if (!isPlainObject(h)) return ['the handoff is not an object'];
+  for (const k of Object.keys(h)) {
+    if (!HANDOFF_KEYS.includes(k)) errors.push(`handoff carries an unknown key "${k}" — the contract is exactly: ${HANDOFF_KEYS.join(', ')}`);
+  }
+  for (const k of ['status', 'summary', 'evidence']) {
+    if (!(k in h)) errors.push(`handoff is missing "${k}"`);
+  }
+  if ('status' in h && !HANDOFF_STATUSES.has(h.status)) {
+    errors.push(`handoff has status ${JSON.stringify(h.status)} — the set is fixed: complete, continue, blocked`);
+  }
+  if ('summary' in h && !isNonEmptyString(h.summary)) errors.push('handoff has an empty "summary"');
+  if ('evidence' in h) {
+    if (!Array.isArray(h.evidence)) errors.push('handoff "evidence" is not an array — one string per item a reader can re-check');
+    else if (!h.evidence.length) errors.push('handoff "evidence" is empty — a status nobody can re-check is an opinion');
+    else h.evidence.forEach((e, i) => { if (!isNonEmptyString(e)) errors.push(`handoff evidence[${i}] is not a non-empty string`); });
+  }
+  // The blocker rule cuts both ways. A `blocked` with no blocker is a stall nobody can name, and the
+  // chair has nothing to hand the human. A named blocker on a status that is not blocked is two
+  // statuses in one object, and the reader takes whichever one suits them.
+  if (h.status === 'blocked' && !isNonEmptyString(h.blocker)) {
+    errors.push('handoff is blocked with no blocker — a block nobody can name is a stall, not a status');
+  }
+  if (h.status !== 'blocked' && 'blocker' in h) {
+    errors.push(`handoff carries a blocker but is not blocked (status ${JSON.stringify(h.status)}) — one status per handoff`);
+  }
+  return errors;
+}
+
 function readInput(file) {
   const raw = file === '-' ? fs.readFileSync(0, 'utf8') : fs.readFileSync(file, 'utf8');
   // A seat that wraps its JSON in a ```json fence has still emitted the contract; a chair pasting the
@@ -254,6 +299,32 @@ function cmdCheckFindings(argv) {
   reportInvalid('FINDINGS', seat, ['the reply is neither a findings array nor a scorecard object'], FINDING_SHAPE);
 }
 
+function cmdCheckHandoff(argv) {
+  const { opts, positional } = parseArgs(argv, ['--seat']);
+  const [file] = positional;
+  if (!file) {
+    process.stderr.write('usage: loop-gate.js check-handoff <file|-> [--seat <name>]\n');
+    process.exit(1);
+  }
+  const seat = opts['--seat'] || null;
+
+  let parsed;
+  try {
+    parsed = readInput(file);
+  } catch (e) {
+    if (e.contract) reportInvalid('HANDOFF', seat, [e.message], HANDOFF_SHAPE);
+    process.stderr.write(`loop-gate.js: ${e.message}\n`);
+    process.exit(1);
+  }
+
+  // A run aggregate that carries its last handoff is checked on that field, so the same command
+  // covers a seat's raw reply and a finished loop-runs/*.json.
+  const handoff = isPlainObject(parsed) && !('status' in parsed) && 'handoff' in parsed ? parsed.handoff : parsed;
+  const errors = checkHandoff(handoff);
+  if (errors.length) reportInvalid('HANDOFF', seat, errors, HANDOFF_SHAPE);
+  process.stdout.write(`HANDOFF OK: ${handoff.status} · ${handoff.evidence.length} evidence line(s)${seat ? ` from ${seat}` : ''}\n`);
+}
+
 // Rounds are files, and the round a run is on is which files exist — the same reason swarm-forge keeps
 // its queue in directory names rather than in a process: a chair that dies in round 3 of a five-round
 // deep read loses its context, and everything it had already paid for, unless the rounds are on disk.
@@ -323,13 +394,17 @@ function main() {
   const [cmd, ...rest] = process.argv.slice(2);
   switch (cmd) {
     case 'check-findings': return cmdCheckFindings(rest);
+    case 'check-handoff': return cmdCheckHandoff(rest);
     case 'resume': return cmdResume(rest);
     default:
-      process.stderr.write('usage: loop-gate.js <check-findings|resume> [...]\n');
+      process.stderr.write('usage: loop-gate.js <check-findings|check-handoff|resume> [...]\n');
       process.exit(1);
   }
 }
 
 if (require.main === module) main();
 
-module.exports = { checkFinding, checkFindingList, checkScorecard, scoreOf, FINDING_KEYS, RESERVED_KEYS };
+module.exports = {
+  checkFinding, checkFindingList, checkScorecard, checkHandoff, scoreOf,
+  FINDING_KEYS, RESERVED_KEYS, HANDOFF_KEYS, HANDOFF_STATUSES,
+};

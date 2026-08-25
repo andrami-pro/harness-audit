@@ -101,6 +101,8 @@ The hypothesis is that progressive memory shows up as a steepening success curve
 
 `harness-audit` installs the memory system at M4 (Distill) from day one, with explicit instructions for agents to read it before acting (the necessary condition for M5).
 
+The scale grades what the notes *are*; it says nothing about where they live, and an audit that cannot point at a directory is grading a vibe. Two artifacts give M2 and M4 a shape on disk. A **decision lifecycle** — `proposed/`, `implemented/`, `rejected/` as folders, so a note's status is its path — with a mandatory *Alternatives considered* section in every implemented note: a decision recorded without what it beat invites re-litigation, which is the failure a decision record exists to prevent. And **postmortems** kept apart from decisions, each with a section on why every safety net missed the bug and which guardrail was added so the class fails loudly next time — a postmortem that records only the fix is M1 wearing a template. The audit checks both by command (Pillar 4) and flags them aspirational where the directories do not exist: it never fabricates an incident to fill a row.
+
 ### 2.3 Compounding Gains vs. Isolated Gains
 
 A useful distinction from optimization-benchmark work:
@@ -311,6 +313,11 @@ in order:
   *process* that runs the other four loops, one level up the stack. Its rubric is a prediction instead of
   a score threshold, and its verifier is time: the next round is what confirms or falsifies what the last
   one predicted.
+- **Loop 6 has one precondition, and it is the harness's, not the loop's**: *model-visible ⟺ logged*.
+  Everything that reached a model request must be reconstructable from the session log, or
+  `/session-review` audits a transcript that is not what the model saw. This is why the repeat-tool guard
+  rides `additionalContext` — a channel the harness records — rather than rewriting a tool result in
+  place: a harness that injects unlogged context makes every transcript-reading loop lie by omission.
 
 None of this is aspirational — every loop in the table above has at least one recorded run backing the row
 it occupies in the README's catalog; see that catalog for what "recorded" means and which run backs which

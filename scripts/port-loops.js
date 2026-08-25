@@ -244,6 +244,10 @@ const PI_COMMAND_BODY_SUBSTITUTIONS = [
     '```text\nThis target does not install the plugin\'s loop-gate.js. Check the run directory by hand:\nlist docs/harness-dev/loop-runs/<run-slug>/ and read the round-<n>.json files it holds. Rounds must\nbe the contiguous sequence 1..n; a gap, an unreadable file, or an aggregate JSON already present is\nAMBIGUOUS_RUN_STATE — stop and hand it to the human rather than reconciling it yourself.\n```'],
   ['```bash\nnode "${CLAUDE_PLUGIN_ROOT:-.claude}/scripts/loop-gate.js" check-findings <file> --root . --seat <seat>\n```',
     '```text\nThis target does not install the plugin\'s loop-gate.js. Check each seat\'s JSON by hand against the\ncontract in its agent file: the fixed severity ladder (blocker|major|minor), a "file" that exists in\nthe repo, a "line" inside that file (0 = file-wide), a non-empty summary and fix, and no "id" or\n"critic" the seat assigned itself. This is a real loss: the checks are mechanical, and a chair doing\nthem by eye is the party the gate existed to be independent of.\n```'],
+  // iterate.md: the builder seat\'s end-of-round handoff goes through the same script. Same loss, same
+  // degradation: the shape check becomes a hand-check the chair performs on a seat it is also driving.
+  ['```bash\nnode "${CLAUDE_PLUGIN_ROOT:-.claude}/scripts/loop-gate.js" check-handoff <file> --seat builder\n```',
+    '```text\nThis target does not install the plugin\'s loop-gate.js. Check the builder\'s handoff by hand: "status"\nis one of complete|continue|blocked, "summary" and "evidence" are non-empty (evidence is a list of\nthings a reader can re-check), and "blocker" is present exactly when the status is blocked. Record in\nthe report that the handoff was checked by the chair, not by the gate.\n```'],
 ];
 
 function transformCommandPi(fm, body) {
@@ -285,10 +289,11 @@ const CAP_LOOP_GATE = {
   id: 'loop-gate',
   readmeMarker: 'loop-gate',
   warning: [
-    '⚠ /orchestrate and /review-loop lose their deterministic gate. On Claude Code both shell out to',
-    "  the plugin's scripts/loop-gate.js, which refuses a seat's findings when they anchor at a file",
-    '  that does not exist or a line past the end of one, recomputes the score from the criteria table,',
-    '  and refuses to guess the state of a half-written run. This target installs no scripts/, so those',
+    '⚠ /orchestrate, /review-loop and /iterate lose their deterministic gate. On Claude Code all three',
+    "  shell out to the plugin's scripts/loop-gate.js, which refuses a seat's findings when they anchor at",
+    '  a file that does not exist or a line past the end of one, recomputes the score from the criteria',
+    "  table, refuses a builder's handoff that names no evidence, and refuses to guess the state of a",
+    '  half-written run. This target installs no scripts/, so those',
     '  steps are ported as hand-checks the chair performs on itself — which is the party the gate was',
     '  independent of. The rounds still run; the arithmetic and the anchor checks are no longer verified.',
   ],

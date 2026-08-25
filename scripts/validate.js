@@ -214,13 +214,13 @@ function loadPrivateTerms() {
 
 // Negative control — a term from private-terms.json planted in the telemetry fixture: exit 1,
 // sess-0001.jsonl:2 (2026-07-12). Re-verified 2026-07-13 after the terms moved out of this file.
-check('no private contract leaks in commands/, agents/, benchmarks/, fixtures/', () => {
+check('no private contract leaks in commands/, agents/, benchmarks/, scripts/, docs/, skills/', () => {
   const leaks = loadPrivateTerms();
   // No terms file is not a pass. A gate that reports green because it was given nothing to look for is
   // the exact failure this repo keeps finding: absence of evidence read as evidence of absence.
   if (!leaks) skip('no private-terms.json — nothing was scanned (copy private-terms.example.json to enable)');
   if (!leaks.length) throw new Error('private-terms.json has no terms — the gate would pass vacuously');
-  const files = [...walk('commands'), ...walk('agents'), ...walk('benchmarks'), ...walk('scripts/fixtures')];
+  const files = [...walk('commands'), ...walk('agents'), ...walk('benchmarks'), ...walk('scripts'), ...walk('docs'), ...walk('skills')];
   if (!files.length) throw new Error('nothing scanned — the gate would pass vacuously');
   for (const rel of files) {
     read(rel).split('\n').forEach((line, i) => {
@@ -241,6 +241,41 @@ check('hooks.json valid + every referenced script exists and parses', () => {
     execFileSync('node', ['--check', path.join(ROOT, rel)], { stdio: 'pipe' });
   }
   return `${new Set(cmds).size} scripts`;
+});
+
+// hooks.json is the only place a guard is installed and the README table is the only place a user
+// learns what runs on every one of their tool calls. A guard added to one and not the other is a
+// hook nobody consented to. So every PreToolUse script is bound to a table row, and the headline
+// count in the install section is bound to the set — "three hooks" over a file that installs four is
+// the README lying by one, which is still lying.
+//
+// Negative controls (2026-08-25, each applied, observed, reverted — all exit 1):
+//   the repeat-tool-guard row struck from the README table ........................................
+//     "README never discloses the PreToolUse guard 'repeat-tool-guard' — it runs on every tool call
+//      and the install section does not say so"
+//   "four guards that run on every session" reverted to "three" ....................................
+//     "README's install sentence does not count four guards — hooks.json installs 4"
+check('README discloses every PreToolUse guard hooks.json installs', () => {
+  const h = JSON.parse(read('hooks/hooks.json'));
+  const guards = new Set((h.hooks.PreToolUse || []).flatMap((g) => g.hooks.map((x) => {
+    const m = /scripts\/hooks\/([\w-]+)\.js/.exec(x.command);
+    return m ? m[1] : null;
+  })).filter(Boolean));
+  if (guards.size < 3) throw new Error(`expected ≥3 PreToolUse guards in hooks.json, found ${guards.size}`);
+  const t = read('README.md');
+  const install = t.split('### Option 2')[0];
+  for (const g of guards) {
+    if (!new RegExp(`^\\|\\s*\`${g}\``, 'm').test(install)) {
+      throw new Error(`README never discloses the PreToolUse guard '${g}' — it runs on every tool call and the install section does not say so`);
+    }
+  }
+  const WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven'];
+  const sentence = install.split('\n').find((l) => /guards that run on every session/.test(l));
+  if (!sentence) throw new Error('README lost the "guards that run on every session" sentence that introduces the table');
+  if (!new RegExp(`\\b${WORDS[guards.size]}\\b guards that run`).test(sentence)) {
+    throw new Error(`README's install sentence does not count ${WORDS[guards.size]} guards — hooks.json installs ${guards.size}`);
+  }
+  return `${guards.size} PreToolUse guards, each in the README table`;
 });
 
 // The hook is the only writer of loop-telemetry.ndjson and the dashboard is the only reader: nothing
@@ -292,6 +327,85 @@ check('loop-telemetry hook emits a schema-valid ndjson line', () => {
 
   fs.rmSync(path.dirname(out), { recursive: true, force: true });
   return '2 lines · SubagentStop+agentType, Stop';
+});
+
+// The guard is advisory by construction: it may only ever ADD context, never decide. Everything that
+// makes it useful is invisible at runtime — canonical arguments (so a reordered key is the same call),
+// the reset on a different call, the reset on a human prompt, per-session isolation — and everything
+// that would make it dangerous is one line away (a `permissionDecision`). This check pins both sides.
+//
+// Negative controls (2026-08-25, each applied, observed, reverted — all exit 1):
+//   canonical() replaced with plain JSON.stringify ...................................................
+//     "call 3 (same arguments, keys reordered) did not fire — canonicalization is broken"
+//   the `count = 1` reset on a different hash removed (counter keeps climbing) .......................
+//     "another session's calls advanced this session's chain" — not the predicted message: with no
+//     reset the chain sits at 7 after the different call (no threshold there), and the next call is
+//     the 8th, which fires. Same defect, caught one assertion later.
+//   permissionDecision: 'deny' added to the emitted object ...........................................
+//     "the guard emitted a permissionDecision — it is advisory and may never decide"
+//   the UserPromptSubmit branch removed ..............................................................
+//     "a human prompt did not reset the chain — repetition across an interjection is not a loop"
+//   the top-level `description` no longer stripped before hashing ....................................
+//     "three Bash calls differing only in description did not fire — description is narration, not
+//      the call" — this one was found live before it was a control: the first real session ran the
+//     same grep three times with three descriptions and the guard stayed silent.
+check('repeat-tool-guard emits additionalContext at run 3 and 5, not at 2 or 4, and never a permissionDecision', () => {
+  const script = path.join(ROOT, 'scripts/hooks/repeat-tool-guard.js');
+  mustExist('scripts/hooks/repeat-tool-guard.js');
+  execFileSync('node', ['--check', script], { stdio: 'pipe' });
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'repeat-tool-guard-'));
+  const fire = (input) => execFileSync('node', [script], {
+    input, env: { ...process.env, REPEAT_TOOL_GUARD_DIR: dir }, stdio: ['pipe', 'pipe', 'pipe'],
+  }).toString();
+  const fx = (name) => read(path.join('scripts/fixtures/hooks', name));
+  const A = fx('pre-tool-use-repeat-a.json');
+  const A2 = fx('pre-tool-use-repeat-a-reordered.json');
+  const B = fx('pre-tool-use-repeat-b.json');
+  const OTHER = fx('pre-tool-use-repeat-a-other-session.json');
+  const PROMPT = fx('user-prompt-submit.json');
+
+  const parse = (out, where) => {
+    let o;
+    try { o = JSON.parse(out); } catch { throw new Error(`${where}: stdout is not JSON: ${out.slice(0, 80)}`); }
+    const h = o.hookSpecificOutput;
+    if (!h || h.hookEventName !== 'PreToolUse') throw new Error(`${where}: hookSpecificOutput.hookEventName is not PreToolUse`);
+    if (typeof h.additionalContext !== 'string' || !h.additionalContext) throw new Error(`${where}: additionalContext missing or empty`);
+    if ('permissionDecision' in h || 'permissionDecisionReason' in h) throw new Error(`${where}: the guard emitted a permissionDecision — it is advisory and may never decide`);
+    for (const k of Object.keys(o)) if (k !== 'hookSpecificOutput') throw new Error(`${where}: unknown top-level key ${k}`);
+    return h.additionalContext;
+  };
+
+  if (fire(A) !== '') throw new Error('call 1 fired — the first call is never a repeat');
+  if (fire(A2) !== '') throw new Error('call 2 fired — the threshold is 3');
+  const out3 = fire(A);
+  if (out3 === '') throw new Error('call 3 (same arguments, keys reordered) did not fire — canonicalization is broken');
+  const third = parse(out3, 'call 3');
+  if (!/3 consecutive/.test(third)) throw new Error('call 3 fired without its count');
+  if (fire(A) !== '') throw new Error('call 4 fired — thresholds are 3, 5, 8');
+  const fifth = parse(fire(A), 'call 5');
+  if (!/5 consecutive/.test(fifth) || !/"pattern":"TODO"/.test(fifth)) throw new Error('call 5 did not carry the count and the canonical arguments');
+  if (fire(B) !== '') throw new Error('a DIFFERENT call fired — it starts a new chain at 1');
+  if (fire(A) !== '') throw new Error('call after a DIFFERENT call fired at 3 — the chain did not reset');
+  // Another session's chain is its own: three calls there fire there and leave this one untouched.
+  fire(OTHER); fire(OTHER);
+  parse(fire(OTHER), 'other session, call 3');
+  if (fire(A) !== '') throw new Error('another session\'s calls advanced this session\'s chain');
+  // A human prompt resets: the demo chain sits at 2 (A, A) — after the prompt, A must be 1 again.
+  if (fire(PROMPT) !== '') throw new Error('UserPromptSubmit wrote to stdout — it only resets');
+  if (fire(A) !== '') throw new Error('a human prompt did not reset the chain — repetition across an interjection is not a loop');
+  if (fire('not json') !== '') throw new Error('garbage stdin produced output');
+  if (fire(fx('other-event.json')) !== '') throw new Error('a non-PreToolUse payload produced output');
+  // The first live run: three identical Bash commands, zero reminders. The model had written a fresh
+  // `description` on each ("(1/3)", "(2/3)", "(3/3)") and the chain never formed. Narration is not
+  // the call.
+  fire(fx('pre-tool-use-bash-desc-1.json')); fire(fx('pre-tool-use-bash-desc-2.json'));
+  const bash3 = fire(fx('pre-tool-use-bash-desc-3.json'));
+  if (bash3 === '' || !/3 consecutive identical `Bash`/.test(bash3)) {
+    throw new Error('three Bash calls differing only in description did not fire — description is narration, not the call');
+  }
+
+  fs.rmSync(dir, { recursive: true, force: true });
+  return 'fires at 3 and 5, resets on a different call and on a human prompt, ignores description, isolated per session, never decides';
 });
 
 check('install.sh parses (sh -n)', () => {
@@ -1211,8 +1325,8 @@ check('loop-gate refuses malformed seat output and computes the gate arithmetic'
 //      crashes on the missing script and the chair is left with no instruction, so an ungated run
 //      reports as a gated one". Added after shipping the gate one version with this hole open: the
 //      gate reached two loops that install.sh copies WITHOUT scripts/, and nothing said so.
-check('the panel loops actually run their seats through loop-gate', () => {
-  for (const cmd of ['orchestrate', 'review-loop']) {
+check('the panel and build loops actually run their seats through loop-gate', () => {
+  for (const cmd of ['orchestrate', 'review-loop', 'iterate']) {
     const src = read(`commands/${cmd}.md`);
     if (!/loop-gate\.js" check-findings/.test(src)) {
       throw new Error(`${cmd} dispatches seats but never gates their JSON — loop-gate.js check-findings has no producer`);
@@ -1244,13 +1358,134 @@ check('the panel loops actually run their seats through loop-gate', () => {
     // which install.sh now populates. Reintroducing a bare reference silently restores the trade-off.
     if (/\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/loop-gate/.test(src)) {
       throw new Error(`${cmd} calls loop-gate.js through a bare \${CLAUDE_PLUGIN_ROOT} — that resolves to nothing outside the plugin runtime, so a copied-commands install is silently ungated again`);
+    }    // The build loop's builder seat reports a handoff; a handoff nobody shape-checks is a status the
+    // chair takes on trust from the seat it is also driving.
+    if (cmd === 'iterate' && !/loop-gate\.js" check-handoff/.test(src)) {
+      throw new Error('iterate dispatches a builder but never gates its handoff — loop-gate.js check-handoff has no producer');
     }
   }
   const inst = read('install.sh');
   if (!/SCRIPT_DEST/.test(inst) || !/scripts\/\*\.js/.test(inst)) {
     throw new Error('install.sh copies commands/ without copying scripts/ beside them — the commands\' .claude/scripts fallback would point at an empty directory');
   }
-  return '2 panel loops gate their seats, resume their runs, degrade honestly, and resolve the gate with or without the plugin';
+  return '3 loops gate their seats, resume their runs, degrade honestly, and resolve the gate with or without the plugin';
+});
+
+// A handoff is the one seat output that is ABOUT the seat's own work — "I am done, here is why" — and
+// the one a chair most wants to believe. The gate cannot check the claim; it can refuse the shapes
+// that let a claim hide: a status outside the set, evidence that is empty, a block nobody named.
+//
+// Negative controls (2026-08-25, each applied, observed, reverted — all exit 1):
+//   HANDOFF_STATUSES widened to accept 'done' ......................................................
+//     "a foreign status with a stray blocker was not reported as both defects" — the stray-blocker
+//     rule still fired (exit 2), so the first version of this check PASSED the control: it matched
+//     `status "done"` inside the blocker message and never asked for the set violation itself. Now it
+//     demands both messages.
+//   the blocked-without-blocker rule struck ..........................................................
+//     "invalid-handoff.json passed with a blocked status and no blocker"
+//   the "handoff" example struck from commands/iterate.md §6 ........................................
+//     "iterate never records the builder's handoff in its run JSON — the gate checks a field no loop
+//      writes"
+check('loop-gate check-handoff refuses a malformed handoff and accepts a complete one', () => {
+  const script = path.join(ROOT, 'scripts/loop-gate.js');
+  const gate = require(script);
+  const run = (fixture, seat) => {
+    try {
+      const out = execFileSync('node', [script, 'check-handoff', path.join(ROOT, 'scripts/fixtures/findings', fixture), '--seat', seat], { stdio: ['pipe', 'pipe', 'pipe'] });
+      return { code: 0, out: out.toString(), err: '' };
+    } catch (e) {
+      return { code: e.status, out: (e.stdout || '').toString(), err: (e.stderr || '').toString() };
+    }
+  };
+  const ok = run('valid-handoff.json', 'builder');
+  if (ok.code !== 0 || !/HANDOFF OK: complete/.test(ok.out)) throw new Error(`valid-handoff.json refused: exit ${ok.code} ${ok.err.split('\n')[0]}`);
+  const agg = run('valid-run-with-handoff.json', 'chair');
+  if (agg.code !== 0) throw new Error(`a run aggregate carrying a valid handoff was refused: ${agg.err.split('\n')[0]}`);
+
+  const bad = run('invalid-handoff.json', 'builder');
+  if (bad.code !== 2) throw new Error(`invalid-handoff.json exited ${bad.code}, expected 2`);
+  for (const must of ['blocked with no blocker', '"evidence" is empty', 'empty "summary"', 'unknown key "confidence"']) {
+    if (!bad.err.includes(must)) throw new Error(`invalid-handoff.json passed a rule it breaks — missing error: ${must}`);
+  }
+  const status = run('invalid-handoff-status.json', 'builder');
+  if (status.code !== 2) throw new Error('invalid-handoff-status.json passed the gate — status "done" is outside the fixed set');
+  if (!/the set is fixed/.test(status.err) || !/is not blocked/.test(status.err)) throw new Error('a foreign status with a stray blocker was not reported as both defects');
+
+  if (gate.checkHandoff({ status: 'continue', summary: 'x', evidence: ['y'] }).length) throw new Error('checkHandoff refused a minimal valid continue');
+  if (!gate.checkHandoff({ status: 'continue', summary: 'x', evidence: 'y' }).length) throw new Error('checkHandoff accepted evidence as a bare string');
+
+  // The field has to have a producer, or the gate checks a shape no loop ever writes.
+  if (!/"handoff"/.test(read('commands/iterate.md'))) {
+    throw new Error('iterate never records the builder\'s handoff in its run JSON — the gate checks a field no loop writes');
+  }
+  return 'valid + aggregate accepted; 4 defect classes refused with self-repairable errors';
+});
+
+// The budget gate has three answers, not two, for the same reason validate.js itself does: a manifest
+// that budgets nothing must not read as "every doc is within budget", and a budgeted file that has
+// been renamed away must not read as "no longer over". Both are silent passes a rubric row would
+// happily record as PASS.
+//
+// Negative controls (2026-08-25, each applied, observed, reverted — all exit 1):
+//   `words > budget` flipped to `>=` .................................................................
+//     "within.json: exit 1, expected 0" — within.json budgets docs/short.md at exactly its word count,
+//     so the ceiling itself is the fixture: at-the-ceiling must be within, not over
+//   the missing-file branch removed (a missing file counted as 0 words) ..............................
+//     "missing.json: exit 0, expected 1 — a renamed file silently orphaned its budget"
+//   the empty-manifest refusal removed ...............................................................
+//     "empty.json: exit 0, expected 2 — a manifest that budgets nothing passed"
+check('check-doc-budgets exits 1 over budget, 0 within, 2 with no manifest', () => {
+  const script = path.join(ROOT, 'scripts/check-doc-budgets.js');
+  mustExist('scripts/check-doc-budgets.js');
+  execFileSync('node', ['--check', script], { stdio: 'pipe' });
+  const root = path.join(ROOT, 'scripts/fixtures/doc-budgets');
+  const run = (manifest) => {
+    try {
+      return { code: 0, out: execFileSync('node', [script, '--root', root, '--manifest', manifest], { stdio: ['pipe', 'pipe', 'pipe'] }).toString() };
+    } catch (e) {
+      return { code: e.status, out: (e.stdout || '').toString() + (e.stderr || '').toString() };
+    }
+  };
+  const expect = (manifest, code, re) => {
+    const r = run(manifest);
+    if (r.code !== code) throw new Error(`${manifest}: exit ${r.code}, expected ${code}`);
+    if (re && !re.test(r.out)) throw new Error(`${manifest}: output does not match ${re}`);
+  };
+  expect('within.json', 0, /✓ docs\/short\.md 38\/38/);
+  expect('over.json', 1, /✗ docs\/long\.md \d+\/100 \(\+\d+ over\)/);
+  expect('missing.json', 1, /docs\/gone\.md MISSING/);
+  expect('empty.json', 2, /budgets nothing/);
+  expect('absent.json', 2, /not found/);
+  const { countWords } = require(script);
+  if (countWords('a  b\nc\t d ') !== 4) throw new Error(`countWords miscounts: ${countWords('a  b\nc\t d ')}`);
+  return 'within → 0, over/missing → 1, empty/absent manifest → 2';
+});
+
+// The four Pillar-4 criteria live in two places by design — the audit table the skill reads and the
+// rubric template it emits from — and two copies of a criterion drift unless something says so. The
+// ADR and postmortem rows are flagged aspirational in the skill (most repos have neither directory,
+// and an absent postmortem dir is not a gap to fabricate incidents into); the gate pins the flag too.
+//
+// Negative controls (2026-08-25, each applied, observed, reverted — all exit 1):
+//   the doc-budgets row struck from rubric-template.md ...............................................
+//     "rubric-template.md lacks the criterion marker 'check-doc-budgets.js'"
+//   ⚠ removed from the ADR row in SKILL.md ...........................................................
+//     "SKILL.md's ADR-lifecycle row is not flagged ⚠ aspirational"
+check('rubric-template and SKILL.md both carry the four Pillar-4 criteria, and the ADR/postmortem rows are flagged aspirational', () => {
+  const rubric = read('skills/harness-audit/rubric-template.md');
+  const skill = read('skills/harness-audit/SKILL.md');
+  const markers = ['Alternatives considered', 'why the safety nets missed it', 'check-doc-budgets.js', 'proven by mutation'];
+  for (const m of markers) {
+    if (!rubric.includes(m)) throw new Error(`rubric-template.md lacks the criterion marker '${m}'`);
+    if (!skill.includes(m)) throw new Error(`SKILL.md lacks the criterion marker '${m}'`);
+  }
+  if (!skill.includes('repeat-tool-guard.js')) throw new Error('SKILL.md Pillar 3 never names the loop-hygiene guard this plugin ships');
+  for (const [label, m] of [['ADR-lifecycle', 'Alternatives considered'], ['postmortem', 'why the safety nets missed it']]) {
+    const row = skill.split('\n').find((l) => l.startsWith('|') && l.includes(m));
+    if (!row) throw new Error(`SKILL.md has no audit-table row carrying '${m}'`);
+    if (!row.includes('⚠')) throw new Error(`SKILL.md's ${label} row is not flagged ⚠ aspirational`);
+  }
+  return '4 criteria in both files; ADR + postmortem rows ⚠';
 });
 
 // F13 — the capability table is the authority on what the port destroys, and its whole purpose is that

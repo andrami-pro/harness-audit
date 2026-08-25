@@ -37,6 +37,7 @@ Re-check: after each change, only the affected checks; every 3 iterations, the f
 | "Memory should be up to date" | `grep -c "\[VERIFIED" docs/decisions/*.md` → ≥ 1, and `du -s docs/decisions \| cut -f1` → ≤ 200 (KB) |
 | "The reviewer should be independent" | `grep -ciE "refut\|reject\|evidence" .claude/agents/reviewer.md` → ≥ 1 |
 | "The model line-up should keep reviewer and implementer independent" | `node "${CLAUDE_PLUGIN_ROOT}/scripts/model-lineup.js" resolve --target claude --global ~/.agents/model-lineup.json --project .agents/model-lineup.json; echo $?` → exit `0` (exit `2` = P2-8 FAIL: reviewer shares the implementer's model family, D25a) |
+| "Docs should stay short" | `node "${CLAUDE_PLUGIN_ROOT:-.claude}/scripts/check-doc-budgets.js" --manifest docs/doc-budgets.json; echo $?` → 0 (every standing doc listed in the manifest is under its word ceiling; exit `2` = no manifest, which is N/A, not PASS) |
 
 ## Complete example (excerpt)
 
@@ -114,6 +115,55 @@ Why each one is a criterion and not a preference:
   wrote a line, and no dashboard can join a commit to the loop that produced it. Only score this one
   when agents in the project actually commit; where a human commits every change, mark it
   `applies: false` rather than handing it a free pass.
+
+## Criteria for the memory that outlives a run
+
+Emit these when the project keeps any decision record at all — an `ADR` folder, a `docs/decisions/`, a
+postmortem or two. Each one gives the M-scale (SKILL.md, Pillar 4) a shape on disk it can be graded
+against, instead of a judgment call over a handful of notes. The first two are **⚠ aspirational** when
+the directory does not exist: report them, do not fabricate decisions or incidents to satisfy them.
+
+```markdown
+## R<N> — Decisions have a lifecycle, and every implemented one says what it beat  (⚠ aspirational)
+Check: `test -d docs/decisions/implemented && grep -rL "## Alternatives considered" docs/decisions/implemented/ | wc -l` → 0
+State: FAIL (actual: 3 implemented notes without an "Alternatives considered" section)
+Pillar: 4 · Fix cost: low
+
+## R<N+1> — Every postmortem says why the safety nets missed it  (⚠ aspirational)
+Check: `ls docs/postmortems/*.md 2>/dev/null | xargs -r grep -Li "why the safety nets missed it" | wc -l` → 0 (N/A when the directory is absent)
+State: PASS (actual: 0 of 2)
+Pillar: 4 · Fix cost: low
+
+## R<N+2> — Standing docs stay under a word ceiling
+Check: `node "${CLAUDE_PLUGIN_ROOT:-.claude}/scripts/check-doc-budgets.js" --manifest docs/doc-budgets.json; echo $?` → 0
+State: FAIL (actual: exit 2 — no docs/doc-budgets.json; generalizes R2, which stays)
+Pillar: 4 · Fix cost: low
+
+## R<N+3> — The gate is proven by mutation, in a versioned test
+Check: `test -f scripts/preflight-mutation.sh && sh scripts/preflight-mutation.sh >/dev/null 2>&1; echo $?` → 0
+State: FAIL (actual: no such script)
+Pillar: 3 · Fix cost: medium
+```
+
+Why each one is a criterion and not a preference:
+
+- **Decision lifecycle** — `proposed/`, `implemented/`, `rejected/` as folders, so a note's status is
+  its path and cannot silently rot. The mandatory `## Alternatives considered` is the part that earns
+  the row: a decision recorded without what it beat invites re-litigation, which is the failure a
+  decision record exists to prevent. An implemented note is kept current with what shipped (paths,
+  names, defaults) but never rewritten into a different decision — that takes a new note.
+- **Postmortems that name the gap** — a postmortem that records only the fix repeats the class. The
+  section that matters is the one that says why every safety net missed the bug, and which guardrail
+  (a test, a hook, a rule in `AGENTS.md`) was added so the same class fails loudly next time. Postmortems
+  are not decision records: one looks back at a failure, the other forward at a choice.
+- **Word ceilings** — standing docs grow by accretion, and review alone does not stop it. A budget forces
+  the relocation decision at the moment content is added, when the author still knows where it belongs.
+  When the gate goes red: relocate, then condense, and raise the ceiling only with a written reason.
+  The manifest is `docs/doc-budgets.json`, `{ "<path>": <maxWords> }`, `wc -w` semantics.
+- **Proven by mutation** — a gate that has never been seen to fail is a thermometer nobody has held to a
+  flame. The row wants the proof *versioned*: a script that breaks a component, asserts the preflight
+  exits non-zero, and reverts, so the next person can re-run the proof instead of trusting the last one.
+  The Good column above already asks for this in prose; this row asks for the file.
 
 ## The golden rule
 
