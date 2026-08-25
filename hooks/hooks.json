@@ -22,6 +22,25 @@
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/hooks/secret-scan.js\""
           }
         ]
+      },
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/hooks/repeat-tool-guard.js\""
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/hooks/repeat-tool-guard.js\""
+          }
+        ]
       }
     ],
     "SubagentStop": [

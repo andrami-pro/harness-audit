@@ -1,0 +1,12 @@
+{
+  "run": "2026-08-25-iterate-demo",
+  "loop": "iterate",
+  "rounds": [],
+  "verdict": "APROBADO",
+  "stoppedBy": "gate-passed-process-still",
+  "handoff": {
+    "status": "complete",
+    "summary": "Feature converged in round 3.",
+    "evidence": ["SCORE: 92/100 · BLOCKERS: 0 — loop-gate, round 3"]
+  }
+}

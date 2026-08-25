@@ -1,6 +1,6 @@
 ---
 name: harness-audit
-description: Audit a project's agent harness against four pillars (harness-in-code, multi-agent role separation, automatic verification, loop design) and produce an EXECUTABLE rubric (harness-rubric.md) plus a stack-tailored remediation plan with stop conditions. Use when starting work in an unfamiliar repo, or when the user says "audit my harness", "audita el harness", "AGENTS.md", "preflight", "reviewer subagent", "harness engineering", "self-improving loop", "loop design", "rubric", "independent verifier", "continuous memory", "loop-readiness", or asks to make a repo portable across Claude Code / Codex / Cursor / Antigravity / Kilo Code. Methodology: the audit IS a rubric a loop converges against, not a static report; an independent verifier sub-agent beats self-critique; memory matures Fail→Investigate→Verify→Distill→Consult; AGENTS.md ≤ 200 lines; a minimal harness beats an inflated one. The model is the horse, the harness is the saddle.
+description: Audit a project's agent harness against four pillars (harness-in-code, multi-agent role separation, automatic verification, loop design) and produce an EXECUTABLE rubric (harness-rubric.md) plus a stack-tailored remediation plan with stop conditions. Use when starting work in an unfamiliar repo, or when the user says "audit my harness", "audita el harness", "AGENTS.md", "preflight", "reviewer subagent", "harness engineering", "self-improving loop", "loop design", "rubric", "independent verifier", "continuous memory", "loop-readiness", "ADR lifecycle", "postmortem", "doc budgets", "chain-of-thought leakage", or asks to make a repo portable across Claude Code / Codex / Cursor / Antigravity / Kilo Code. Methodology: the audit IS a rubric a loop converges against, not a static report; an independent verifier sub-agent beats self-critique; memory matures Fail→Investigate→Verify→Distill→Consult; AGENTS.md ≤ 200 lines; a minimal harness beats an inflated one. The model is the horse, the harness is the saddle.
 ---
 
 # harness-audit — Four pillars + executable rubric + self-correction loop
@@ -44,8 +44,9 @@ with `Check:` rows already in it? If any of those is present, this is a **re-aud
   annotation — `run N` marks a re-verification that moved the needle, not every keystroke.
 - **Add criteria the rubric doesn't have yet**: the Graphify item (P1-8), a loop-existence check per loop
   this project has actually run (mirror the README's honesty rule — a loop with no run in
-  `docs/harness-dev/loop-runs/` gets no row), and a `LEARNINGS.md` convention check if any skill loop has
-  run.
+  `docs/harness-dev/loop-runs/` gets no row), a `LEARNINGS.md` convention check if any skill loop has
+  run, and the four Pillar-4 rows for the memory's shape on disk (decision lifecycle, postmortems, doc
+  word budgets, the mutation-proven gate) — the first two flagged ⚠ when their directory is absent.
 - **Modernize obsolete criteria** in place — e.g. a `CodeGraph` reference becomes the Graphify check —
   rather than leaving a stale row next to a new one that says the same thing.
 - **Never clobber a rule the human promoted.** Any `AGENTS.md` line the human wrote or explicitly approved
@@ -124,6 +125,7 @@ Also detect: package manager (`pnpm-lock.yaml` → pnpm, `yarn.lock` → yarn, `
 | Secret-scan gate | A write-time or pre-commit check catches credential patterns (`sk-`, `ghp_`, `AKIA`, PEM blocks) before they land in tracked files | inspect hook config (`hooks/hooks.json`, lefthook, pre-commit) for a secret scanner — this plugin ships one (`secret-scan.js`) |
 | Destructive-command guard | Agent sessions cannot run `rm -rf` against root/home, `git checkout --force`, or `git clean -fdx` unchecked | inspect hook config for a Bash pre-execution guard — this plugin ships one (`destructive-guard.js`) |
 | No-verify blocked | `git commit/push --no-verify` is rejected, so the pre-commit gate cannot be silently bypassed | `grep -rE "no.?verify" hooks/ .husky/ lefthook.yml 2>/dev/null` — this plugin ships `block-no-verify.js` |
+| Loop-hygiene guard | A tool-call hook counts consecutive byte-identical calls (same tool, same canonical arguments) and injects an escalating reminder at 3/5/8 — advisory, never a deny, so a model stuck re-running the same grep is told so instead of burning the budget | inspect hook config for a repeat-call guard — this plugin ships `repeat-tool-guard.js` (PreToolUse, matcher `.*`) |
 
 #### Pillar 4 — Loop design (rubrics + continuous memory)
 
@@ -137,13 +139,17 @@ Also detect: package manager (`pnpm-lock.yaml` → pnpm, `yarn.lock` → yarn, `
 | Memory compaction policy | Size budget + dedup/merge rule documented (unbounded memory = bloat that degrades recall) | `du -sh` memory dir + `grep -iE "compact\|destil\|distill\|merge\|l[ií]mite\|limit" AGENTS.md` |
 | Memory distilled from session telemetry | An offline analyzer reads past session logs, correlates each failure with the fix that *worked*, and writes distilled corrections (jumps M1→M3 in one step — see the success-correlation note below) | `grep -riE "success.correlat\|session.*log\|\blearn\b" scripts/ .claude/ package.json pyproject.toml 2>/dev/null` — usually absent; this is M4→M5 maturity, so flag ⚠ (aspirational), not ✗ (basic gap) |
 | Auto-writes don't clobber curated memory | If any tool auto-writes to `memory/`/`AGENTS.md`/`CLAUDE.md`, it fences its output in delimited markers so hand-curated content survives a re-run | `grep -rE "<!--.*(start\|end).*-->" memory/ AGENTS.md CLAUDE.md CLAUDE.local.md 2>/dev/null` — N/A if nothing auto-writes memory |
+| Decision lifecycle | Decisions live under `proposed/ implemented/ rejected/` so status is the path, and every implemented note carries `## Alternatives considered` — a decision recorded without what it beat invites re-litigation | `test -d docs/decisions/implemented && grep -rL "## Alternatives considered" docs/decisions/implemented/ \| wc -l` → 0 — usually absent; flag ⚠ (aspirational), not ✗ |
+| Postmortems name the gap | Each postmortem has a section on why the safety nets missed it and which guardrail was added, not only the fix | `ls docs/postmortems/*.md 2>/dev/null \| xargs -r grep -Li "why the safety nets missed it" \| wc -l` → 0 — usually absent; flag ⚠ (aspirational), not ✗; never fabricate incidents |
+| Doc word budgets | Standing docs (AGENTS.md, architecture, testing policy) have a word ceiling in `docs/doc-budgets.json`; generalizes the ≤ 200-line AGENTS.md row | `node "${CLAUDE_PLUGIN_ROOT:-.claude}/scripts/check-doc-budgets.js" --manifest docs/doc-budgets.json; echo $?` → 0 (exit 2 = no manifest = FAIL, fix cost low) |
+| Gate proven by mutation | A versioned script breaks a component, asserts the preflight exits non-zero, and reverts — the proof the anti-false-convergence row asks for, kept where the next person can re-run it | `test -f scripts/preflight-mutation.sh && sh scripts/preflight-mutation.sh >/dev/null 2>&1; echo $?` → 0 |
 
 **Memory maturity scale** (continual-learning progression — grade by what the notes ARE, not how many):
 
 - **M1 Fail** — raw failure notes, guesses, duplicates ("tried X, didn't work")
-- **M2 Investigate** — notes explain WHY something failed
+- **M2 Investigate** — notes explain WHY something failed — a postmortem's "why the safety nets missed it" section is M2 evidence
 - **M3 Verify** — facts tagged `[VERIFIED]` / `[UNVERIFIED]` with the check that proved them
-- **M4 Distill** — verified facts compressed into general rules ("when X, always Y")
+- **M4 Distill** — verified facts compressed into general rules ("when X, always Y") — an implemented decision note with `## Alternatives considered`, and a postmortem whose guardrails section names the rule it added, are M4 evidence
 - **M5 Consult** — rules are actually read before acting (instruction exists + evidence of use, e.g. references in recent commits/ADRs)
 
 > **Success-correlation shortcut (M1→M3).** The highest-signal way to climb from raw failure notes (M1) to verified facts (M3) is *not* hand-annotation — it's to correlate each failed action with the action that later **fixed** it: "`Read foo/X.java` failed → `Read bar/X.scala` succeeded ⇒ *X lives in bar/, not foo/*." The fix that worked IS the verification. An offline distiller (reference impl: headroom `learn`) automates this from agent session logs and writes it, marker-fenced, to the agent-native canonical file (`AGENTS.md` / `CLAUDE.local.md` / `GEMINI.md`) — the same portability principle as Pillar 1. Keep the human in the outer loop: default to the gitignored personal file + dry-run (propose, don't auto-merge).
@@ -202,7 +208,7 @@ For every ✗ or ⚠ item, propose a concrete fix using the stack's idioms (reci
 | **Flutter** | `dart run tool/preflight.dart` | lefthook | `flutter test` | `flutter drive` / `patrol` | GitHub Actions |
 | **Ruby on Rails** | `bin/preflight` | overcommit | RSpec / minitest | Capybara | GitHub Actions |
 
-Preflight checks to always include: (1) AGENTS.md exists and ≤ 200 lines, (2) typecheck, (3) lint, (4) schema/config validation if runtime config exists, (5) domain-specific invariant if any. Preflight must exit non-zero on any failure — it is the loop's gate, not a log.
+Preflight checks to always include: (1) AGENTS.md exists and ≤ 200 lines, (2) typecheck, (3) lint, (4) schema/config validation if runtime config exists, (5) domain-specific invariant if any, (6) doc word budgets when `docs/doc-budgets.json` exists. Preflight must exit non-zero on any failure — it is the loop's gate, not a log.
 
 ### Step 4a — Resolve the model line-up (D25)
 
@@ -349,14 +355,34 @@ If it fails: identify the exact check that failed.`,
 const preflightPassed = preflight.toLowerCase().includes('pass') || preflight.includes('exit:0')
 log(`Preflight: ${preflightPassed ? 'PASS' : 'FAIL'}`)
 
+// The handoff is what the seats REPORT: the reviewer's [PASS|FAIL] lines are its evidence, the open
+// [FAIL] lines are its blocker. Nothing in this runtime can re-run them, so the label says so.
+const verdictLines = lastReview.split('\n').filter((l) => /^\[(PASS|FAIL)\]/.test(l))
+const openFails = verdictLines.filter((l) => l.startsWith('[FAIL]'))
+const handoff = {
+  status: approved && preflightPassed ? 'complete' : approved ? 'continue' : 'blocked',
+  summary: approved
+    ? `Reviewer approved after ${iteration} iteration(s); preflight ${preflightPassed ? 'green' : 'red'}`
+    : `Reviewer still rejects after ${maxIter} iteration(s)`,
+  evidence: [...verdictLines, `preflight: ${preflightPassed ? 'PASS' : 'FAIL'}`],
+  ...(approved ? {} : { blocker: openFails.join(' · ') || 'reviewer returned REJECTED with no [FAIL] line' }),
+}
+const LABEL = 'Reported by the implementer/reviewer seats — not independently certified: '
+
 return {
-  task, iterations: iteration, approved, preflightPassed,
-  nextStep: approved && preflightPassed
+  task, iterations: iteration, approved, preflightPassed, handoff,
+  nextStep: LABEL + (approved && preflightPassed
     ? 'git add -p && git commit'
     : approved ? 'Preflight failed — fix before commit'
-    : `Did not converge — review remaining [FAIL] after ${maxIter} iter and report to the human`,
+    : `Did not converge — review remaining [FAIL] after ${maxIter} iter and report to the human`),
 }
 ```
+
+The `handoff` the workflow returns — `status: complete | continue | blocked`, `summary`, `evidence`,
+`blocker` when blocked — is the same contract `/iterate` gates with `loop-gate.js check-handoff`. Here
+nothing gates it: the workflow runtime has no shell, so the handoff is what the seats say about their
+own work, and `nextStep` carries the label that says so. A human reading "complete" reads a report,
+not a certificate.
 
 **Adaptations required by stack** (from Step 1 detection):
 

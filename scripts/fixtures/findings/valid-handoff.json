@@ -1,0 +1,8 @@
+{
+  "status": "complete",
+  "summary": "Requirement 2 (rate limiter) implemented and green under the project's preflight.",
+  "evidence": [
+    "pnpm preflight → exit 0 (lint, typecheck, 42 tests)",
+    "src/lib/rate-limit.ts:1-88 — new module; src/routes/api.ts:12 wires it"
+  ]
+}

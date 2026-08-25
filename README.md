@@ -2,7 +2,7 @@
 
 A Claude Code **plugin** (and portable **Agent Skill**) that audits a project's agent harness against four pillars — harness-in-code, multi-agent role separation, automatic verification, and loop design — and produces an **executable rubric** (`harness-rubric.md`) plus a stack-tailored remediation plan with stop conditions. The audit is not a static report a human reads and executes; it is a convergence target an autonomous implement-and-verify loop runs against. Its core principle: *the model is the horse, the harness is the saddle* — models change every few months, the harness stays.
 
-Installed as a plugin, it also **protects** your sessions with three write-time security guards (see below).
+Installed as a plugin, it also **protects** your sessions with four write-time guards — three security guards and one loop-hygiene guard (see below).
 
 ## Install
 
@@ -13,15 +13,16 @@ Installed as a plugin, it also **protects** your sessions with three write-time 
 /plugin install harness-audit@harness-audit
 ```
 
-This loads the skill **and** three security hooks that run on every session:
+This loads the skill **and** four guards that run on every session:
 
 | Hook | What it blocks |
 |---|---|
 | `destructive-guard` | `rm -rf` against root/home, `git checkout --force`, `git clean -fdx`, `git reset --hard origin/*`, writes to block devices |
 | `secret-scan` | Writing files that contain credential patterns (`sk-…`, `ghp_…`, `AKIA…`, PEM private keys, Slack tokens) |
 | `block-no-verify` | `git commit/push --no-verify` — the pre-commit gate cannot be silently bypassed |
+| `repeat-tool-guard` | Nothing — it is advisory. After 3, 5 and 8 consecutive byte-identical tool calls (same tool, same canonical arguments) it injects an escalating reminder to re-read the last result and change approach or conclude; it never denies a call, and a human prompt resets the count |
 
-The guards are deliberately conservative (short, high-precision pattern lists — when in doubt they allow). To disable them, uninstall the plugin and use the skill-only install below.
+The guards are deliberately conservative (short, high-precision pattern lists — when in doubt they allow). The repeat guard is advisory by design: a polling loop that repeats a call on purpose still gets the nudge, and the model decides. To disable them, uninstall the plugin and use the skill-only install below.
 
 ### Option 2 — skill only (Claude Code, no hooks)
 
@@ -92,8 +93,8 @@ It detects the stack automatically, audits the four pillars, grades loop-readine
 
 1. **Harness in code** — `AGENTS.md` (≤ 200 lines) as the portable entry point, a single preflight gate, a memory convention, all versioned in the repo rather than in IDE config.
 2. **Multi-agent role separation** — orchestrator / implementer / reviewer, where the reviewer receives only artifacts (diff + rubric), never the implementer's reasoning — and runs on a *different model family* than the implementer, on purpose. Independence is what lifts review accuracy (an independent verifier beats self-critique; the often-cited ~62%→~89% figures are directional targets, pending an in-house benchmark — see WHITEPAPER §8.1).
-3. **Automatic verification** — lint, typecheck, tests with real assertions, a non-zero-on-failure preflight gate, pre-commit hooks, CI — and write-time security gates (secret scan, destructive-command guard, no-verify block). Verification a loop can read.
-4. **Loop design** — an executable rubric every criterion of which is checkable by command, explicit stop conditions, and a memory that matures Fail → Investigate → Verify → Distill → Consult.
+3. **Automatic verification** — lint, typecheck, tests with real assertions, a non-zero-on-failure preflight gate, pre-commit hooks, CI — and write-time security gates (secret scan, destructive-command guard, no-verify block) plus a loop-hygiene guard (a repeat-call reminder). Verification a loop can read.
+4. **Loop design** — an executable rubric every criterion of which is checkable by command, explicit stop conditions, and a memory that matures Fail → Investigate → Verify → Distill → Consult — with a shape on disk the audit can grade: decisions with a lifecycle (`proposed/ implemented/ rejected/`, every implemented one stating the alternatives it beat), postmortems that say why the safety nets missed the bug, standing docs under a word ceiling, and a gate proven by mutation.
 
 A minimal harness beats an inflated one: trimming tooling tends to make agents faster, not weaker.
 
@@ -230,13 +231,14 @@ either harness; there is no error, no log line, nothing to grep for. Pi, via the
 one target that actually enforces a tool-permission field at runtime — but that is a different,
 non-bundled piece from `pi-subagents`, and this repo does not depend on it.
 
-**The deterministic loop gate degrades on every target but Claude Code.** `/orchestrate` and
-`/review-loop` shell out to this plugin's `scripts/loop-gate.js` twice per run: once to refuse a
+**The deterministic loop gate degrades on every target but Claude Code.** `/orchestrate`,
+`/review-loop` and `/iterate` shell out to this plugin's `scripts/loop-gate.js` every round: to refuse a
 critic's findings that anchor at a file which is not in the repo or at a line past the end of a real
-one, or that carry a severity outside the fixed ladder — and once to refuse to *guess* the state of a
-half-written run rather than reconciling it silently. On the scorer's scorecard the same call also
+one, or that carry a severity outside the fixed ladder — and once per run to refuse to *guess* the state
+of a half-written run rather than reconciling it silently. On the scorer's scorecard the same call also
 recomputes `SCORE` and `BLOCKERS` from the criteria table, so the number the gate opens on is produced
-by arithmetic instead of by whichever model is holding the chair. None of these targets installs this
+by arithmetic instead of by whichever model is holding the chair; on `/iterate`'s builder handoff it
+refuses a status with no evidence behind it. None of these targets installs this
 repo's `scripts/`, and `${CLAUDE_PLUGIN_ROOT}` expands to nothing outside the Claude Code plugin
 runtime, so the port rewrites both steps into hand-checks the chair performs **on itself** — which is
 precisely the party the gate exists to be independent of. The rounds, the stop conditions and the
@@ -334,7 +336,9 @@ The meta-loop. Each round: the implementer builds the next requirement, the scor
 spec of the process that built it, with a falsifiable prediction. It **writes** the process spec (versioned,
 `docs/process.md` by default) and a `process-log.md` of predictions, each settled by the *next* run, not this
 one. Stops only when both subjects are still: score ≥ 90, zero blockers, and the optimizer proposing nothing
-— or at 5 rounds.
+— or at 5 rounds. Each round is gated by `loop-gate.js` like Loops 3–4, and the builder's end-of-round
+handoff (`complete | continue | blocked`, with evidence) is shape-checked by `check-handoff` — and reported
+as the builder's claim, never as a certificate.
 *Recorded:* one settled entry in `process-log.md` — the optimizer's first bounded change to a real process
 spec, its prediction graded ✅ verified by the following phase.
 
@@ -443,10 +447,11 @@ which is not in the repo, or at line 900 of a 40-line file, is indistinguishable
 it is inside the findings JSON, and it will be reported to a human as evidence. That is what a
 fabricated finding looks like from the inside, and it is invisible to a chair reading JSON as prose.
 
-`/orchestrate` and `/review-loop` now call the gate twice per run. It costs zero tokens.
+`/orchestrate`, `/review-loop` and `/iterate` call the gate every round. It costs zero tokens.
 
 ```bash
 node scripts/loop-gate.js check-findings <seat.json> --root . --seat correctness
+node scripts/loop-gate.js check-handoff <builder.json> --seat builder
 node scripts/loop-gate.js resume docs/harness-dev/loop-runs/<run-slug>/
 ```
 
@@ -472,6 +477,13 @@ round file), it answers **`AMBIGUOUS_RUN_STATE`, lists the files, and exits 2**.
 A loop that repairs its own half-written state resumes into a round nobody chose and reports the
 result as though someone had.
 
+**`check-handoff`** gates the one seat output that is about the seat's own work: the builder's
+end-of-round `{ status, summary, evidence, blocker? }`. It refuses a status outside
+`complete | continue | blocked`, empty evidence, a `blocked` with no blocker named and a blocker on a
+status that is not blocked — the shapes that let a claim hide. It certifies nothing: a handoff that
+clears it is what the builder reported, and `/iterate` says so wherever it quotes one. The independent
+read is the scorer's scorecard, not the handoff.
+
 The gate is Claude Code-only; every other target degrades it to a hand-check the chair performs on
 itself. See [Compatibility across harnesses](#compatibility-across-harnesses).
 
@@ -480,8 +492,9 @@ itself. See [Compatibility across harnesses](#compatibility-across-harnesses).
 ```
 .claude-plugin/     plugin + marketplace manifests
 skills/harness-audit/   SKILL.md + rubric-template.md + verifier-protocol.md (the portable part)
-hooks/ + scripts/hooks/ security guards (plugin install only)
+hooks/ + scripts/hooks/ three security guards + the repeat-tool loop-hygiene guard (plugin install only)
 scripts/loop-gate.js    the deterministic seam inside a loop — see below
+scripts/check-doc-budgets.js  word-ceiling gate for standing docs (docs/doc-budgets.json)
 scripts/validate.js     this package's own preflight gate — run `node scripts/validate.js` before releasing
 install.sh              multi-IDE skill installer
 WHITEPAPER.md           full rationale, benchmarks provenance, and theory

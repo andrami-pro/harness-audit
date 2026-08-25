@@ -1,0 +1,6 @@
+{
+  "status": "done",
+  "summary": "All good.",
+  "evidence": ["tests pass"],
+  "blocker": "none really"
+}

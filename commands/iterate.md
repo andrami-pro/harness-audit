@@ -1,7 +1,7 @@
 ---
 description: "Loop 5 — the meta-loop. Round after round it builds a multi-requirement feature, scores the app against the rubric, and then a process-optimizer reads the run's own telemetry and makes ONE bounded change — with a falsifiable prediction — to the spec of the process that built it. Two subjects converge: the feature against the rubric, the process against its own waste. The lasting product is not the feature; it is a process that builds the next feature in fewer rounds. Cost: HIGH — builder, scorer and optimizer every round, up to five rounds. Multi-requirement features only: never a bug fix, never a typo, never a one-file change. You may suggest this command; you may never launch it yourself."
 argument-hint: <the feature to build> [--spec <process spec path, default docs/process.md>]
-allowed-tools: Task, Read, Write, Edit, Grep, Glob, Bash(graphify:*), Bash(git diff:*), Bash(git status:*), Bash(git log:*), Bash(git ls-files:*), Bash(mkdir:*), Bash(date:*)
+allowed-tools: Task, Read, Write, Edit, Grep, Glob, Bash(graphify:*), Bash(git diff:*), Bash(git status:*), Bash(git log:*), Bash(git ls-files:*), Bash(mkdir:*), Bash(date:*), Bash(node:*)
 disable-model-invocation: true
 ---
 
@@ -66,11 +66,32 @@ forever.
 Read the graph before you read the files: `graphify query "<what the feature touches>"` returns a
 scoped subgraph for a fraction of a grep sweep. No `graphify-out/graph.json`? Skip it.
 
+Name the run — `<YYYY-MM-DD>-iterate-<slug>` — and use that one slug for the run directory, the
+round files and the findings JSON.
+
+**Then check whether that run is already in progress.** Rounds are files, not conversation: a chair
+that dies in round 3 of a build loop has already paid for two builder rounds, and the only way to keep
+them is to have written them down.
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT:-.claude}/scripts/loop-gate.js" resume docs/harness-dev/loop-runs/<run-slug>/
+```
+
+**If that command is not available**, list the run directory yourself and read the `round-<n>.json`
+files it holds. The rule that matters survives the missing script: unless what you find is plainly the
+contiguous sequence `1..n`, stop and hand it to the human rather than reconciling it.
+
+`NO_RUN` → start at round 1. `RESUME_FROM: <n>` → round `n` is the next one: read the round files
+already on disk for what is open, and never re-dispatch a round that is recorded. `RUN_COMPLETE` →
+that slug has published a verdict; pick another slug or stop. **`AMBIGUOUS_RUN_STATE` (exit 2) → stop
+and hand the human the files it listed.** Do not reconcile it yourself — a loop that repairs its own
+half-written state resumes into a round nobody chose, and it reports the result as if someone had.
+
 ## 2. The round — three seats, in sequence (max 5)
 
 | # | seat | `subagent_type` | what it does |
 |---|---|---|---|
-| 1 | builder | the project's own **`implementer`** | builds the next open requirement, following the spec |
+| 1 | builder | the project's own **`implementer`** | builds the next open requirement, following the spec, and ends its reply with a handoff (below) |
 | 2 | scorer | `scorer` | scores the app against the rubric → scorecard |
 | 3 | optimizer | `process-optimizer` | reads the telemetry and the score → ONE bounded change to the spec |
 
@@ -93,21 +114,76 @@ That last row is the one that quietly breaks. Hand the optimizer the diff and yo
 review from a seat that was supposed to be looking somewhere else entirely, and the process goes another
 run unexamined.
 
-## 3. Recompute the score yourself
+**The builder ends its reply with a handoff** — one fenced `json` block, nothing after it. Put this
+contract in its prompt every round:
 
-The scorer returns a `criteria` table. Do the arithmetic from the table — do not take its headline on
-trust:
-
-```
-weight(blocker) = 3        weight(quality) = 1
-
-score    = round( 100 × Σ(weight × pass) / Σ(weight) )   over every criterion with applies: true
-blockers = how many blocker-class criteria came back pass: false
+```json
+{ "status": "complete|continue|blocked",
+  "summary": "one sentence: where the requirement stands",
+  "evidence": ["<a command and its output, or file:line>"],
+  "blocker": "<only when blocked: what stops the work, in one sentence>" }
 ```
 
-If your recount disagrees with the scorer's headline, **your recount wins**, and say so in the report:
-a scorer whose table does not support its own number is a finding, and it is one the optimizer should
-hear about.
+`complete` means the requirement is built and the builder can point at why. `continue` means it is
+partly built and the next round carries on. `blocked` means it cannot proceed without something it does
+not have, and `blocker` names it — a block nobody can name is a stall.
+
+## 3. Gate every seat — the handoff for shape, the scorecard for arithmetic
+
+Write each seat's raw reply to `docs/harness-dev/loop-runs/<run-slug>/raw/<round>-<seat>.json`, then
+run the gate over it before anything enters the aggregate. The builder's handoff:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT:-.claude}/scripts/loop-gate.js" check-handoff <file> --seat builder
+```
+
+The scorer's scorecard:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT:-.claude}/scripts/loop-gate.js" check-findings <file> --root . --seat <seat>
+```
+
+**If that command is not available** — the install has these commands but not the plugin's `scripts/`,
+which is what a copied-commands install looks like — say so once, in one line, and check each seat's
+JSON yourself against the contract in its agent file: for the handoff, a status from the fixed set,
+non-empty summary and evidence, a blocker exactly when blocked; for the scorecard, the fixed severity
+ladder, a `file` that exists in the repo, a `line` inside that file, a non-empty summary and fix, and
+no `id`/`critic` the seat assigned itself. Then **say in the report that the run was ungated.** A
+missing gate is not a passing gate, and a crash from a missing script is not a verdict.
+
+Exit 0 → take it. **Exit 2 → do not take it, and do not repair it yourself.** Re-dispatch that one
+seat with the gate's error list appended verbatim to its prompt: the errors are written to be acted on
+without help, and a chair paraphrasing them is a chair guessing what the seat meant. A seat that fails
+the gate twice is a finding about the loop — record it, and carry on. A handoff that comes back
+`blocked` is **not** a gate failure: record the blocker, let the scorer score what exists, and report
+the block — the human decides whether the loop goes on.
+
+A handoff that clears the gate has been checked for **shape**, nothing more. It is what the builder
+reports about its own work; the gate certifies none of it, and the scorer's scorecard is the
+independent read. Say so wherever the handoff is quoted: *reported by the builder, not certified*.
+
+**The score comes from the gate, not from you and not from the scorer's headline.** Run over the
+scorecard, `check-findings` prints the two numbers this loop gates on:
+
+```
+SCORE: 86/100 · BLOCKERS: 1
+```
+
+It computes them from the `criteria` table with the same weights the scorer's own file states —
+`blocker` 3, `quality` 1, over every criterion with `applies: true` — and it is the only party in the
+round that is neither building the feature nor grading it. Take those two numbers. If they disagree
+with the scorer's own headline, **the gate wins**, and say so in the report: a scorer whose table does
+not support its number is a finding of its own, and one the optimizer should hear about.
+
+Give every gated finding an `id` of `R<round>-F<k>` (k restarts each round) and its `critic` field
+(`scorer`) — the seats do not set these, and the gate rejects them if they try.
+
+**Close the round on disk before you open the next one.** Write
+`docs/harness-dev/loop-runs/<run-slug>/round-<n>.json` — the round object exactly as §6 specifies it,
+one round per file. That file is what `resume` counts, and it is the only thing that survives a chair
+that dies mid-run. Write it after the optimizer's change has landed, so a resumed run never re-applies
+a spec edit that already exists. Numbering is contiguous from 1: `resume` refuses a gap rather than
+guessing which round is missing.
 
 ## 4. Stop — two subjects, two convergences
 
@@ -175,9 +251,15 @@ Create `docs/harness-dev/loop-runs/` if it does not exist. Write
       "prediction": "one line — the number, and the artifact that settles it" }
   ],
   "verdict": "APROBADO",
-  "stoppedBy": "gate-passed-process-still"
+  "stoppedBy": "gate-passed-process-still",
+  "handoff": { "status": "complete",
+    "summary": "one sentence: where the feature stands, as the builder reported it",
+    "evidence": ["SCORE: 92/100 · BLOCKERS: 0 — loop-gate, round 3"] }
 }
 ```
+
+`handoff` is the last round's builder handoff after it cleared `check-handoff` — gated for shape,
+reported by the builder, certified by nobody. Omit the field when no round produced one.
 
 `severity`: `blocker` (a contract break — a failed blocker-class criterion, a false factual claim, a
 leaked secret, a broken build) · `major` (quality a client would notice) · `minor` (style).
@@ -193,7 +275,8 @@ field as unmeasured and says so, and it has no way to tell a filled-in guess fro
 ## 7. Report
 
 Short. The score per round (the app's trend line), the spec changes with their versions (the process's),
-the predictions now open and what will settle them, the JSON path.
+the predictions now open and what will settle them, the JSON path. Say which numbers came from the
+gate, and label the handoff as the builder's report, not a certificate.
 
 **Lead with the process, not the feature.** The feature is what you paid for. The process is what you
 bought.
