@@ -1,0 +1,4 @@
+#!/bin/sh
+# Asesor semanal del line-up: rankings × precio × política de datos → ~/.agents/lineup-advice.md
+#   bin/lineup-advise [--offline] [--no-probe] [--project <.agents/model-lineup.json>]
+exec node "$(CDPATH= cd -- "$(dirname -- "$0")/../scripts" && pwd)/lineup-advise.js" "$@"

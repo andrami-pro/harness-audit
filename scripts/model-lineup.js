@@ -14,12 +14,15 @@
 //               confirmable: the caller must reject, not prompt.
 //     Exit 1  — usage error or unreadable file.
 //
-//   node model-lineup.js check [--global <path>] [--project <path>] [--catalog <path>]
+//   node model-lineup.js check [--global <path>] [--project <path>] [--catalog <path>] [--probe]
 //     Validates every provider-qualified entry against the live `pi --list-models` catalog.
 //     Exit 0 — all present, or no catalog reachable. Exit 1 — an entry names a model nothing serves.
 //
 //   node model-lineup.js ui [--global <path>]
 //     Editor de la matriz rol x harness. Sin TTY imprime la matriz y valida, sin editar.
+//
+//   node model-lineup.js advise [--offline] [--no-probe]
+//     Asesor semanal (lineup-advise.js): rankings × precio × datos → ~/.agents/lineup-advice.md
 //
 //   node model-lineup.js ollama-sync
 //     Regenera el bloque `ollama` de ~/.pi/agent/models.json desde `ollama list`.
@@ -33,7 +36,11 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-const ROLES = ['architect', 'orchestrator', 'implementer', 'reviewer', 'preflight', 'scorer', 'critic', 'judge'];
+// 'explainer' is the read-only question seat: it answers "where is X / what state is this in /
+// why was this decided" from the graph, STATUS.md and docs, and never proposes work. It is in the
+// line-up for one reason — a role that answers questions all day at implementer prices is the
+// cheapest thing in the harness to get wrong, and it is the natural home for a free-tier model.
+const ROLES = ['architect', 'orchestrator', 'implementer', 'reviewer', 'preflight', 'scorer', 'critic', 'judge', 'explainer'];
 
 // Targets whose harness accepts a non-Anthropic `provider` (Pi, Kilo, OpenCode per D25). Every
 // other target — Claude Code chief among them — only understands bare Anthropic model ids, so a
@@ -310,6 +317,28 @@ function catalogProblems(lineup, catalog) {
   return problems;
 }
 
+// The catalog is a claim, not a fact. Measured 2026-08-24: `pi --list-models` still advertised
+// `nvidia/z-ai/glm-5.2` and `nvidia/moonshotai/kimi-k2.6` while the endpoints answered 410 and 404 —
+// so a line-up can pass the catalog check and still hang every dispatch. Probing is the only thing
+// that distinguishes "listed" from "answers": one throwaway request per distinct model.
+function probeModel(id, timeoutMs) {
+  try {
+    const out = require('node:child_process').execFileSync(
+      'pi', ['-p', 'Responde solo: ok', '--model', id],
+      { encoding: 'utf8', timeout: timeoutMs, stdio: ['ignore', 'pipe', 'pipe'] },
+    );
+    const text = String(out).trim();
+    if (!text) return { ok: false, reason: 'respuesta vacía' };
+    // A provider error arrives as normal output, not a non-zero exit — so the status code has to be
+    // read out of the text or a 403 would count as a healthy model.
+    const err = text.match(/\b(4\d\d|5\d\d)\b[^\n]*/);
+    return err ? { ok: false, reason: err[0].slice(0, 120) } : { ok: true };
+  } catch (e) {
+    if (e.killed || e.signal) return { ok: false, reason: `sin respuesta en ${Math.round(timeoutMs / 1000)}s` };
+    return { ok: false, reason: String(e.message || e).slice(0, 120) };
+  }
+}
+
 function cmdCheck(argv) {
   const filePath = opt(argv, '--file', null);
   let lineup;
@@ -335,6 +364,29 @@ function cmdCheck(argv) {
   const problems = catalogProblems(lineup, catalog);
   if (!problems.length) {
     process.stdout.write(`model-lineup.js check: ok — every provider-qualified entry exists in a catalog of ${catalog.pairs.size} models\n`);
+    if (!argv.includes('--probe')) process.exit(0);
+  }
+
+  if (argv.includes('--probe')) {
+    const timeoutMs = Number(opt(argv, '--probe-timeout', '90')) * 1000;
+    const ids = new Set();
+    for (const [target, roles] of Object.entries(lineup.harness || {})) {
+      if (!MULTI_PROVIDER_TARGETS.has(target)) continue;
+      for (const entry of Object.values(roles || {})) {
+        if (entry && entry.provider) ids.add(`${String(entry.provider).trim()}/${String(entry.model || '').trim()}`);
+      }
+    }
+    let dead = 0;
+    for (const id of [...ids].sort()) {
+      const r = probeModel(id, timeoutMs);
+      if (r.ok) process.stdout.write(`  ok    ${id}\n`);
+      else { dead += 1; process.stdout.write(`  MUERTO ${id} — ${r.reason}\n`); }
+    }
+    if (dead || problems.length) {
+      process.stderr.write(`model-lineup.js check: ${dead} modelo(s) listado(s) que no responden, ${problems.length} fuera del catálogo\n`);
+      process.exit(1);
+    }
+    process.stdout.write(`model-lineup.js check: ${ids.size} modelo(s) responden\n`);
     process.exit(0);
   }
   for (const p of problems) {
@@ -353,6 +405,12 @@ function main() {
   if (cmd === 'resolve') return cmdResolve(argv);
   if (cmd === 'record-exception') return cmdRecordException(argv);
   if (cmd === 'check') return cmdCheck(argv);
+  if (cmd === 'advise') {
+    // Mismo motivo que `ui`: el asesor hace red y tarda un minuto; nadie que haga `require` de este
+    // archivo para leer un id debe cargarlo.
+    process.argv = [process.argv[0], require('node:path').join(__dirname, 'lineup-advise.js'), ...argv];
+    return require('./lineup-advise.js');
+  }
   if (cmd === 'ui' || cmd === 'ollama-sync') {
     // The editor lives in its own file: it is TTY code (raw mode, redraws) and this one is required
     // by validate.js, install.sh and loop-stats.js, none of which should load a terminal UI to read a
@@ -361,7 +419,7 @@ function main() {
       ...(cmd === 'ollama-sync' ? ['ollama-sync'] : []), ...argv];
     return require('./lineup-ui.js').main();
   }
-  process.stderr.write(`model-lineup.js: unknown command '${cmd || ''}' — usage: resolve | check | ui | ollama-sync | record-exception\n`);
+  process.stderr.write(`model-lineup.js: unknown command '${cmd || ''}' — usage: resolve | check | ui | advise | ollama-sync | record-exception\n`);
   process.exit(1);
 }
 

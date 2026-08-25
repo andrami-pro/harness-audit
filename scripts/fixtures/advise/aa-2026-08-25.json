@@ -1,0 +1,236 @@
+{
+ "fetchedAt": "2026-08-25T15:19:45.303Z",
+ "rows": [
+  {
+   "name": "gpt-oss-20b (high)",
+   "slug": "gpt-oss-20b",
+   "creator": "openai",
+   "intelligence": 15.2,
+   "coding": 20.7,
+   "agentic": 35.41998936735779,
+   "price_in": 0.06,
+   "price_out": 0.19,
+   "tps": 117.485
+  },
+  {
+   "name": "gpt-oss-20b (low)",
+   "slug": "gpt-oss-20b-low",
+   "creator": "openai",
+   "intelligence": 14.4,
+   "coding": null,
+   "agentic": 27.418926103136627,
+   "price_in": 0.07,
+   "price_out": 0.2,
+   "tps": 140.151
+  },
+  {
+   "name": "GPT-5.6 Sol (low)",
+   "slug": "gpt-5-6-sol-low",
+   "creator": "openai",
+   "intelligence": 50.7,
+   "coding": 69.7,
+   "agentic": 68.31472620946305,
+   "price_in": 4,
+   "price_out": 20,
+   "tps": 56.915
+  },
+  {
+   "name": "GPT-5.6 Sol (max)",
+   "slug": "gpt-5-6-sol",
+   "creator": "openai",
+   "intelligence": 60.9,
+   "coding": 77.4,
+   "agentic": 75.49840510366825,
+   "price_in": 4,
+   "price_out": 20,
+   "tps": 62.221
+  },
+  {
+   "name": "GPT-5.6 Sol (medium)",
+   "slug": "gpt-5-6-sol-medium",
+   "creator": "openai",
+   "intelligence": 55.6,
+   "coding": 76.3,
+   "agentic": 71.93646996278575,
+   "price_in": 4,
+   "price_out": 20,
+   "tps": 53.679
+  },
+  {
+   "name": "GPT-5.6 Sol (xhigh)",
+   "slug": "gpt-5-6-sol-xhigh",
+   "creator": "openai",
+   "intelligence": 59,
+   "coding": 78.3,
+   "agentic": 73.07947900053165,
+   "price_in": 4,
+   "price_out": 20,
+   "tps": 63.784
+  },
+  {
+   "name": "GPT-5.6 Sol (high)",
+   "slug": "gpt-5-6-sol-high",
+   "creator": "openai",
+   "intelligence": 57.3,
+   "coding": 77.2,
+   "agentic": 72.7272727272727,
+   "price_in": 4,
+   "price_out": 20,
+   "tps": 57.202
+  },
+  {
+   "name": "Gemini 3.7 Flash (high)",
+   "slug": "gemini-3-7-flash",
+   "creator": "google",
+   "intelligence": 56,
+   "coding": 76.1,
+   "agentic": null,
+   "price_in": 0.75,
+   "price_out": 3.75,
+   "tps": 358.423
+  },
+  {
+   "name": "Gemini 3.7 Flash (low)",
+   "slug": "gemini-3-7-flash-low",
+   "creator": "google",
+   "intelligence": 50.9,
+   "coding": 71,
+   "agentic": null,
+   "price_in": 0.75,
+   "price_out": 3.75,
+   "tps": 296.861
+  },
+  {
+   "name": "Gemini 3.7 Flash (medium)",
+   "slug": "gemini-3-7-flash-medium",
+   "creator": "google",
+   "intelligence": 53.4,
+   "coding": 71.5,
+   "agentic": null,
+   "price_in": 0.75,
+   "price_out": 3.75,
+   "tps": 301.32
+  },
+  {
+   "name": "Claude Opus 5 (Adaptive Reasoning, Max Effort)",
+   "slug": "claude-opus-5",
+   "creator": "anthropic",
+   "intelligence": 63.1,
+   "coding": 78,
+   "agentic": null,
+   "price_in": 5,
+   "price_out": 25,
+   "tps": 53.861
+  },
+  {
+   "name": "Claude Opus 5 (Adaptive Reasoning, Xhigh Effort)",
+   "slug": "claude-opus-5-xhigh",
+   "creator": "anthropic",
+   "intelligence": 62.5,
+   "coding": 77,
+   "agentic": null,
+   "price_in": 5,
+   "price_out": 25,
+   "tps": 51.137
+  },
+  {
+   "name": "Claude Opus 5 (Adaptive Reasoning, Low Effort)",
+   "slug": "claude-opus-5-low",
+   "creator": "anthropic",
+   "intelligence": 52.5,
+   "coding": 66.9,
+   "agentic": null,
+   "price_in": 5,
+   "price_out": 25,
+   "tps": 45.608
+  },
+  {
+   "name": "Claude Opus 5 (Adaptive Reasoning, High Effort)",
+   "slug": "claude-opus-5-high",
+   "creator": "anthropic",
+   "intelligence": 61.5,
+   "coding": 76.5,
+   "agentic": null,
+   "price_in": 5,
+   "price_out": 25,
+   "tps": 47.769
+  },
+  {
+   "name": "Claude Opus 5 (Adaptive Reasoning, Medium Effort)",
+   "slug": "claude-opus-5-medium",
+   "creator": "anthropic",
+   "intelligence": 58.6,
+   "coding": 74.3,
+   "agentic": null,
+   "price_in": 5,
+   "price_out": 25,
+   "tps": 46.052
+  },
+  {
+   "name": "Kimi K2.7 Code",
+   "slug": "kimi-k2-7-code",
+   "creator": "kimi",
+   "intelligence": 43,
+   "coding": 60.8,
+   "agentic": 67.3777246145667,
+   "price_in": 0.95,
+   "price_out": 4,
+   "tps": 42.884
+  },
+  {
+   "name": "Kimi K3 (max)",
+   "slug": "kimi-k3",
+   "creator": "kimi",
+   "intelligence": 59.7,
+   "coding": 76.2,
+   "agentic": null,
+   "price_in": 3,
+   "price_out": 15,
+   "tps": 35.335
+  },
+  {
+   "name": "Kimi K3 (low)",
+   "slug": "kimi-k3-low",
+   "creator": "kimi",
+   "intelligence": 48.3,
+   "coding": 72,
+   "agentic": null,
+   "price_in": 3,
+   "price_out": 15,
+   "tps": 32.27
+  },
+  {
+   "name": "GLM-5.2 (max)",
+   "slug": "glm-5-2",
+   "creator": "zai",
+   "intelligence": 52.6,
+   "coding": 68.8,
+   "agentic": 74.94019138755985,
+   "price_in": 1.4,
+   "price_out": 4.4,
+   "tps": 0
+  },
+  {
+   "name": "GLM-5.3 (max)",
+   "slug": "glm-5-3",
+   "creator": "zai",
+   "intelligence": 59.5,
+   "coding": 74.8,
+   "agentic": null,
+   "price_in": 1.4,
+   "price_out": 4.4,
+   "tps": 0
+  },
+  {
+   "name": "Ox Alpha \u2014 FIXTURE SINT\u00c9TICA (AA no eval\u00faa este modelo; existe solo para que el check pueda ver que un modelo `retains` fuerte y gratis queda fuera de los roles con c\u00f3digo)",
+   "slug": "ox-alpha",
+   "creator": "stealth",
+   "intelligence": 70,
+   "coding": 90,
+   "agentic": 80,
+   "price_in": 0,
+   "price_out": 0,
+   "tps": 100
+  }
+ ]
+}

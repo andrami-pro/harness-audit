@@ -1,0 +1,29 @@
+{
+ "fetchedAt": "2026-08-25T15:19:48.841Z",
+ "rows": [
+  {
+   "model": "Claude 4.5 Opus",
+   "resolved": 79.2,
+   "agent": "live-SWE-agent",
+   "date": "2025-12-15"
+  },
+  {
+   "model": "Claude 4.6 Opus",
+   "resolved": 75.6,
+   "agent": "mini-SWE-agent",
+   "date": "2026-02-17"
+  },
+  {
+   "model": "Claude 4 Opus",
+   "resolved": 73.2,
+   "agent": "Tools",
+   "date": "2025-05-22"
+  },
+  {
+   "model": "Claude 3 Opus",
+   "resolved": 15.8,
+   "agent": "SWE-agent",
+   "date": "2024-04-02"
+  }
+ ]
+}

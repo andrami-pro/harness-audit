@@ -1,0 +1,425 @@
+{
+ "fetchedAt": "2026-08-25T15:26:56.177Z",
+ "rows": [
+  {
+   "tag": "lm_coding",
+   "model": "claude-opus-5-high",
+   "score": 1531.5185073420098,
+   "rank": 3,
+   "org": "anthropic"
+  },
+  {
+   "tag": "lm_coding",
+   "model": "claude-opus-5-max",
+   "score": 1528.395960285115,
+   "rank": 4,
+   "org": "anthropic"
+  },
+  {
+   "tag": "lm_coding",
+   "model": "kimi-k3-max",
+   "score": 1511.541768583301,
+   "rank": 8,
+   "org": "moonshot"
+  },
+  {
+   "tag": "lm_coding",
+   "model": "glm-5.3-max",
+   "score": 1504.0079599546075,
+   "rank": 9,
+   "org": "zai"
+  },
+  {
+   "tag": "lm_coding",
+   "model": "gemini-3.7-flash-high",
+   "score": 1503.5280062667107,
+   "rank": 11,
+   "org": "google"
+  },
+  {
+   "tag": "lm_coding",
+   "model": "gpt-5.6-sol-xhigh",
+   "score": 1492.2691050475642,
+   "rank": 21,
+   "org": "openai"
+  },
+  {
+   "tag": "lm_coding",
+   "model": "glm-5.2-max",
+   "score": 1475.473869793419,
+   "rank": 46,
+   "org": "zai"
+  },
+  {
+   "tag": "lm_coding",
+   "model": "gpt-oss-20b",
+   "score": 1308.4100617804668,
+   "rank": 230,
+   "org": "openai"
+  },
+  {
+   "tag": "lm_hard",
+   "model": "claude-opus-5-high",
+   "score": 1524.3704853006493,
+   "rank": 2,
+   "org": "anthropic"
+  },
+  {
+   "tag": "lm_hard",
+   "model": "claude-opus-5-max",
+   "score": 1523.8711728691405,
+   "rank": 3,
+   "org": "anthropic"
+  },
+  {
+   "tag": "lm_hard",
+   "model": "kimi-k3-max",
+   "score": 1496.760517119444,
+   "rank": 9,
+   "org": "moonshot"
+  },
+  {
+   "tag": "lm_hard",
+   "model": "gemini-3.7-flash-high",
+   "score": 1496.6925815977597,
+   "rank": 10,
+   "org": "google"
+  },
+  {
+   "tag": "lm_hard",
+   "model": "glm-5.3-max",
+   "score": 1490.533280406191,
+   "rank": 11,
+   "org": "zai"
+  },
+  {
+   "tag": "lm_hard",
+   "model": "gpt-5.6-sol-xhigh",
+   "score": 1477.7560962423904,
+   "rank": 28,
+   "org": "openai"
+  },
+  {
+   "tag": "lm_hard",
+   "model": "glm-5.2-max",
+   "score": 1471.2929822694068,
+   "rank": 33,
+   "org": "zai"
+  },
+  {
+   "tag": "lm_hard",
+   "model": "gpt-oss-20b",
+   "score": 1274.4976065232004,
+   "rank": 240,
+   "org": "openai"
+  },
+  {
+   "tag": "lm_webdev",
+   "model": "claude-opus-5-max",
+   "score": 1690.6395713997163,
+   "rank": 1,
+   "org": "anthropic"
+  },
+  {
+   "tag": "lm_webdev",
+   "model": "kimi-k3-max",
+   "score": 1673.6961333978227,
+   "rank": 2,
+   "org": "moonshot"
+  },
+  {
+   "tag": "lm_webdev",
+   "model": "claude-opus-5-high",
+   "score": 1662.5934919996598,
+   "rank": 4,
+   "org": "anthropic"
+  },
+  {
+   "tag": "lm_webdev",
+   "model": "gpt-5.6-sol-xhigh (codex-harness)",
+   "score": 1618.7118275567602,
+   "rank": 7,
+   "org": "openai"
+  },
+  {
+   "tag": "lm_webdev",
+   "model": "glm-5.3-max",
+   "score": 1598.6001848847525,
+   "rank": 8,
+   "org": "zai"
+  },
+  {
+   "tag": "lm_webdev",
+   "model": "gemini-3.7-flash-high",
+   "score": 1587.044813853989,
+   "rank": 10,
+   "org": "google"
+  },
+  {
+   "tag": "lm_webdev",
+   "model": "glm-5.2-max",
+   "score": 1582.0912797071308,
+   "rank": 11,
+   "org": "zai"
+  },
+  {
+   "tag": "lm_webdev",
+   "model": "kimi-k2.7-code",
+   "score": 1472.646928867663,
+   "rank": 41,
+   "org": "moonshot"
+  },
+  {
+   "tag": "lm_webdev",
+   "model": "claude-opus-5-max",
+   "score": 1664.469276663045,
+   "rank": 1,
+   "org": "anthropic"
+  },
+  {
+   "tag": "lm_webdev",
+   "model": "gpt-5.6-sol-xhigh (codex-harness)",
+   "score": 1605.9159174669094,
+   "rank": 4,
+   "org": "openai"
+  },
+  {
+   "tag": "lm_webdev",
+   "model": "kimi-k3-max",
+   "score": 1573.9376859174708,
+   "rank": 7,
+   "org": "moonshot"
+  },
+  {
+   "tag": "lm_webdev",
+   "model": "kimi-k2.7-code",
+   "score": 1510.590141576819,
+   "rank": 19,
+   "org": "moonshot"
+  },
+  {
+   "tag": "lm_webdev",
+   "model": "claude-opus-5-max",
+   "score": 1690.6395713997163,
+   "rank": 1,
+   "org": "anthropic"
+  },
+  {
+   "tag": "lm_webdev",
+   "model": "kimi-k3-max",
+   "score": 1673.6961333978227,
+   "rank": 2,
+   "org": "moonshot"
+  },
+  {
+   "tag": "lm_webdev",
+   "model": "claude-opus-5-high",
+   "score": 1662.5934919996598,
+   "rank": 4,
+   "org": "anthropic"
+  },
+  {
+   "tag": "lm_webdev",
+   "model": "gpt-5.6-sol-xhigh (codex-harness)",
+   "score": 1618.7118275567602,
+   "rank": 7,
+   "org": "openai"
+  },
+  {
+   "tag": "lm_webdev",
+   "model": "glm-5.3-max",
+   "score": 1598.6001848847525,
+   "rank": 8,
+   "org": "zai"
+  },
+  {
+   "tag": "lm_webdev",
+   "model": "gemini-3.7-flash-high",
+   "score": 1587.044813853989,
+   "rank": 10,
+   "org": "google"
+  },
+  {
+   "tag": "lm_webdev",
+   "model": "glm-5.2-max",
+   "score": 1582.0912797071308,
+   "rank": 11,
+   "org": "zai"
+  },
+  {
+   "tag": "lm_webdev",
+   "model": "kimi-k2.7-code",
+   "score": 1472.646928867663,
+   "rank": 41,
+   "org": "moonshot"
+  },
+  {
+   "tag": "lm_webdev",
+   "model": "claude-opus-5-max",
+   "score": 1685.0219335164438,
+   "rank": 1,
+   "org": "anthropic"
+  },
+  {
+   "tag": "lm_webdev",
+   "model": "kimi-k3-max",
+   "score": 1649.5392094087865,
+   "rank": 3,
+   "org": "moonshot"
+  },
+  {
+   "tag": "lm_webdev",
+   "model": "claude-opus-5-high",
+   "score": 1648.1123955670514,
+   "rank": 4,
+   "org": "anthropic"
+  },
+  {
+   "tag": "lm_webdev",
+   "model": "gemini-3.7-flash-high",
+   "score": 1622.34702959783,
+   "rank": 7,
+   "org": "google"
+  },
+  {
+   "tag": "lm_webdev",
+   "model": "gpt-5.6-sol-xhigh (codex-harness)",
+   "score": 1618.2748501551378,
+   "rank": 8,
+   "org": "openai"
+  },
+  {
+   "tag": "lm_webdev",
+   "model": "glm-5.3-max",
+   "score": 1577.091365387705,
+   "rank": 10,
+   "org": "zai"
+  },
+  {
+   "tag": "lm_webdev",
+   "model": "glm-5.2-max",
+   "score": 1536.5926280216395,
+   "rank": 22,
+   "org": "zai"
+  },
+  {
+   "tag": "lm_webdev",
+   "model": "kimi-k2.7-code",
+   "score": 1461.9566376410835,
+   "rank": 49,
+   "org": "moonshot"
+  },
+  {
+   "tag": "lm_webdev",
+   "model": "claude-opus-5-max",
+   "score": 1709.1575588894566,
+   "rank": 1,
+   "org": "anthropic"
+  },
+  {
+   "tag": "lm_webdev",
+   "model": "kimi-k3-max",
+   "score": 1691.633912435193,
+   "rank": 2,
+   "org": "moonshot"
+  },
+  {
+   "tag": "lm_webdev",
+   "model": "claude-opus-5-high",
+   "score": 1680.8083757859047,
+   "rank": 3,
+   "org": "anthropic"
+  },
+  {
+   "tag": "lm_webdev",
+   "model": "gpt-5.6-sol-xhigh (codex-harness)",
+   "score": 1624.9415689051705,
+   "rank": 7,
+   "org": "openai"
+  },
+  {
+   "tag": "lm_webdev",
+   "model": "glm-5.3-max",
+   "score": 1609.2520822615816,
+   "rank": 8,
+   "org": "zai"
+  },
+  {
+   "tag": "lm_webdev",
+   "model": "glm-5.2-max",
+   "score": 1593.532925524643,
+   "rank": 10,
+   "org": "zai"
+  },
+  {
+   "tag": "lm_webdev",
+   "model": "gemini-3.7-flash-high",
+   "score": 1581.4200321442174,
+   "rank": 13,
+   "org": "google"
+  },
+  {
+   "tag": "lm_webdev",
+   "model": "kimi-k2.7-code",
+   "score": 1472.3568398235943,
+   "rank": 39,
+   "org": "moonshot"
+  },
+  {
+   "tag": "lm_agent",
+   "model": "Claude Opus 5 (High)",
+   "score": 0.12733236681052468,
+   "rank": 1,
+   "org": "anthropic"
+  },
+  {
+   "tag": "lm_agent",
+   "model": "Claude Opus 5 (Max)",
+   "score": 0.12413615325188568,
+   "rank": 2,
+   "org": "anthropic"
+  },
+  {
+   "tag": "lm_agent",
+   "model": "GPT 5.6 Sol (xHigh)",
+   "score": 0.10308907749743668,
+   "rank": 4,
+   "org": "openai"
+  },
+  {
+   "tag": "lm_agent",
+   "model": "Kimi K3 (Max)",
+   "score": 0.09531968013602259,
+   "rank": 6,
+   "org": "moonshot"
+  },
+  {
+   "tag": "lm_agent",
+   "model": "GLM 5.2 (Max)",
+   "score": 0.05862951282046114,
+   "rank": 15,
+   "org": "zai"
+  },
+  {
+   "tag": "lm_agent",
+   "model": "GLM 5.3 (Max)",
+   "score": 0.03774351573659967,
+   "rank": 20,
+   "org": "zai"
+  },
+  {
+   "tag": "lm_agent",
+   "model": "Kimi K2.7 Code",
+   "score": 0.020284108795353084,
+   "rank": 25,
+   "org": "moonshot"
+  },
+  {
+   "tag": "lm_agent",
+   "model": "Gemini 3.7 Flash (High)",
+   "score": 0.015668534602611646,
+   "rank": 27,
+   "org": "google"
+  }
+ ]
+}

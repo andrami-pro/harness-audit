@@ -1,0 +1,22 @@
+{
+  "_comment": "Tabla de correcciones del asesor de line-up (lineup-advise.js). `aliases`: nombre tal como aparece en una fuente (AA slug, LMArena model_name, SWE-bench model_display, id de OpenRouter) → id de Pi (provider/id). Solo hace falta cuando el normalizador no acierta solo. `providers`: política de datos por proveedor con la fuente que la respalda; `unknown` es la respuesta honesta cuando no hay documento que citar. `notes`: advertencias que el informe copia literalmente junto al modelo.",
+  "aliases": {
+    "kimi-k3-max": "opencode-go/kimi-k3",
+    "Kimi K3 (max)": "opencode-go/kimi-k3",
+    "Claude 4.5 Opus": "openrouter/anthropic/claude-opus-4.5"
+  },
+  "providers": {
+    "stealth": { "policy": "retains", "source": "openrouter.ai/stealth/ox-alpha — 'prompts and completions are retained by the provider'" },
+    "anthropic": { "policy": "no-train", "source": "anthropic.com/legal/commercial-terms" },
+    "openai": { "policy": "no-train", "source": "openai.com/policies/api-data-usage-policies" },
+    "google": { "policy": "no-train", "source": "ai.google.dev/gemini-api/terms (paid tier)" },
+    "nvidia": { "policy": "unknown", "source": "NVIDIA API Trial Terms of Service — no verificado" },
+    "opencode-go": { "policy": "unknown", "source": "opencode.ai/docs/zen — no publica política de retención por modelo" },
+    "openrouter": { "policy": "unknown", "source": "depende del proveedor que sirva cada endpoint; ver openrouter.ai/settings/privacy" },
+    "ollama": { "policy": "local", "source": "corre en esta máquina" }
+  },
+  "notes": {
+    "stealth/ox-alpha": "Proveedor anónimo que RETIENE prompts y completions. La única cifra que lo pone por encima de Claude Fable 5 es una muestra comunitaria de 10 tareas (Ben Davis, DeepSWE): un fallo = 10 puntos. No aparece en SWE-bench ni en LMArena. Gratis por tiempo limitado.",
+    "openrouter/free": "Enrutador que elige un modelo gratis AL AZAR en cada petición. Inservible para scorer, judge, critic o preflight: dos ejecuciones no son comparables."
+  }
+}

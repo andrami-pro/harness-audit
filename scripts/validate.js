@@ -503,6 +503,72 @@ check('lineup-ui prints and validates the matrix without a TTY', () => {
   return 'matrix printed pipe-safe · valid lineup ✓ · unknown model exits 1 and names the fix';
 });
 
+// D25d — the advisor is the only thing in this repo that turns "which model is best" into a number,
+// and the only way to keep a number honest is to pin the inputs. The fixtures are five real snapshots
+// (AA, LMArena, SWE-bench, OpenRouter, `pi --list-models`) trimmed to ~18 models, chosen so that every
+// rule the advisor claims to enforce has a case that would violate it:
+//   stealth/ox-alpha ....... free, RETAINS prompts, and — in the AA fixture only — given a synthetic
+//                            coding index of 90 so that it WOULD win every code role on merit. The real
+//                            AA has no row for it; the synthetic row is labelled as such in the fixture.
+//                            Without that row the privacy rule is never the operative filter (a model
+//                            with no metrics is dropped earlier) and the check would pass by accident.
+//   claude-opus-5:batch .... async endpoint → never a candidate
+//   ~deepseek/...-latest ... floating alias → never a candidate
+//   openrouter/free ........ random router → only ever the explainer
+//   kimi-k3 on 3 providers . the same weights, so the reviewer must land in a different FAMILY (D25a),
+//                            not merely on a different provider
+//
+// Negative controls — each mutation applied, observed, reverted (2026-08-25):
+//   `sensitive` dropped from the implementer profile → ox-alpha ranked #1 for implementer (coding 90,
+//     free) → "sees code, yet a retains model was suggested for a client repo". Before the synthetic AA
+//     row existed this mutation did NOT fire — recorded here because that is the whole reason the row
+//     is in the fixture.
+//   `excludeFamily` not passed for reviewer → reviewer top-1 = kimi-k3 = implementer top-1 → D25a check
+//     fired.
+check('lineup-advise produces a report from pinned fixtures and honours privacy + D25a', () => {
+  const script = path.join(ROOT, 'scripts/lineup-advise.js');
+  const fixtures = path.join(ROOT, 'scripts/fixtures/advise');
+  mustExist('scripts/lineup-advise.js');
+  mustExist('scripts/lineup-aliases.json');
+  for (const f of ['aa', 'lmarena', 'swebench', 'openrouter', 'pi']) mustExist(`scripts/fixtures/advise/${f}-2026-08-25.json`);
+  execFileSync('node', ['--check', script], { stdio: 'pipe' });
+
+  const out = fs.mkdtempSync(path.join(os.tmpdir(), 'advise-'));
+  // A lineup file that does not exist → advisor falls back to an empty current lineup, sensitivity `client`.
+  execFileSync('node', [script, '--offline', '--no-probe', '--fixtures', fixtures, '--out', out,
+    '--project', path.join(out, 'none.json')], { stdio: 'pipe', env: { ...process.env, HOME: out } });
+
+  const md = fs.readFileSync(path.join(out, 'lineup-advice.md'), 'utf8');
+  for (const section of ['## Fuentes', '## Diff contra el line-up actual', '## Top 3 por rol', '## Gratis en OpenRouter hoy', '## No pude mapear']) {
+    if (!md.includes(section)) throw new Error(`report is missing the section "${section}"`);
+  }
+  const json = JSON.parse(fs.readFileSync(path.join(out, 'lineup-advice.json'), 'utf8'));
+  if (json.sensitivity !== 'client') throw new Error(`default sensitivity should be client, got ${json.sensitivity}`);
+
+  // Pinned here, NOT read from the script's PROFILES: a mutation that drops `sensitive` from a profile
+  // would otherwise drop the assertion with it and the check would pass for the wrong reason (it did,
+  // the first time).
+  const CODE_FACING = new Set(['architect', 'orchestrator', 'implementer', 'reviewer', 'critic']);
+  const { familyOf } = require(path.join(ROOT, 'scripts/model-lineup.js'));
+  for (const [role, list] of Object.entries(json.suggestions)) {
+    for (const s of list) {
+      if (s.id.endsWith(':batch')) throw new Error(`${role}: a :batch endpoint was offered (${s.id})`);
+      if (s.model.startsWith('~')) throw new Error(`${role}: a floating ~alias was offered (${s.id})`);
+      if (s.model === 'openrouter/free' && role !== 'explainer') throw new Error(`${role}: the random free router was offered`);
+      if (CODE_FACING.has(role) && s.data.policy === 'retains') throw new Error(`${role} sees code, yet a retains model was suggested for a client repo (${s.id})`);
+    }
+  }
+  const impl = json.suggestions.implementer[0];
+  const rev = json.suggestions.reviewer[0];
+  if (!impl || !rev) throw new Error('fixtures must yield an implementer and a reviewer suggestion');
+  if (familyOf({ model: impl.model }) === familyOf({ model: rev.model })) {
+    throw new Error(`reviewer top-1 (${rev.id}) shares the implementer's family (${impl.id}) — D25a not applied`);
+  }
+  if (!md.includes('stealth/ox-alpha') || !md.includes('RETIENE')) throw new Error('the free-models table must list ox-alpha with its retention note');
+
+  return `report rendered · ${Object.keys(json.suggestions).length} roles · retains never on code roles · reviewer ${familyOf({ model: rev.model })} ≠ implementer ${familyOf({ model: impl.model })}`;
+});
+
 // The shipped `model:` values in agents/*.md are the exact thing a reader opening one of those files
 // on GitHub reacts to — "why is this hardcoded?" — so the README has to answer it where that reader
 // lands, in the vocabulary the code actually enforces, not a softer paraphrase. Grounded three ways so
