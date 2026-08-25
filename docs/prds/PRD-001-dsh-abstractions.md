@@ -97,7 +97,10 @@ shows ✓ and its recorded negative controls fail it when applied.
   (`claude --plugin-dir`, 2026-08-25): the hook loaded and wrote its state file, but three identical
   `grep` commands drew no reminder — the model had written a fresh Bash `description` each time and the
   chain never formed. The guard now drops the top-level `description` before hashing; a fixture pins
-  it. Second live run pending.
+  it. Second live run (`claude -p --plugin-dir`, same day): the third identical `grep` returned the
+  reminder to the model verbatim — `PreToolUse:Bash hook additional context: harness-audit
+  repeat-tool-guard: 3 consecutive identical \`Bash\` calls…` — and the state file read `count: 3`.
+  Verified.
 
 ### R3 — Chain-of-thought leakage lens
 
