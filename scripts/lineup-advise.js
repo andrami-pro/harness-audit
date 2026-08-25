@@ -44,6 +44,17 @@ const TODAY = new Date().toISOString().slice(0, 10);
 // (architect), máximo para los que corren todo el día (explainer, preflight).
 // `sensitive` = el rol ve código del proyecto; en repos `client` no se le asigna un proveedor que
 // retiene prompts.
+// Independencia entre asientos (D25a extendida). El reviewer no puede ser la familia del implementer,
+// y tampoco quien juzga la disputa entre ambos ni quien critica o puntúa el resultado: "revisión
+// independiente" con el mismo modelo en las dos sillas es autocrítica con otro sombrero. El precio
+// hace que un modelo fuerte y gratis gane TODOS los roles a la vez; esto es lo que lo impide.
+const INDEPENDENT_OF = {
+  reviewer: ['implementer'],
+  judge:    ['implementer', 'reviewer'],
+  critic:   ['implementer'],
+  scorer:   ['implementer'],
+};
+
 const PROFILES = {
   architect:    { metrics: ['intelligence', 'lm_hard'],                        minCtx: 200_000, price: 0.3, sensitive: true },
   orchestrator: { metrics: ['agentic', 'lm_agent'],                            minCtx: 500_000, price: 0.7, sensitive: true, tools: true },
@@ -287,7 +298,15 @@ function buildTable(src, catalog) {
   // interactivo, y ofrecerlos solo haría que el precio ganara a la realidad.
   // `~org/model-latest` son alias flotantes de OpenRouter: apuntan a lo que el proveedor decida esa
   // semana, y un line-up debe nombrar el modelo que se evaluó, no un puntero.
-  const models = catalog.filter((m) => !m.id.endsWith(':batch') && !m.id.startsWith('~')).map((m) => ({
+  // models.json puede declarar modelos de ollama que no están descargados (o sin ollama instalado);
+  // sugerir uno de esos es sugerir un 404 local.
+  const ollamaIds = new Set();
+  try {
+    for (const l of execFileSync('ollama', ['list'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 10_000 }).split('\n').slice(1)) {
+      const id = l.trim().split(/\s+/)[0]; if (id) ollamaIds.add(id);
+    }
+  } catch { /* sin ollama: sin candidatos ollama */ }
+  const models = catalog.filter((m) => !m.id.endsWith(':batch') && !m.id.startsWith('~') && (m.provider !== 'ollama' || ollamaIds.has(m.id))).map((m) => ({
     key: normalize(m.id), id: `${m.provider}/${m.id}`, provider: m.provider, model: m.id,
     ctx: m.ctx, max_out: m.max_out, metrics: {}, price_in: null, price_out: null, params: null, free: false, from: new Set(),
   }));
@@ -335,7 +354,7 @@ function zscores(models, key) {
   return (m) => (m.metrics[key] == null ? null : (m.metrics[key] - mean) / sd);
 }
 
-function rankRole(role, models, sensitivity, excludeFamily) {
+function rankRole(role, models, sensitivity, excludeFamilies) {
   const p = PROFILES[role];
   const z = Object.fromEntries(p.metrics.map((k) => [k, zscores(models, k)]));
   const out = [];
@@ -346,7 +365,13 @@ function rankRole(role, models, sensitivity, excludeFamily) {
     if (p.tools && m.params && !m.params.includes('tools')) continue;
     if (p.json && m.params && !m.params.some((x) => x === 'structured_outputs' || x === 'response_format')) continue;
     if (m.model === 'openrouter/free' && role !== 'explainer') continue;
-    if (excludeFamily && familyOf({ model: m.model }) === excludeFamily) continue;
+    if (excludeFamilies && excludeFamilies.has(familyOf({ model: m.model }))) continue;
+    // Cuota del proveedor: NIM (40 rpm, créditos finitos) y ollama (CPU) solo aspiran a los roles que
+    // su límite aguanta. Que un modelo sea gratis no lo hace apto para una tarde de implementación.
+    const allowedRoles = ((ALIASES.providers || {})[m.provider] || {}).roles;
+    if (allowedRoles && !allowedRoles.includes(role)) continue;
+    const freeRoles = (ALIASES.freeTierRoles || {}).roles;
+    if (m.free && m.provider === 'openrouter' && freeRoles && !freeRoles.includes(role)) continue;
     if (p.sensitive && sensitivity === 'client' && m.data.policy === 'retains') continue;
     const zs = p.metrics.map((k) => z[k](m)).filter((v) => v != null);
     if (p.metrics.length && !zs.length) continue;         // sin ninguna métrica no hay ranking, solo adivinar
@@ -383,6 +408,7 @@ function render(result) {
     L.push(`- ${k}: ${s.ok ? `${s.rows.length} filas` : `**FALLÓ** — ${s.error}`}${s.note ? ` _(${s.note})_` : ''}${s.fetchedAt ? ` · ${s.fetchedAt.slice(0, 16)}` : ''}`);
   }
   L.push('', 'SWE-bench Verified son cifras que cada laboratorio reporta con su propio agente; sirven para ordenar, no para comparar al décimo. LMArena `agent` es una puntuación distinta (0-1), se usa solo como z-score.', '');
+  L.push('Reglas fijas: NIM (40 rpm, créditos finitos) y los gratis de OpenRouter (20 rpm, 50-1000/día) solo aspiran a `explainer`/`preflight` (NIM solo `explainer`); ollama solo si el modelo está descargado. Familias independientes: reviewer ≠ implementer; judge ≠ implementer y reviewer; critic y scorer ≠ implementer. En repo `client`, ningún proveedor que retiene prompts en roles que ven código.', '');
 
   L.push('## Diff contra el line-up actual', '', '| rol | actual | sugerido | por qué |', '|---|---|---|---|');
   for (const role of ROLES) {
@@ -451,10 +477,14 @@ async function main() {
   const { models, unmapped, freeOR } = buildTable({ aa, lmarena, swebench, openrouter }, pi.rows);
   const { pi: current, sensitivity } = currentLineup(opts.project);
 
+  // Orden de resolución: implementer y reviewer primero, porque los demás asientos se definen contra
+  // ellos. `suggestions` se rellena en ese orden y INDEPENDENT_OF lee lo ya decidido.
   const suggestions = {};
-  for (const role of ROLES) {
-    const excl = role === 'reviewer' && suggestions.implementer && suggestions.implementer[0]
-      ? familyOf({ model: suggestions.implementer[0].m.model }) : null;
+  const order = ['implementer', 'reviewer', ...ROLES.filter((r) => r !== 'implementer' && r !== 'reviewer')];
+  for (const role of order) {
+    const excl = new Set((INDEPENDENT_OF[role] || [])
+      .map((dep) => suggestions[dep] && suggestions[dep][0] && familyOf({ model: suggestions[dep][0].m.model }))
+      .filter(Boolean));
     suggestions[role] = rankRole(role, models, sensitivity, excl);
   }
 
@@ -486,4 +516,4 @@ async function main() {
 
 if (require.main === module) main().catch((e) => { process.stderr.write(`lineup-advise: ${e.stack || e}\n`); process.exit(1); });
 
-module.exports = { normalize, PROFILES, rankRole, buildTable, render, srcAA, srcLMArena, srcSWE, srcOpenRouter, srcPi };
+module.exports = { normalize, PROFILES, INDEPENDENT_OF, rankRole, buildTable, render, srcAA, srcLMArena, srcSWE, srcOpenRouter, srcPi };

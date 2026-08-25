@@ -556,6 +556,10 @@ check('lineup-advise produces a report from pinned fixtures and honours privacy 
       if (s.model.startsWith('~')) throw new Error(`${role}: a floating ~alias was offered (${s.id})`);
       if (s.model === 'openrouter/free' && role !== 'explainer') throw new Error(`${role}: the random free router was offered`);
       if (CODE_FACING.has(role) && s.data.policy === 'retains') throw new Error(`${role} sees code, yet a retains model was suggested for a client repo (${s.id})`);
+      // The user's rule, verbatim: NIM's free tier is for answering questions about the project, never
+      // for a seat that runs for an afternoon. A free model is not a free afternoon.
+      if (s.provider === 'nvidia' && role !== 'explainer') throw new Error(`${role}: an NVIDIA NIM model was suggested for a long-running role (${s.id}) — quota rule not applied`);
+      if (s.provider === 'openrouter' && s.price_out === 0 && !['explainer', 'preflight'].includes(role)) throw new Error(`${role}: an OpenRouter free-tier model was suggested for a long-running role (${s.id})`);
     }
   }
   const impl = json.suggestions.implementer[0];
@@ -566,7 +570,7 @@ check('lineup-advise produces a report from pinned fixtures and honours privacy 
   }
   if (!md.includes('stealth/ox-alpha') || !md.includes('RETIENE')) throw new Error('the free-models table must list ox-alpha with its retention note');
 
-  return `report rendered · ${Object.keys(json.suggestions).length} roles · retains never on code roles · reviewer ${familyOf({ model: rev.model })} ≠ implementer ${familyOf({ model: impl.model })}`;
+  return `report rendered · ${Object.keys(json.suggestions).length} roles · retains never on code roles · NIM/free only on short roles · reviewer ${familyOf({ model: rev.model })} ≠ implementer ${familyOf({ model: impl.model })}`;
 });
 
 // The shipped `model:` values in agents/*.md are the exact thing a reader opening one of those files

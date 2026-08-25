@@ -171,8 +171,13 @@ current line-up. Two things it refuses on principle:
   `sensitivity` is `client` (the default; set `"sensitivity": "personal"` in `.agents/model-lineup.json`
   to lift it). `stealth/ox-alpha` is the live example: free, 1M context, anonymous, and explicit about
   retention — it lands in the free-models table with that note, not in the implementer column.
-- **The reviewer must be a different model family from the implementer** (D25a), so "kimi-k3 on a cheaper
-  provider" is never the reviewer answer to "kimi-k3 as implementer".
+- **Seats are independent across families** — reviewer ≠ implementer (D25a), judge ≠ implementer and
+  reviewer, critic and scorer ≠ implementer — so "kimi-k3 on a cheaper provider" is never the reviewer
+  answer to "kimi-k3 as implementer", and one free frontier model cannot fill every chair at once.
+- **Free quotas only get short roles.** NVIDIA NIM (40 rpm, finite credits) is eligible for `explainer`
+  only; OpenRouter's free tier (20 rpm, 50-1,000/day) for `explainer` and `preflight`; ollama only for
+  models actually pulled. A free model is not a free afternoon of implementation. The lists live in
+  `scripts/lineup-aliases.json` (`providers.<x>.roles`, `freeTierRoles`).
 
 Names differ per source (`claude-opus-5-high` / `Claude Opus 5 (High)` / `anthropic/claude-opus-5`);
 `normalize()` reduces them to one key and `scripts/lineup-aliases.json` catches the rest. Whatever still
