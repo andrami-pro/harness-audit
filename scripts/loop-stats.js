@@ -73,6 +73,9 @@ function parseArgs(argv) {
     project: null, repo: null, sinceMs: null, html: null, json: false, top: 3, lineup: null,
     jsonOut: null, fromJson: null, open: false, all: false, brief: false,
     untilMs: null, windowMs: null,
+    // The report's language. Defaults to the shell's LANG; the numbers and every verbatim quote stay
+    // as they are — only the report's own words change.
+    lang: /^(es|fr)/.test(String(process.env.LANG || '')) ? String(process.env.LANG).slice(0, 2) : 'en',
   };
   for (let i = 0; i < argv.length; i++) {
     const flag = argv[i];
@@ -91,6 +94,11 @@ function parseArgs(argv) {
     else if (flag === '--json-out') a.jsonOut = argv[++i];
     else if (flag === '--from-json') a.fromJson = argv[++i];
     else if (flag === '--lineup') a.lineup = argv[++i];
+    else if (flag === '--lang') {
+      const v = String(argv[++i] || '');
+      if (['en', 'es', 'fr'].includes(v)) a.lang = v;
+      else warn(`--lang expects en, es or fr — ignored, using ${a.lang}`);
+    }
     else if (flag === '--top') {
       const n = Number.parseInt(argv[++i], 10);
       if (Number.isInteger(n) && n > 0) a.top = n;
@@ -2044,10 +2052,378 @@ function renderAnsi(d) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// RENDER-HTML — one self-contained file: no CDN, no webfont, no script, no fetch.
+// STRINGS — the report's own words, in the three languages its author reads
 // ─────────────────────────────────────────────────────────────────────────────
+// Numbers, names, paths and every verbatim quote are never translated: a quote in another language
+// is a paraphrase, and a paraphrase in the quote slot is a fabrication with good manners.
 
-const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const STR = {
+  en: {
+    eyebrow: 'harness-audit · recap', lastDays: (n) => `last ${n} days`, allHistory: 'all history',
+    readHere: 'Read from the transcripts on this machine; nothing left it.',
+    sessions: 'sessions', asked: 'things you asked for', spend: 'est. spend', floor: '(floor — see the ledger)',
+    attention: (n, q) => `${n} thing${n === 1 ? '' : 's'} worth your attention below, ${q} rule${q === 1 ? '' : 's'} checked and quiet.`,
+    noCards: 'No rule found evidence in this window. Nothing is printed rather than something reassuring.',
+    startHere: 'Start here', startKicker: 'One thing. The card with the most evidence behind it, and what to do about it.',
+    whatToDo: 'What to do.', notProve: 'What this does not prove.',
+    caught: 'What the harness stopped', caughtKicker: 'Every time a piece of the harness said no, or changed something, on the record. This is the receipt — events, not a saving.',
+    caughtNone: 'Nothing on the record this window: no reviewer verdict, no guard fire, no promoted card, no A/B. The loops that produce a receipt are the ones not running.',
+    timesOnRecord: (n) => `time${n === 1 ? '' : 's'} on the record`,
+    cRejected: (n) => `${n} workflow run${n === 1 ? '' : 's'} returned by the reviewer before merging`,
+    cLoops: (n) => `${n} loop run${n === 1 ? '' : 's'} stopped by a seat`,
+    cGuard: (name, n) => `${name} blocked a command ×${n}`,
+    cPromoted: (n) => `${n} review card${n === 1 ? '' : 's'} promoted into the contract`,
+    cAb: (subj, delta, max) => `skill-loop A/B on ${subj}: ${delta} ${max ? `of ${max}` : ''} with the skill vs without`,
+    cPred: (v, f) => `${v} optimizer prediction${v === 1 ? '' : 's'} verified, ${f} falsified`,
+    cLearn: (n) => `${n} lesson${n === 1 ? '' : 's'} written to a LEARNINGS.md`,
+    cGreen: (t) => `rounds to green on approved runs: ${t}`,
+    cNudges: (n) => `plus ${n} nudge${n === 1 ? '' : 's'} from the repeat-tool guard (advisory, not counted)`,
+    caughtNot: 'What this does not prove: what would have shipped without the harness. Nobody ran that arm. Each line is an event; the counterfactual is not.',
+    driving: 'How the driving went',
+    drivingCmp: (n) => `Against the ${n} days before — rates per 100 prompts, so a busier month does not read as a worse one.`,
+    drivingQuiet: (n, s, p) => `The ${n} days before this window were too quiet to compare against (${s} session${s === 1 ? '' : 's'}, ${p} prompts). Next month there will be a baseline.`,
+    drivingNoSince: 'Pass --since to get a comparison against the window before.',
+    tContinua: 'bare «continua»', tContinuaSub: (a, n) => `${a} of ${n} right after the agent stopped`,
+    tInterrupt: 'interrupted', tInterruptSub: (p) => `${p} of your turns stopped mid-flight`,
+    tModel: '/model by hand', tModelNone: 'no target recorded',
+    tCompact: 'compactions', tCompactSub: (a, avg) => `${a} automatic${avg ? ` · avg ${avg} tokens before the cut` : ''}`,
+    drivingFine: (hp, ss, dr, dd, co) => `${hp} human prompts over ${ss} sessions. ${dr} turns that looked human but were written by a loop to its own subagent were dropped; ${dd} duplicate record${dd === 1 ? '' : 's'} collapsed. ${co} turn${co === 1 ? '' : 's'} opened like a correction`,
+    drivingFine2: '— the reasons you typed while refusing a call, further down, are the only corrections here that are not a guess.',
+    breaking: 'What kept breaking', breakingKicker: 'The failure that came back most. A failure that repeats is a preflight check nobody wrote.',
+    breakingNone: 'Nothing failed the same way twice in this window.',
+    bossSub: (ss, last) => `times, across ${ss} · last on ${last}`,
+    bossTool: (t) => `Tool: <b>${t}</b>. Clustered by the first eight words of the error, so this may be more than one root cause wearing the same message.`,
+    toolsFine: (calls, errs) => `${calls} tool calls in all · ${errs} errors`,
+    stale: (n) => `${n} edit${n === 1 ? '' : 's'} hit a file that had changed since it was read`,
+    retries: (n) => `${n} transport retr${n === 1 ? 'y' : 'ies'}, which are slow rather than failed`,
+    toolsNone: (calls, errs) => `${calls} tool calls, ${errs} errors, none of them repeated.`,
+    skills: 'Your skills', skillsKicker: 'What you reached for, what to sharpen, and what is only costing context. Facts from disk and from the transcripts; the decisions are yours.',
+    topUsed: 'Most used', usedNone: 'Nothing was invoked through the Skill tool or by name in this window.',
+    notInstalled: 'not installed here', outcomes: (o) => [o.interrupted ? `${o.interrupted} interrupted` : '', o.denied ? `${o.denied} refused` : '', o.corrected ? `${o.corrected} corrected` : '', o.continued ? `${o.continued} «continua»` : ''].filter(Boolean).join(' · '),
+    keep: 'Keep', keepSub: 'Used, and nothing followed them that looked like trouble.',
+    improve: 'Improve', improveSub: 'Used at least twice, with a reason to open the file.',
+    improveNone: 'No used skill shows a reason to open it.',
+    rFollowed: (r) => `${r.rough} of ${r.uses} uses were followed by an interrupt, a refusal or a correction-shaped turn (${[r.interrupted ? `${r.interrupted} interrupted` : '', r.denied ? `${r.denied} refused` : '', r.corrected ? `${r.corrected} corrected` : ''].filter(Boolean).join(', ')}) — proxy`,
+    rLooped: (r) => `used ${r.uses} times and has never been through /skill-loop — no LEARNINGS.md beside it`,
+    rOld: (r) => `used ${r.uses} times, SKILL.md untouched for ${r.ageDays} days`,
+    rHeavy: (r) => `${r.words} words of context on every call`,
+    improveHow: (name) => `Have an idea? <code>/skill-loop ${name}</code> measures it blind, with and without.`,
+    improveBundled: 'Ships with the client, so there is no SKILL.md to edit: the fix is a line in AGENTS.md about when to call it.',
+    uninstall: 'Uninstall candidates', uninstallSub: (n, total) => `${n} of ${total} — never invoked in the window. Project scope first, because it loads every session.`,
+    uninstallNone: 'Every installed skill was invoked at least once.',
+    uUnused: (r) => `never invoked in the window · ${r.words} words loaded ${r.scope === 'project' ? 'every session' : 'when matched'}`,
+    uDup: (r) => `installed twice: ${r.sources.join(' and ')}`,
+    uDisabled: 'plugin disabled in settings — installed but off',
+    uStale: (r) => `SKILL.md untouched for ${r.ageDays} days`,
+    uninstallNot: 'A skill whose description auto-triggered without the Skill tool leaves no trace in a transcript. This is what the Skill tool saw, not proof a skill is useless.',
+    more: (n) => `and ${n} more`,
+    usedNotInstalled: (list) => `Invoked but with no SKILL.md under this project or your home: ${list} — a workflow, or a skill the client ships.`,
+    distinct: (n) => `${n} distinct skills this window`,
+    reportCard: 'Report card',
+    rcKicker: (date, age) => `What your last <code>/session-review</code> proposed on ${date}, ${age} days ago, and where each card is now. Checked means the repo now contains it.`,
+    rcNever: 'Loop 6 has never run in this repo, so nothing has ever been proposed, promoted or rejected on the record.',
+    promoted: 'promoted', proposed: 'proposed', pending: 'pending',
+    rcUnreadable: (why) => `The report is present but ${why} — not the same fact as "no review yet".`,
+    rcHow: 'Promotion is checked by grepping this repo\'s contract and skills for what each card quoted. A DISPATCH or HABIT card leaves nothing on disk to grep, so it reads n/a rather than pending.',
+    nextLesson: 'Next lesson:', rcStarts: '— it now starts from the cards in this report.',
+    rcRun: 'Run <code>/session-review</code> once. From then on this scene shows what it proposed and whether you kept it.',
+    rest: 'The rest of the cards', restKicker: (n) => `${n} more, in order. Open one for its evidence and its limits. None of them edits anything — you promote.`,
+    silent: (n, list) => `${n} rule${n === 1 ? '' : 's'} checked and quiet: ${list}. A rule with no evidence prints nothing — padding a report to fill the grid is how an instrument becomes a horoscope.`,
+    guards: 'Guards, and the calls you refused', guardsKicker: 'What blocked a call by rule, and what you blocked by hand — with the reason you typed.',
+    gInstalled: (n, f, ss) => `<b>${n}</b> guards installed · <b>${f}</b> fire${f === 1 ? '' : 's'} in ${ss}`,
+    gNoList: 'hooks.json is not readable from here, so no guard list is shown — an empty list would read as "none installed".',
+    advisory: '(advisory)',
+    gFine: 'A fire is a result beginning <code>harness-audit &lt;guard&gt;: blocked</code>. Zero fires does not mean nothing dangerous happened; the guards are conservative by design.',
+    gOther: (n, list) => ` Other hooks ran ${n} times: ${list}.`,
+    refused: (n, r) => `<b>${n}</b> call${n === 1 ? '' : 's'} you refused${r ? `, <b>${r}</b> with a reason` : ''}`,
+    refusedFine: 'These are the only corrections in this report that are not a proxy: you typed them. Each one is a candidate line for AGENTS.md, and you are the one who promotes it.',
+    refusedNone: 'No refusal carried a typed reason this window.',
+    ledger: 'The ledger', ledgerKicker: 'Tokens, cost, workflows, savings — the accounting that used to be the whole report. Open it when you need a number.',
+    lAgents: 'Tokens by agent × model', lUnpriced: (l) => `est.$ excludes unpriced models: ${l} — a floor, not a total.`, lIntro: (l) => `priced at introductory rate: ${l}`,
+    lLineup: 'Model line-up — configured vs. observed', lDrift: '⚠ = drift: the role ran on a different model family than model-lineup.json configures.',
+    lDays: 'Tokens per day', lWorkflows: 'Workflow activations', lLoops: 'Loop runs (findings JSON)', lSavings: 'Savings — measured counterfactuals only',
+    lNoAb: 'No two-armed run in scope — /skill-loop is the only loop that produces one.',
+    lNoPred: 'No process-log.md — /iterate has never run in this repo.',
+    lPredUnread: (w) => `process-log.md is present but its ledger is unreadable (${w}) — <b>no prediction counted</b>, and that is not the same as none falsified.`,
+    lPred: (v, f, p, u) => `Optimizer predictions: <b>${v} verified · ${f} falsified · ${p} pending · ${u} unreadable</b>.`,
+    lGreen: (t) => ` Rounds-to-green ${t} — a proxy, explicitly not a saving.`, lNoGreen: ' No approved develop-phase run in scope.',
+    lNoMult: ' Nothing here is a multiplier; an unmeasured quantity is printed n/a with its reason.',
+    lNoRepo: 'No counterfactual in scope — pass --repo to read loop-runs and process-log.md.',
+    lPredictions: 'Optimizer predictions', lLearnings: 'Learnings', lPrompts: 'Prompts',
+    lPromptsFine: (t, w, sd, fu) => `${t} user turns · ${w} words avg · ${sd} sessions/day · ${fu} follow-ups`,
+    lTurns: '. These are turns, not keystrokes: a loop that re-prompts its session writes one too.',
+    lEvery: 'Every tool',
+    footer: 'every figure is measured from local transcripts and the repo\'s own loop records. Cards are rule-based recommendations: each prints its evidence, the field it came from and what it does not prove, and a rule that finds no evidence prints nothing. est.$ is list price × measured tokens, never a multiplier. A comparison is shown only where the window before was busy enough to anchor one. Nothing here edits anything — you promote.',
+    unreadableLines: (n) => ` ${n} transcript line(s) could not be read.`,
+    tooQuiet: 'too quiet before to compare', same: '▪ same as before', per100: 'per 100 prompts', better: 'better', worse: 'worse',
+    warn: 'warn', info: 'info', prune: 'prune', failure: 'failure',
+    types: { HABIT: 'habit', DISPATCH: 'dispatch', 'SKILL CANDIDATE': 'skill candidate', 'AGENTS.md RULE': 'AGENTS.md rule', LIFECYCLE: 'lifecycle', DASHBOARD: 'dashboard', HARNESS: 'harness' },
+  },
+  es: {
+    eyebrow: 'harness-audit · resumen', lastDays: (n) => `últimos ${n} días`, allHistory: 'todo el historial',
+    readHere: 'Leído de los transcripts de esta máquina; nada salió de ella.',
+    sessions: 'sesiones', asked: 'cosas que pediste', spend: 'gasto est.', floor: '(piso — ver el libro mayor)',
+    attention: (n, q) => `${n} cosa${n === 1 ? '' : 's'} que merece${n === 1 ? '' : 'n'} tu atención abajo, ${q} regla${q === 1 ? '' : 's'} revisada${q === 1 ? '' : 's'} y en silencio.`,
+    noCards: 'Ninguna regla encontró evidencia en esta ventana. No se imprime nada antes que algo tranquilizador.',
+    startHere: 'Empezá por acá', startKicker: 'Una sola cosa. La card con más evidencia detrás, y qué hacer con ella.',
+    whatToDo: 'Qué hacer.', notProve: 'Qué no prueba esto.',
+    caught: 'Lo que el arnés frenó', caughtKicker: 'Cada vez que una pieza del arnés dijo que no, o cambió algo, con registro. Esto es el recibo: eventos, no un ahorro.',
+    caughtNone: 'Nada registrado en esta ventana: ni veredicto de reviewer, ni guard disparado, ni card promovida, ni A/B. Los loops que producen un recibo son los que no están corriendo.',
+    timesOnRecord: (n) => `${n === 1 ? 'vez' : 'veces'} con registro`,
+    cRejected: (n) => `${n} corrida${n === 1 ? '' : 's'} de workflow devuelta${n === 1 ? '' : 's'} por el reviewer antes de mergear`,
+    cLoops: (n) => `${n} corrida${n === 1 ? '' : 's'} de loop frenada${n === 1 ? '' : 's'} por un asiento`,
+    cGuard: (name, n) => `${name} bloqueó un comando ×${n}`,
+    cPromoted: (n) => `${n} card${n === 1 ? '' : 's'} de review promovida${n === 1 ? '' : 's'} al contrato`,
+    cAb: (subj, delta, max) => `A/B de skill-loop sobre ${subj}: ${delta} ${max ? `de ${max}` : ''} con el skill vs sin él`,
+    cPred: (v, f) => `${v} predicción${v === 1 ? '' : 'es'} del optimizador verificada${v === 1 ? '' : 's'}, ${f} falsada${f === 1 ? '' : 's'}`,
+    cLearn: (n) => `${n} lección${n === 1 ? '' : 'es'} escrita${n === 1 ? '' : 's'} en un LEARNINGS.md`,
+    cGreen: (t) => `rondas hasta verde en corridas aprobadas: ${t}`,
+    cNudges: (n) => `más ${n} aviso${n === 1 ? '' : 's'} del guard de repetición (consultivo, no cuenta)`,
+    caughtNot: 'Qué no prueba esto: qué habría salido sin el arnés. Nadie corrió ese brazo. Cada línea es un evento; el contrafactual no lo es.',
+    driving: 'Cómo fue la conducción',
+    drivingCmp: (n) => `Contra los ${n} días anteriores — tasas por 100 prompts, para que un mes más cargado no se lea como uno peor.`,
+    drivingQuiet: (n, s, p) => `Los ${n} días anteriores a esta ventana fueron demasiado tranquilos para comparar (${s} sesión${s === 1 ? '' : 'es'}, ${p} prompts). El mes que viene habrá línea base.`,
+    drivingNoSince: 'Pasá --since para comparar contra la ventana anterior.',
+    tContinua: '«continua» a secas', tContinuaSub: (a, n) => `${a} de ${n} justo después de que el agente paró`,
+    tInterrupt: 'interrumpidos', tInterruptSub: (p) => `${p} de tus turnos cortados a mitad`,
+    tModel: '/model a mano', tModelNone: 'sin destino registrado',
+    tCompact: 'compactaciones', tCompactSub: (a, avg) => `${a} automática${a === 1 ? '' : 's'}${avg ? ` · media ${avg} tokens antes del corte` : ''}`,
+    drivingFine: (hp, ss, dr, dd, co) => `${hp} prompts humanos en ${ss} sesiones. Se descartaron ${dr} turnos que parecían humanos pero los escribió un loop a su propio subagente; ${dd} registro${dd === 1 ? '' : 's'} duplicado${dd === 1 ? '' : 's'} colapsado${dd === 1 ? '' : 's'}. ${co} turno${co === 1 ? '' : 's'} abrieron como corrección`,
+    drivingFine2: '— las razones que tipeaste al rechazar una llamada, más abajo, son las únicas correcciones de acá que no son una suposición.',
+    breaking: 'Qué se rompía una y otra vez', breakingKicker: 'El fallo que más volvió. Un fallo que se repite es un check de preflight que nadie escribió.',
+    breakingNone: 'Nada falló dos veces de la misma manera en esta ventana.',
+    bossSub: (ss, last) => `veces, en ${ss} · la última el ${last}`,
+    bossTool: (t) => `Tool: <b>${t}</b>. Agrupado por las primeras ocho palabras del error, así que puede ser más de una causa raíz con el mismo mensaje.`,
+    toolsFine: (calls, errs) => `${calls} llamadas a tools en total · ${errs} errores`,
+    stale: (n) => `${n} edición${n === 1 ? '' : 'es'} chocó con un archivo que cambió desde su lectura`,
+    retries: (n) => `${n} reintento${n === 1 ? '' : 's'} de transporte, que son lentos, no fallidos`,
+    toolsNone: (calls, errs) => `${calls} llamadas a tools, ${errs} errores, ninguno repetido.`,
+    skills: 'Tus skills', skillsKicker: 'Lo que usaste, lo que conviene afinar y lo que solo cuesta contexto. Hechos del disco y de los transcripts; las decisiones son tuyas.',
+    topUsed: 'Más usados', usedNone: 'Nada se invocó por la tool Skill ni por nombre en esta ventana.',
+    notInstalled: 'no instalado acá', outcomes: (o) => [o.interrupted ? `${o.interrupted} interrumpido${o.interrupted === 1 ? '' : 's'}` : '', o.denied ? `${o.denied} rechazado${o.denied === 1 ? '' : 's'}` : '', o.corrected ? `${o.corrected} corregido${o.corrected === 1 ? '' : 's'}` : '', o.continued ? `${o.continued} «continua»` : ''].filter(Boolean).join(' · '),
+    keep: 'Conservar', keepSub: 'Usados, y nada después que pareciera un problema.',
+    improve: 'Mejorar', improveSub: 'Usados al menos dos veces, con una razón para abrir el archivo.',
+    improveNone: 'Ningún skill usado muestra una razón para abrirlo.',
+    rFollowed: (r) => `${r.rough} de ${r.uses} usos fueron seguidos de una interrupción, un rechazo o un turno con forma de corrección (${[r.interrupted ? `${r.interrupted} interrumpido${r.interrupted === 1 ? '' : 's'}` : '', r.denied ? `${r.denied} rechazado${r.denied === 1 ? '' : 's'}` : '', r.corrected ? `${r.corrected} corregido${r.corrected === 1 ? '' : 's'}` : ''].filter(Boolean).join(', ')}) — proxy`,
+    rLooped: (r) => `usado ${r.uses} veces y nunca pasó por /skill-loop — no hay LEARNINGS.md al lado`,
+    rOld: (r) => `usado ${r.uses} veces, SKILL.md sin tocar hace ${r.ageDays} días`,
+    rHeavy: (r) => `${r.words} palabras de contexto en cada llamada`,
+    improveHow: (name) => `¿Tenés una idea? <code>/skill-loop ${name}</code> la mide a ciegas, con y sin.`,
+    improveBundled: 'Viene con el cliente, así que no hay SKILL.md que editar: el arreglo es una línea en AGENTS.md sobre cuándo llamarlo.',
+    uninstall: 'Candidatos a desinstalar', uninstallSub: (n, total) => `${n} de ${total} — nunca invocados en la ventana. Primero los de proyecto, porque cargan en cada sesión.`,
+    uninstallNone: 'Todos los skills instalados se invocaron al menos una vez.',
+    uUnused: (r) => `nunca invocado en la ventana · ${r.words} palabras cargadas ${r.scope === 'project' ? 'en cada sesión' : 'cuando coincide'}`,
+    uDup: (r) => `instalado dos veces: ${r.sources.join(' y ')}`,
+    uDisabled: 'plugin desactivado en settings — instalado pero apagado',
+    uStale: (r) => `SKILL.md sin tocar hace ${r.ageDays} días`,
+    uninstallNot: 'Un skill cuya descripción se disparó sola sin la tool Skill no deja rastro en un transcript. Esto es lo que vio la tool Skill, no prueba de que un skill sea inútil.',
+    more: (n) => `y ${n} más`,
+    usedNotInstalled: (list) => `Invocados pero sin SKILL.md en este proyecto ni en tu home: ${list} — un workflow, o un skill que trae el cliente.`,
+    distinct: (n) => `${n} skills distintos en esta ventana`,
+    reportCard: 'Boletín',
+    rcKicker: (date, age) => `Lo que tu último <code>/session-review</code> propuso el ${date}, hace ${age} días, y dónde está cada card ahora. Tildada significa que el repo ya la contiene.`,
+    rcNever: 'El Loop 6 nunca corrió en este repo, así que nunca se propuso, promovió ni rechazó nada con registro.',
+    promoted: 'promovidas', proposed: 'propuestas', pending: 'pendientes',
+    rcUnreadable: (why) => `El informe existe pero ${why} — no es lo mismo que "sin review todavía".`,
+    rcHow: 'La promoción se verifica buscando en el contrato y los skills de este repo lo que cada card citó. Una card DISPATCH o HABIT no deja nada en disco que buscar, así que dice n/a y no pendiente.',
+    nextLesson: 'Próxima lección:', rcStarts: '— ahora arranca desde las cards de este informe.',
+    rcRun: 'Corré <code>/session-review</code> una vez. Desde entonces esta escena muestra qué propuso y si lo conservaste.',
+    rest: 'El resto de las cards', restKicker: (n) => `${n} más, en orden. Abrí una para ver su evidencia y sus límites. Ninguna edita nada — vos promovés.`,
+    silent: (n, list) => `${n} regla${n === 1 ? '' : 's'} revisada${n === 1 ? '' : 's'} y en silencio: ${list}. Una regla sin evidencia no imprime nada — rellenar un informe para llenar la grilla es cómo un instrumento se vuelve horóscopo.`,
+    guards: 'Guards, y las llamadas que rechazaste', guardsKicker: 'Qué bloqueó una llamada por regla, y qué bloqueaste vos a mano — con la razón que tipeaste.',
+    gInstalled: (n, f, ss) => `<b>${n}</b> guards instalados · <b>${f}</b> disparo${f === 1 ? '' : 's'} en ${ss}`,
+    gNoList: 'hooks.json no se puede leer desde acá, así que no se muestra lista de guards — una lista vacía se leería como "ninguno instalado".',
+    advisory: '(consultivo)',
+    gFine: 'Un disparo es un resultado que empieza con <code>harness-audit &lt;guard&gt;: blocked</code>. Cero disparos no significa que no pasó nada peligroso; los guards son conservadores a propósito.',
+    gOther: (n, list) => ` Otros hooks corrieron ${n} veces: ${list}.`,
+    refused: (n, r) => `<b>${n}</b> llamada${n === 1 ? '' : 's'} que rechazaste${r ? `, <b>${r}</b> con razón` : ''}`,
+    refusedFine: 'Estas son las únicas correcciones de este informe que no son un proxy: las tipeaste vos. Cada una es una línea candidata para AGENTS.md, y quien la promueve sos vos.',
+    refusedNone: 'Ningún rechazo llevó una razón tipeada en esta ventana.',
+    ledger: 'El libro mayor', ledgerKicker: 'Tokens, coste, workflows, ahorros — la contabilidad que antes era todo el informe. Abrilo cuando necesites un número.',
+    lAgents: 'Tokens por agente × modelo', lUnpriced: (l) => `est.$ excluye modelos sin precio: ${l} — un piso, no un total.`, lIntro: (l) => `con precio de lanzamiento: ${l}`,
+    lLineup: 'Line-up de modelos — configurado vs. observado', lDrift: '⚠ = drift: el rol corrió en otra familia de modelo que la que configura model-lineup.json.',
+    lDays: 'Tokens por día', lWorkflows: 'Activaciones de workflow', lLoops: 'Corridas de loop (findings JSON)', lSavings: 'Ahorros — solo contrafactuales medidos',
+    lNoAb: 'Ninguna corrida de dos brazos en alcance — /skill-loop es el único loop que produce una.',
+    lNoPred: 'No hay process-log.md — /iterate nunca corrió en este repo.',
+    lPredUnread: (w) => `process-log.md existe pero su ledger es ilegible (${w}) — <b>ninguna predicción contada</b>, y eso no es lo mismo que ninguna falsada.`,
+    lPred: (v, f, p, u) => `Predicciones del optimizador: <b>${v} verificadas · ${f} falsadas · ${p} pendientes · ${u} ilegibles</b>.`,
+    lGreen: (t) => ` Rondas hasta verde ${t} — un proxy, explícitamente no un ahorro.`, lNoGreen: ' Ninguna corrida develop-phase aprobada en alcance.',
+    lNoMult: ' Nada de esto es un multiplicador; una cantidad no medida se imprime n/a con su razón.',
+    lNoRepo: 'Sin contrafactual en alcance — pasá --repo para leer loop-runs y process-log.md.',
+    lPredictions: 'Predicciones del optimizador', lLearnings: 'Aprendizajes', lPrompts: 'Prompts',
+    lPromptsFine: (t, w, sd, fu) => `${t} turnos de usuario · ${w} palabras de media · ${sd} sesiones/día · ${fu} de seguimiento`,
+    lTurns: '. Son turnos, no teclas: un loop que re-promptea su sesión también escribe uno.',
+    lEvery: 'Todas las tools',
+    footer: 'cada cifra está medida de transcripts locales y de los registros de loop del propio repo. Las cards son recomendaciones por regla: cada una imprime su evidencia, el campo del que salió y qué no prueba, y una regla que no encuentra evidencia no imprime nada. est.$ es precio de lista × tokens medidos, nunca un multiplicador. Una comparación se muestra solo donde la ventana anterior tuvo actividad suficiente para anclarla. Nada de esto edita nada — vos promovés.',
+    unreadableLines: (n) => ` ${n} línea(s) del transcript no se pudieron leer.`,
+    tooQuiet: 'antes demasiado tranquilo para comparar', same: '▪ igual que antes', per100: 'por 100 prompts', better: 'mejor', worse: 'peor',
+    warn: 'aviso', info: 'info', prune: 'podar', failure: 'fallo',
+    types: { HABIT: 'hábito', DISPATCH: 'despacho', 'SKILL CANDIDATE': 'skill candidato', 'AGENTS.md RULE': 'regla AGENTS.md', LIFECYCLE: 'ciclo de vida', DASHBOARD: 'dashboard', HARNESS: 'arnés' },
+  },
+  fr: {
+    eyebrow: 'harness-audit · récap', lastDays: (n) => `${n} derniers jours`, allHistory: 'tout l\'historique',
+    readHere: 'Lu dans les transcripts de cette machine ; rien n\'en est sorti.',
+    sessions: 'sessions', asked: 'choses demandées', spend: 'dépense est.', floor: '(plancher — voir le grand livre)',
+    attention: (n, q) => `${n} chose${n === 1 ? '' : 's'} qui mérite${n === 1 ? '' : 'nt'} votre attention ci-dessous, ${q} règle${q === 1 ? '' : 's'} vérifiée${q === 1 ? '' : 's'} et silencieuse${q === 1 ? '' : 's'}.`,
+    noCards: 'Aucune règle n\'a trouvé de preuve dans cette fenêtre. Rien n\'est imprimé plutôt que quelque chose de rassurant.',
+    startHere: 'Commencez ici', startKicker: 'Une seule chose. La carte avec le plus de preuves derrière elle, et quoi en faire.',
+    whatToDo: 'Quoi faire.', notProve: 'Ce que cela ne prouve pas.',
+    caught: 'Ce que le harnais a arrêté', caughtKicker: 'Chaque fois qu\'une pièce du harnais a dit non, ou a changé quelque chose, avec trace. C\'est le reçu : des événements, pas une économie.',
+    caughtNone: 'Rien de tracé dans cette fenêtre : ni verdict du reviewer, ni garde déclenchée, ni carte promue, ni A/B. Les boucles qui produisent un reçu sont celles qui ne tournent pas.',
+    timesOnRecord: (n) => `fois avec trace`,
+    cRejected: (n) => `${n} exécution${n === 1 ? '' : 's'} de workflow renvoyée${n === 1 ? '' : 's'} par le reviewer avant merge`,
+    cLoops: (n) => `${n} exécution${n === 1 ? '' : 's'} de boucle arrêtée${n === 1 ? '' : 's'} par un siège`,
+    cGuard: (name, n) => `${name} a bloqué une commande ×${n}`,
+    cPromoted: (n) => `${n} carte${n === 1 ? '' : 's'} de review promue${n === 1 ? '' : 's'} dans le contrat`,
+    cAb: (subj, delta, max) => `A/B skill-loop sur ${subj} : ${delta} ${max ? `sur ${max}` : ''} avec le skill vs sans`,
+    cPred: (v, f) => `${v} prédiction${v === 1 ? '' : 's'} de l'optimiseur vérifiée${v === 1 ? '' : 's'}, ${f} falsifiée${f === 1 ? '' : 's'}`,
+    cLearn: (n) => `${n} leçon${n === 1 ? '' : 's'} écrite${n === 1 ? '' : 's'} dans un LEARNINGS.md`,
+    cGreen: (t) => `tours jusqu'au vert sur les exécutions approuvées : ${t}`,
+    cNudges: (n) => `plus ${n} rappel${n === 1 ? '' : 's'} de la garde de répétition (consultatif, non compté)`,
+    caughtNot: 'Ce que cela ne prouve pas : ce qui aurait été livré sans le harnais. Personne n\'a exécuté ce bras. Chaque ligne est un événement ; le contrefactuel n\'en est pas un.',
+    driving: 'Comment s\'est passée la conduite',
+    drivingCmp: (n) => `Contre les ${n} jours précédents — taux pour 100 prompts, pour qu'un mois plus chargé ne se lise pas comme un mois pire.`,
+    drivingQuiet: (n, s, p) => `Les ${n} jours précédant cette fenêtre étaient trop calmes pour comparer (${s} session${s === 1 ? '' : 's'}, ${p} prompts). Le mois prochain il y aura une base.`,
+    drivingNoSince: 'Passez --since pour obtenir une comparaison avec la fenêtre précédente.',
+    tContinua: '« continua » nu', tContinuaSub: (a, n) => `${a} sur ${n} juste après l'arrêt de l'agent`,
+    tInterrupt: 'interrompus', tInterruptSub: (p) => `${p} de vos tours coupés en vol`,
+    tModel: '/model à la main', tModelNone: 'aucune cible enregistrée',
+    tCompact: 'compactions', tCompactSub: (a, avg) => `${a} automatique${a === 1 ? '' : 's'}${avg ? ` · moy. ${avg} tokens avant la coupe` : ''}`,
+    drivingFine: (hp, ss, dr, dd, co) => `${hp} prompts humains sur ${ss} sessions. ${dr} tours qui semblaient humains mais écrits par une boucle à son propre sous-agent ont été écartés ; ${dd} enregistrement${dd === 1 ? '' : 's'} en double fusionné${dd === 1 ? '' : 's'}. ${co} tour${co === 1 ? '' : 's'} ont commencé comme une correction`,
+    drivingFine2: '— les raisons tapées en refusant un appel, plus bas, sont les seules corrections ici qui ne sont pas une supposition.',
+    breaking: 'Ce qui cassait encore et encore', breakingKicker: 'La panne la plus revenue. Une panne qui se répète est un check de preflight que personne n\'a écrit.',
+    breakingNone: 'Rien n\'a échoué deux fois de la même façon dans cette fenêtre.',
+    bossSub: (ss, last) => `fois, sur ${ss} · la dernière le ${last}`,
+    bossTool: (t) => `Outil : <b>${t}</b>. Regroupé par les huit premiers mots de l'erreur, donc peut-être plusieurs causes sous le même message.`,
+    toolsFine: (calls, errs) => `${calls} appels d'outils au total · ${errs} erreurs`,
+    stale: (n) => `${n} édition${n === 1 ? '' : 's'} sur un fichier modifié depuis sa lecture`,
+    retries: (n) => `${n} nouvelle${n === 1 ? '' : 's'} tentative${n === 1 ? '' : 's'} de transport, lentes plutôt qu'échouées`,
+    toolsNone: (calls, errs) => `${calls} appels d'outils, ${errs} erreurs, aucune répétée.`,
+    skills: 'Vos skills', skillsKicker: 'Ce que vous avez utilisé, ce qu\'il faut affûter, et ce qui ne coûte que du contexte. Faits du disque et des transcripts ; les décisions sont les vôtres.',
+    topUsed: 'Les plus utilisés', usedNone: 'Rien n\'a été invoqué via l\'outil Skill ni par nom dans cette fenêtre.',
+    notInstalled: 'non installé ici', outcomes: (o) => [o.interrupted ? `${o.interrupted} interrompu${o.interrupted === 1 ? '' : 's'}` : '', o.denied ? `${o.denied} refusé${o.denied === 1 ? '' : 's'}` : '', o.corrected ? `${o.corrected} corrigé${o.corrected === 1 ? '' : 's'}` : '', o.continued ? `${o.continued} « continua »` : ''].filter(Boolean).join(' · '),
+    keep: 'Garder', keepSub: 'Utilisés, et rien après qui ressemble à un problème.',
+    improve: 'Améliorer', improveSub: 'Utilisés au moins deux fois, avec une raison d\'ouvrir le fichier.',
+    improveNone: 'Aucun skill utilisé ne montre de raison de l\'ouvrir.',
+    rFollowed: (r) => `${r.rough} des ${r.uses} usages ont été suivis d'une interruption, d'un refus ou d'un tour en forme de correction (${[r.interrupted ? `${r.interrupted} interrompu${r.interrupted === 1 ? '' : 's'}` : '', r.denied ? `${r.denied} refusé${r.denied === 1 ? '' : 's'}` : '', r.corrected ? `${r.corrected} corrigé${r.corrected === 1 ? '' : 's'}` : ''].filter(Boolean).join(', ')}) — proxy`,
+    rLooped: (r) => `utilisé ${r.uses} fois et jamais passé par /skill-loop — pas de LEARNINGS.md à côté`,
+    rOld: (r) => `utilisé ${r.uses} fois, SKILL.md intouché depuis ${r.ageDays} jours`,
+    rHeavy: (r) => `${r.words} mots de contexte à chaque appel`,
+    improveHow: (name) => `Une idée ? <code>/skill-loop ${name}</code> la mesure à l'aveugle, avec et sans.`,
+    improveBundled: 'Livré avec le client, donc pas de SKILL.md à éditer : le correctif est une ligne dans AGENTS.md sur quand l\'appeler.',
+    uninstall: 'Candidats à la désinstallation', uninstallSub: (n, total) => `${n} sur ${total} — jamais invoqués dans la fenêtre. Ceux du projet d'abord, car ils se chargent à chaque session.`,
+    uninstallNone: 'Chaque skill installé a été invoqué au moins une fois.',
+    uUnused: (r) => `jamais invoqué dans la fenêtre · ${r.words} mots chargés ${r.scope === 'project' ? 'à chaque session' : 'quand il correspond'}`,
+    uDup: (r) => `installé deux fois : ${r.sources.join(' et ')}`,
+    uDisabled: 'plugin désactivé dans settings — installé mais éteint',
+    uStale: (r) => `SKILL.md intouché depuis ${r.ageDays} jours`,
+    uninstallNot: 'Un skill dont la description s\'est déclenchée seule sans l\'outil Skill ne laisse aucune trace dans un transcript. Ceci est ce que l\'outil Skill a vu, pas la preuve qu\'un skill est inutile.',
+    more: (n) => `et ${n} de plus`,
+    usedNotInstalled: (list) => `Invoqués mais sans SKILL.md dans ce projet ni dans votre home : ${list} — un workflow, ou un skill livré par le client.`,
+    distinct: (n) => `${n} skills distincts dans cette fenêtre`,
+    reportCard: 'Bulletin',
+    rcKicker: (date, age) => `Ce que votre dernier <code>/session-review</code> a proposé le ${date}, il y a ${age} jours, et où en est chaque carte. Cochée signifie que le dépôt la contient désormais.`,
+    rcNever: 'La boucle 6 n\'a jamais tourné dans ce dépôt, donc rien n\'a jamais été proposé, promu ou rejeté avec trace.',
+    promoted: 'promues', proposed: 'proposées', pending: 'en attente',
+    rcUnreadable: (why) => `Le rapport existe mais ${why} — ce n'est pas la même chose que « pas encore de review ».`,
+    rcHow: 'La promotion est vérifiée en cherchant dans le contrat et les skills de ce dépôt ce que chaque carte a cité. Une carte DISPATCH ou HABIT ne laisse rien sur disque à chercher, donc elle indique n/a plutôt qu\'en attente.',
+    nextLesson: 'Prochaine leçon :', rcStarts: '— elle part désormais des cartes de ce rapport.',
+    rcRun: 'Lancez <code>/session-review</code> une fois. Ensuite cette scène montre ce qu\'il a proposé et si vous l\'avez gardé.',
+    rest: 'Le reste des cartes', restKicker: (n) => `${n} de plus, dans l'ordre. Ouvrez-en une pour ses preuves et ses limites. Aucune ne modifie quoi que ce soit — c'est vous qui promouvez.`,
+    silent: (n, list) => `${n} règle${n === 1 ? '' : 's'} vérifiée${n === 1 ? '' : 's'} et silencieuse${n === 1 ? '' : 's'} : ${list}. Une règle sans preuve n'imprime rien — remplir un rapport pour garnir la grille, c'est ainsi qu'un instrument devient un horoscope.`,
+    guards: 'Gardes, et les appels que vous avez refusés', guardsKicker: 'Ce qui a bloqué un appel par règle, et ce que vous avez bloqué à la main — avec la raison tapée.',
+    gInstalled: (n, f, ss) => `<b>${n}</b> gardes installées · <b>${f}</b> déclenchement${f === 1 ? '' : 's'} sur ${ss}`,
+    gNoList: 'hooks.json n\'est pas lisible d\'ici, donc aucune liste de gardes n\'est affichée — une liste vide se lirait comme « aucune installée ».',
+    advisory: '(consultatif)',
+    gFine: 'Un déclenchement est un résultat commençant par <code>harness-audit &lt;guard&gt;: blocked</code>. Zéro déclenchement ne veut pas dire que rien de dangereux ne s\'est produit ; les gardes sont prudentes par conception.',
+    gOther: (n, list) => ` D'autres hooks ont tourné ${n} fois : ${list}.`,
+    refused: (n, r) => `<b>${n}</b> appel${n === 1 ? '' : 's'} refusé${n === 1 ? '' : 's'}${r ? `, <b>${r}</b> avec une raison` : ''}`,
+    refusedFine: 'Ce sont les seules corrections de ce rapport qui ne sont pas un proxy : vous les avez tapées. Chacune est une ligne candidate pour AGENTS.md, et c\'est vous qui la promouvez.',
+    refusedNone: 'Aucun refus ne portait de raison tapée dans cette fenêtre.',
+    ledger: 'Le grand livre', ledgerKicker: 'Tokens, coût, workflows, économies — la comptabilité qui était tout le rapport. Ouvrez-le quand il vous faut un chiffre.',
+    lAgents: 'Tokens par agent × modèle', lUnpriced: (l) => `est.$ exclut les modèles sans prix : ${l} — un plancher, pas un total.`, lIntro: (l) => `au tarif de lancement : ${l}`,
+    lLineup: 'Line-up des modèles — configuré vs observé', lDrift: '⚠ = dérive : le rôle a tourné sur une autre famille de modèle que celle configurée dans model-lineup.json.',
+    lDays: 'Tokens par jour', lWorkflows: 'Activations de workflow', lLoops: 'Exécutions de boucle (findings JSON)', lSavings: 'Économies — contrefactuels mesurés seulement',
+    lNoAb: 'Aucune exécution à deux bras dans le périmètre — /skill-loop est la seule boucle qui en produit.',
+    lNoPred: 'Pas de process-log.md — /iterate n\'a jamais tourné dans ce dépôt.',
+    lPredUnread: (w) => `process-log.md existe mais son registre est illisible (${w}) — <b>aucune prédiction comptée</b>, ce qui n'est pas la même chose qu'aucune falsifiée.`,
+    lPred: (v, f, p, u) => `Prédictions de l'optimiseur : <b>${v} vérifiées · ${f} falsifiées · ${p} en attente · ${u} illisibles</b>.`,
+    lGreen: (t) => ` Tours jusqu'au vert ${t} — un proxy, explicitement pas une économie.`, lNoGreen: ' Aucune exécution develop-phase approuvée dans le périmètre.',
+    lNoMult: ' Rien ici n\'est un multiplicateur ; une quantité non mesurée est imprimée n/a avec sa raison.',
+    lNoRepo: 'Aucun contrefactuel dans le périmètre — passez --repo pour lire loop-runs et process-log.md.',
+    lPredictions: 'Prédictions de l\'optimiseur', lLearnings: 'Apprentissages', lPrompts: 'Prompts',
+    lPromptsFine: (t, w, sd, fu) => `${t} tours utilisateur · ${w} mots en moyenne · ${sd} sessions/jour · ${fu} de suivi`,
+    lTurns: '. Ce sont des tours, pas des frappes : une boucle qui re-prompte sa session en écrit un aussi.',
+    lEvery: 'Tous les outils',
+    footer: 'chaque chiffre est mesuré à partir des transcripts locaux et des registres de boucle du dépôt. Les cartes sont des recommandations par règle : chacune imprime sa preuve, le champ d\'où elle vient et ce qu\'elle ne prouve pas, et une règle sans preuve n\'imprime rien. est.$ est prix catalogue × tokens mesurés, jamais un multiplicateur. Une comparaison n\'est montrée que là où la fenêtre précédente était assez active pour l\'ancrer. Rien ici ne modifie quoi que ce soit — c\'est vous qui promouvez.',
+    unreadableLines: (n) => ` ${n} ligne(s) de transcript n'ont pas pu être lues.`,
+    tooQuiet: 'trop calme avant pour comparer', same: '▪ comme avant', per100: 'pour 100 prompts', better: 'mieux', worse: 'pire',
+    warn: 'alerte', info: 'info', prune: 'élaguer', failure: 'panne',
+    types: { HABIT: 'habitude', DISPATCH: 'dispatch', 'SKILL CANDIDATE': 'skill candidat', 'AGENTS.md RULE': 'règle AGENTS.md', LIFECYCLE: 'cycle de vie', DASHBOARD: 'dashboard', HARNESS: 'harnais' },
+  },
+};
+
+// The cards' own words, per rule. The JSON keeps English — it is the contract validate.js and
+// /session-review read — and the report swaps the display text. A rule with no entry here renders
+// in English rather than in a guess.
+const RULE_I18N = {
+  'harness-caught': {
+    es: { headline: (d) => `el arnés dijo que no ${d.caught.total} ${d.caught.total === 1 ? 'vez' : 'veces'} con registro`, recommendation: 'nada que hacer: esto es el recibo. Cuando la lista es corta, los loops que la producen (/review-loop, /session-review, /skill-loop) son los que no están corriendo', doesNotProve: 'qué habría salido sin el arnés — nadie corrió ese brazo; cada línea es un evento, el contrafactual no' },
+    fr: { headline: (d) => `le harnais a dit non ${d.caught.total} fois avec trace`, recommendation: 'rien à faire : c\'est le reçu. Quand la liste est courte, les boucles qui la produisent (/review-loop, /session-review, /skill-loop) sont celles qui ne tournent pas', doesNotProve: 'ce qui aurait été livré sans le harnais — personne n\'a exécuté ce bras ; chaque ligne est un événement, le contrefactuel n\'en est pas un' },
+  },
+  'continue-token': {
+    es: { headline: (d) => `${d.hygiene.continuations.count} turnos de «continua» a secas — ${d.hygiene.continuations.afterAgentTurn} de ellos justo después de que el agente terminó`, recommendation: 'el agente termina su turno antes de terminar la unidad de trabajo. Regla candidata para AGENTS.md: terminar la unidad o decir qué falta antes de parar; o más effort en tareas largas', doesNotProve: 'que el agente hiciera mal en parar — un humano marcando el ritmo produce la misma forma' },
+    fr: { headline: (d) => `${d.hygiene.continuations.count} tours « continua » nus — ${d.hygiene.continuations.afterAgentTurn} juste après la fin du tour de l'agent`, recommendation: 'l\'agent termine son tour avant la fin de l\'unité de travail. Règle candidate pour AGENTS.md : finir l\'unité ou dire ce qui manque avant de s\'arrêter ; ou plus d\'effort sur les tâches longues', doesNotProve: 'que l\'agent a eu tort de s\'arrêter — un humain qui donne le rythme produit la même forme' },
+  },
+  'manual-model-switch': {
+    es: { headline: (d) => `/model tipeado ${d.hygiene.modelSwitches.count} veces en esta ventana`, recommendation: 'una decisión que tomás a mano cada sesión. Configurala una vez: settings.model para el hilo principal, model: por archivo de agente, o el line-up para los roles', doesNotProve: 'que alguno de esos destinos sea el mejor modelo — ninguna corrida acá los compara' },
+    fr: { headline: (d) => `/model tapé ${d.hygiene.modelSwitches.count} fois dans cette fenêtre`, recommendation: 'une décision prise à la main à chaque session. Configurez-la une fois : settings.model pour le fil principal, model: par fichier d\'agent, ou le line-up pour les rôles', doesNotProve: 'qu\'une de ces cibles soit le meilleur modèle — aucune exécution ici ne les compare' },
+  },
+  'skill-shelfware': {
+    es: { headline: (d) => `${d.skills.installedNotUsed.project.length} de los ${d.skills.installedNotUsed.projectTotal} skills instalados en este proyecto nunca se invocaron acá`, recommendation: 'cada SKILL.md cuesta contexto en cada sesión. Podá, o hacé la invocación explícita en AGENTS.md para que el uso sea observable', doesNotProve: 'que un skill sea inútil — una descripción que se disparó sola sin la tool Skill no deja rastro acá' },
+    fr: { headline: (d) => `${d.skills.installedNotUsed.project.length} des ${d.skills.installedNotUsed.projectTotal} skills installés dans ce projet n'ont jamais été invoqués ici`, recommendation: 'chaque SKILL.md coûte du contexte à chaque session. Élaguez, ou rendez l\'invocation explicite dans AGENTS.md pour que l\'usage devienne observable', doesNotProve: 'qu\'un skill soit inutile — une description déclenchée seule sans l\'outil Skill ne laisse aucune trace ici' },
+  },
+  'skill-used-not-installed': {
+    es: { headline: (d) => `${d.skills.usedNotInstalled.length} nombre(s) invocados que ningún SKILL.md ni comando de acá define`, recommendation: 'un workflow, o un skill que se quitó después de que quedó el hábito de llamarlo. Si es un workflow, nada que hacer; si se quitó, el hábito sobrevivió al archivo', doesNotProve: 'nada sobre la calidad — solo que el nombre y el disco no coinciden' },
+    fr: { headline: (d) => `${d.skills.usedNotInstalled.length} nom(s) invoqués qu'aucun SKILL.md ni commande d'ici ne définit`, recommendation: 'un workflow, ou un skill retiré après que l\'habitude de l\'appeler est restée. Si c\'est un workflow, rien à faire ; s\'il a été retiré, l\'habitude a survécu au fichier', doesNotProve: 'rien sur la qualité — seulement que le nom et le disque ne concordent pas' },
+  },
+  'repeated-crash': {
+    es: { headline: (d) => `el mismo fallo volvió ${d.tools.errorClusters[0].count} veces en ${d.tools.errorClusters[0].sessions} sesión(es)`, recommendation: 'un fallo que se repite es un check de preflight que nadie escribió. Agregalo al preflight del proyecto, o registrá el arreglo en el LEARNINGS.md del skill', doesNotProve: 'que todos compartan la misma causa raíz — la firma son las primeras ocho palabras del error' },
+    fr: { headline: (d) => `la même panne est revenue ${d.tools.errorClusters[0].count} fois sur ${d.tools.errorClusters[0].sessions} session(s)`, recommendation: 'une panne qui se répète est un check de preflight que personne n\'a écrit. Ajoutez-le au preflight du projet, ou notez le correctif dans le LEARNINGS.md du skill', doesNotProve: 'qu\'elles partagent toutes la même cause — la signature est les huit premiers mots de l\'erreur' },
+  },
+  'denials-as-rules': {
+    es: { headline: (d) => `${d.tools.denials.count} llamadas que rechazaste — ${d.tools.denials.reasons.length} con una razón tipeada`, recommendation: 'una razón de rechazo es la única corrección de este informe que no es un proxy. Cada una es una línea candidata para AGENTS.md; la card busca el contrato y dice si ya está', doesNotProve: 'que la regla pertenezca a AGENTS.md — puede ser de un skill. Vos promovés' },
+    fr: { headline: (d) => `${d.tools.denials.count} appels refusés — ${d.tools.denials.reasons.length} avec une raison tapée`, recommendation: 'une raison de refus est la seule correction de ce rapport qui ne soit pas un proxy. Chacune est une ligne candidate pour AGENTS.md ; la carte cherche le contrat et dit si elle y est déjà', doesNotProve: 'que la règle appartienne à AGENTS.md — elle peut relever d\'un skill. C\'est vous qui promouvez' },
+  },
+  'interrupt-rate': {
+    es: { headline: (d) => `${d.hygiene.interrupts} turnos interrumpidos — ${pctOf(d.hygiene.interrupts, d.hygiene.humanPrompts)} de tus prompts`, recommendation: 'interrumpir es corregir el rumbo a mano. Unidades de trabajo más chicas o plan mode antes de una tarea larga reducen las veces que hace falta', doesNotProve: 'que los turnos interrumpidos fueran mal — cortar un turno correcto antes de tiempo se ve idéntico' },
+    fr: { headline: (d) => `${d.hygiene.interrupts} tours interrompus — ${pctOf(d.hygiene.interrupts, d.hygiene.humanPrompts)} de vos prompts`, recommendation: 'interrompre, c\'est corriger le cap à la main. Des unités de travail plus petites ou le plan mode avant une longue tâche réduisent les fois où c\'est nécessaire', doesNotProve: 'que les tours interrompus allaient mal — couper tôt un tour correct se voit pareil' },
+  },
+  'compaction-pressure': {
+    es: { headline: (d) => `${d.hygiene.compactions.auto} compactaciones automáticas — la sesión se cortó sin tu mano`, recommendation: 'un resumen es un handoff con pérdida. Corré /handoff y abrí sesión nueva antes de que la auto-compactación lo haga por vos', doesNotProve: 'que las sesiones cortas sean mejores — solo que las largas se cortaron sin tu mano' },
+    fr: { headline: (d) => `${d.hygiene.compactions.auto} compactions automatiques — la session a été coupée sans votre main`, recommendation: 'un résumé est un handoff avec perte. Lancez /handoff et ouvrez une nouvelle session avant que l\'auto-compaction ne le fasse pour vous', doesNotProve: 'que les sessions courtes soient meilleures — seulement que les longues ont été coupées sans votre main' },
+  },
+  'hand-dispatched-role': {
+    es: { headline: (d) => `un rol de .claude/agents lanzado a mano — un rol que este repo ya define`, recommendation: 'criterio de despacho candidato (D23): cuándo el rol se lanza solo. Lanzarlo a mano cada vez es hacer de despachador', doesNotProve: 'que un workflow hubiera sido más barato — sin contrafactual' },
+    fr: { headline: (d) => `un rôle de .claude/agents lancé à la main — un rôle que ce dépôt définit déjà`, recommendation: 'critère de dispatch candidat (D23) : quand le rôle se lance seul. Le lancer à la main à chaque fois, c\'est faire le dispatcher', doesNotProve: 'qu\'un workflow aurait été moins cher — pas de contrefactuel' },
+  },
+  'main-thread-heavy': {
+    es: { headline: (d) => `el hilo principal es el ${pctOf(d.agents.filter((a) => a.agentType === 'main').reduce((n, a) => n + a.costUsd, 0), d.totals.costUsd)} del gasto con precio`, recommendation: 'la conversación cuesta más que los agentes que despacha. Delegar exploración e implementación a subagentes mueve tokens a modelos más baratos y contextos más chicos', doesNotProve: 'que delegar hubiera costado menos — sin contrafactual no se afirma ningún ahorro' },
+    fr: { headline: (d) => `le fil principal représente ${pctOf(d.agents.filter((a) => a.agentType === 'main').reduce((n, a) => n + a.costUsd, 0), d.totals.costUsd)} de la dépense tarifée`, recommendation: 'la conversation coûte plus que les agents qu\'elle dispatch. Déléguer exploration et implémentation à des sous-agents déplace les tokens vers des modèles moins chers et des contextes plus petits', doesNotProve: 'que déléguer aurait coûté moins — sans contrefactuel aucune économie n\'est affirmée' },
+  },
+  'unpriced-model': {
+    es: { headline: (d) => `${d.unpricedModels.join(', ')} no tiene precio de lista acá`, recommendation: 'verificá el precio de lista y agregalo a PRICE_PER_MTOK. Nunca de memoria: un precio inventado es peor que ninguno', doesNotProve: 'nada sobre el trabajo — solo que la contabilidad es un piso' },
+    fr: { headline: (d) => `${d.unpricedModels.join(', ')} n'a pas de prix catalogue ici`, recommendation: 'vérifiez le prix catalogue et ajoutez-le à PRICE_PER_MTOK. Jamais de mémoire : un prix inventé est pire qu\'aucun', doesNotProve: 'rien sur le travail — seulement que la comptabilité est un plancher' },
+  },
+  'review-pending': {
+    es: { headline: (d) => `${d.reviews.latest.pending} card(s) del último /session-review siguen abiertas después de ${d.reviews.latest.ageDays} días`, recommendation: 'promovela, o rechazala en el informe para que deje de aparecer acá', doesNotProve: 'que la rechazaras — una card rechazada es un resultado válido, y nada en disco registra esa decisión' },
+    fr: { headline: (d) => `${d.reviews.latest.pending} carte(s) du dernier /session-review encore ouvertes après ${d.reviews.latest.ageDays} jours`, recommendation: 'promouvez-la, ou rejetez-la dans le rapport pour qu\'elle cesse d\'apparaître ici', doesNotProve: 'que vous l\'ayez rejetée — une carte rejetée est un résultat valide, et rien sur disque n\'enregistre cette décision' },
+  },
+  'review-stale': {
+    es: { headline: (d) => (d.reviews && d.reviews.latest ? `el último /session-review tiene ${d.reviews.latest.ageDays} días` : `${d.hygiene.sessions} sesiones y ningún /session-review todavía`), recommendation: 'corré /session-review — ahora arranca desde las cards de este informe, no del corpus crudo', doesNotProve: 'nada — es una cadencia, no un hallazgo' },
+    fr: { headline: (d) => (d.reviews && d.reviews.latest ? `le dernier /session-review date de ${d.reviews.latest.ageDays} jours` : `${d.hygiene.sessions} sessions et aucun /session-review encore`), recommendation: 'lancez /session-review — il part désormais des cartes de ce rapport, pas du corpus brut', doesNotProve: 'rien — c\'est une cadence, pas une trouvaille' },
+  },
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // RENDER-HTML — one self-contained file: no CDN, no webfont, no script, no fetch.
@@ -2059,6 +2435,11 @@ const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&l
 // network call from a report whose whole promise is that nothing leaves the machine, so there is
 // none: the pixel numerals below are drawn, not typed.
 // ─────────────────────────────────────────────────────────────────────────────
+
+// Every value that reaches the HTML goes through this — prompts, denial reasons and error text are
+// verbatim user and tool output, and a report that renders them raw is a script injection with a
+// green theme.
+const esc = (v) => String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
 // A 5×7 pixel glyph set for the numerals and the few symbols a number needs. '#' is a lit pixel.
 const PIXEL_GLYPHS = {
@@ -2082,6 +2463,12 @@ const PIXEL_GLYPHS = {
   '+': ['.....', '..#..', '..#..', '#####', '..#..', '..#..', '.....'],
   '/': ['....#', '...#.', '...#.', '..#..', '.#...', '.#...', '#....'],
   ' ': ['.....', '.....', '.....', '.....', '.....', '.....', '.....'],
+  'L': ['#....', '#....', '#....', '#....', '#....', '#....', '#####'],
+  'O': ['.###.', '#...#', '#...#', '#...#', '#...#', '#...#', '.###.'],
+  'P': ['####.', '#...#', '#...#', '####.', '#....', '#....', '#....'],
+  'S': ['.####', '#....', '#....', '.###.', '....#', '....#', '####.'],
+  'T': ['#####', '..#..', '..#..', '..#..', '..#..', '..#..', '..#..'],
+  'A': ['.###.', '#...#', '#...#', '#####', '#...#', '#...#', '#...#'],
 };
 
 // Pixel numerals as inline SVG. `px` is the size of one pixel; the glyph is 5 wide with a 1-px gap.
@@ -2110,6 +2497,9 @@ const PIXEL_ICONS = {
   swap: ['..#......', '.##......', '#######..', '.##......', '..#......', '......#..', '......##.', '..#######', '......##.'],
   shield: ['.#######.', '#########', '#..###..#', '#..###..#', '#########', '.#######.', '..#####..', '...###...', '....#....'],
   lesson: ['.........', '#########', '#.......#', '#.#####.#', '#.......#', '#.#####.#', '#.......#', '#########', '.........'],
+  stop: ['..#####..', '.#######.', '#########', '#########', '#########', '#########', '#########', '.#######.', '..#####..'],
+  wrench: ['......##.', '.....####', '.....#.##', '....###..', '...###...', '..###....', '.###.....', '###......', '##.......'],
+  trash: ['..#####..', '#########', '.#.....#.', '.#.#.#.#.', '.#.#.#.#.', '.#.#.#.#.', '.#.#.#.#.', '.#.....#.', '.#######.'],
 };
 function pixelIcon(name, px = 3, color = 'currentColor') {
   const g = PIXEL_ICONS[name] || PIXEL_ICONS.box;
@@ -2122,18 +2512,30 @@ function pixelIcon(name, px = 3, color = 'currentColor') {
 const heroNum = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e4 ? `${Math.round(n / 1e3)}k` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}k` : String(Math.round(n)));
 const withCommas = (n) => String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 
-function renderHtml(d) {
+function renderHtml(d, lang = 'en') {
+  const S = STR[lang] || STR.en;
   const h = d.hygiene;
   const t = d.tools;
   const g = d.guards;
   const sk = d.skills;
   const rv = d.reviews;
+  const cg = d.caught;
   const prev = d.previous;
   const cards = d.cards || [];
   const days = d.window === 'all' ? null : Math.round((Date.parse(d.generatedAt) - Date.parse(d.window)) / 864e5);
-  const windowLabel = days ? `last ${days} days` : 'all history';
+  const windowLabel = days ? S.lastDays(days) : S.allHistory;
   // A slug cannot be turned back into a path (every dash is ambiguous); the repo basename can.
   const projectName = sk && sk.repo ? path.basename(sk.repo) : d.project;
+  const sessionsWord = (n) => `${n} ${S.sessions}`;
+
+  // Display text for a card: the rule's own words in the report's language, English otherwise.
+  const words = (c) => {
+    const i = RULE_I18N[c.rule] && RULE_I18N[c.rule][lang];
+    if (!i) return { headline: c.headline, recommendation: c.recommendation, doesNotProve: c.doesNotProve };
+    let headline = c.headline;
+    try { headline = i.headline(d); } catch { /* a field the rule needs is absent in this aggregate: keep English */ }
+    return { headline, recommendation: i.recommendation, doesNotProve: i.doesNotProve };
+  };
 
   // ── delta chips, only where a comparison is honest ──────────────────────
   // Hygiene counts are compared as rates per 100 human prompts, because a busier month has more of
@@ -2142,22 +2544,23 @@ function renderHtml(d) {
   const rate = (n, per) => (per ? (n / per) * 100 : 0);
   const chip = (nowN, prevN, { asRate = true, lowerIsBetter = true, unit = '' } = {}) => {
     if (!prev) return '';
-    if (!prev.comparable) return `<span class="chip mute" title="previous window: ${prev.sessions} sessions, ${prev.humanPrompts} prompts">too quiet before to compare</span>`;
+    if (!prev.comparable) return `<span class="chip mute" title="${prev.sessions} ${S.sessions}, ${prev.humanPrompts} prompts">${S.tooQuiet}</span>`;
     const a = asRate ? rate(nowN, h.humanPrompts) : nowN;
     const b = asRate ? rate(prevN, prev.humanPrompts) : prevN;
     const diff = a - b;
-    if (Math.abs(diff) < (asRate ? 0.5 : 0.5)) return `<span class="chip mute">▪ same as before</span>`;
+    if (Math.abs(diff) < 0.5) return `<span class="chip mute">${S.same}</span>`;
     const better = lowerIsBetter ? diff < 0 : diff > 0;
     const arrow = diff < 0 ? '▼' : '▲';
-    const val = asRate ? `${Math.abs(diff).toFixed(1)} per 100 prompts` : `${withCommas(Math.abs(diff))}${unit}`;
-    return `<span class="chip ${better ? 'good' : 'bad'}">${arrow} ${val} ${better ? 'better' : 'worse'}</span>`;
+    const val = asRate ? `${Math.abs(diff).toFixed(1)} ${S.per100}` : `${withCommas(Math.abs(diff))}${unit}`;
+    return `<span class="chip ${better ? 'good' : 'bad'}">${arrow} ${val} ${better ? S.better : S.worse}</span>`;
   };
 
   // ── shared bits ─────────────────────────────────────────────────────────
   const pill = (cls, label) => `<span class="pill ${cls}">${esc(label)}</span>`;
-  const typeIcon = { HABIT: 'loop', DISPATCH: 'swap', 'SKILL CANDIDATE': 'star', 'AGENTS.md RULE': 'flag', LIFECYCLE: 'lesson', DASHBOARD: 'box' };
+  const typeLabel = (type) => (S.types[type] || type.toLowerCase());
+  const sevLabel = (c) => (c.severity === 'warn' ? S.warn : S.info);
+  const typeIcon = { HABIT: 'loop', DISPATCH: 'swap', 'SKILL CANDIDATE': 'star', 'AGENTS.md RULE': 'flag', LIFECYCLE: 'lesson', DASHBOARD: 'box', HARNESS: 'shield' };
   const blocks = (n, of, cls = '') => {
-    // A segmented bar: each block is one unit up to 20, then the bar is scaled. No decimals.
     const total = Math.max(1, Math.min(20, of));
     const lit = Math.round((Math.min(n, of) / Math.max(1, of)) * total);
     return `<span class="bar ${cls}" aria-hidden="true">${'<i class="on"></i>'.repeat(lit)}${'<i></i>'.repeat(total - lit)}</span>`;
@@ -2166,122 +2569,150 @@ function renderHtml(d) {
     <header class="sh"><span class="num">${pixelText(String(num).padStart(2, '0'), 3)}</span><h2>${title}</h2>${kicker ? `<p class="kicker">${kicker}</p>` : ''}</header>
     ${body}
   </section>`;
-  const cardFull = (c) => `<article class="card ${c.severity}">
-      <div class="top">${pixelIcon(typeIcon[c.type] || 'box', 2)}${pill('type', c.type)}${pill(c.severity, c.severity)}<span class="rid">${esc(c.rule)}</span></div>
-      <h3>${esc(c.headline)}</h3>
+  const cardFull = (c) => { const w = words(c); return `<article class="card ${c.severity}">
+      <div class="top">${pixelIcon(typeIcon[c.type] || 'box', 2)}${pill('type', typeLabel(c.type))}${pill(c.severity, sevLabel(c))}<span class="rid">${esc(c.rule)}</span></div>
+      <h3>${esc(w.headline)}</h3>
       <p class="ev">${esc(c.evidence)}</p>
-      <p class="rec"><b>What to do.</b> ${esc(c.recommendation)}</p>
-      <p class="not"><b>What this does not prove.</b> ${esc(c.doesNotProve)}</p>
+      <p class="rec"><b>${S.whatToDo}</b> ${esc(w.recommendation)}</p>
+      <p class="not"><b>${S.notProve}</b> ${esc(w.doesNotProve)}</p>
       <span class="src">${esc(c.source)}</span>
-    </article>`;
-  const cardRow = (c) => `<details class="crow ${c.severity}">
-      <summary>${pixelIcon(typeIcon[c.type] || 'box', 2)}<span class="ct">${esc(c.type)}</span><span class="ch">${esc(c.headline)}</span><span class="rid">${esc(c.rule)}</span></summary>
+    </article>`; };
+  const cardRow = (c) => { const w = words(c); return `<details class="crow ${c.severity}">
+      <summary>${pixelIcon(typeIcon[c.type] || 'box', 2)}<span class="ct">${esc(typeLabel(c.type))}</span><span class="ch">${esc(w.headline)}</span><span class="rid">${esc(c.rule)}</span></summary>
       <div class="cbody"><p class="ev">${esc(c.evidence)}</p>
-      <p class="rec"><b>What to do.</b> ${esc(c.recommendation)}</p>
-      <p class="not"><b>What this does not prove.</b> ${esc(c.doesNotProve)}</p></div>
-    </details>`;
+      <p class="rec"><b>${S.whatToDo}</b> ${esc(w.recommendation)}</p>
+      <p class="not"><b>${S.notProve}</b> ${esc(w.doesNotProve)}</p></div>
+    </details>`; };
 
   // ── 00 cover ────────────────────────────────────────────────────────────
   const cover = `<header class="cover">
-    <p class="eyebrow">harness-audit · recap</p>
+    <p class="eyebrow">${S.eyebrow}</p>
     <h1><span class="pxtitle">${pixelText('LOOP-STATS', 4)}</span><span class="proj">${esc(projectName)}</span></h1>
-    <p class="lede">${windowLabel}${days ? `, ${esc(d.window.slice(0, 10))} → ${esc(d.generatedAt.slice(0, 10))}` : ''}. Read from the transcripts on this machine; nothing left it.</p>
+    <p class="lede">${windowLabel}${days ? `, ${esc(d.window.slice(0, 10))} → ${esc(d.generatedAt.slice(0, 10))}` : ''}. ${S.readHere}</p>
     <div class="heroes">
-      <div class="hero"><div class="hv">${pixelText(String(h ? h.sessions : d.totals.runs), 7)}</div><div class="hl">sessions</div>${prev && prev.comparable ? chip(h ? h.sessions : 0, prev.sessions, { asRate: false, lowerIsBetter: false }) : ''}</div>
-      <div class="hero"><div class="hv">${pixelText(String(h ? h.humanPrompts : d.prompts.total), 7)}</div><div class="hl">things you asked for</div></div>
-      <div class="hero"><div class="hv">${pixelText(`$${heroNum(d.totals.costUsd)}`, 7)}</div><div class="hl">est. spend${d.unpricedModels.length ? ' (floor — see the ledger)' : ''}</div>${prev && prev.comparable ? chip(d.totals.costUsd, prev.costUsd, { asRate: false, lowerIsBetter: true, unit: '$' }) : ''}</div>
+      <div class="hero"><div class="hv">${pixelText(String(h ? h.sessions : d.totals.runs), 7)}</div><div class="hl">${S.sessions}</div>${prev && prev.comparable ? chip(h ? h.sessions : 0, prev.sessions, { asRate: false, lowerIsBetter: false }) : ''}</div>
+      <div class="hero"><div class="hv">${pixelText(String(h ? h.humanPrompts : d.prompts.total), 7)}</div><div class="hl">${S.asked}</div></div>
+      <div class="hero"><div class="hv">${pixelText(`$${heroNum(d.totals.costUsd)}`, 7)}</div><div class="hl">${S.spend}${d.unpricedModels.length ? ` ${S.floor}` : ''}</div>${prev && prev.comparable ? chip(d.totals.costUsd, prev.costUsd, { asRate: false, lowerIsBetter: true, unit: '$' }) : ''}</div>
     </div>
-    ${cards.length ? `<p class="lede">${cards.length} thing${cards.length === 1 ? '' : 's'} worth your attention below, ${d.rulesSilent.length} rule${d.rulesSilent.length === 1 ? '' : 's'} checked and quiet.</p>` : '<p class="lede">No rule found evidence in this window. Nothing is printed rather than something reassuring.</p>'}
+    <p class="lede">${cards.length ? S.attention(cards.length, d.rulesSilent.length) : S.noCards}</p>
   </header>`;
 
   // ── 01 the one thing ────────────────────────────────────────────────────
-  const first = cards[0];
-  const oneThing = first
-    ? scene(1, 'Start here', 'One thing. The card with the most evidence behind it, and what to do about it.', cardFull(first), 'stage')
-    : '';
+  const stageCards = cards.filter((c) => c.rule !== 'harness-caught');
+  const first = stageCards[0];
+  const oneThing = first ? scene(1, S.startHere, S.startKicker, cardFull(first), 'stage') : '';
 
-  // ── 02 how the driving went ─────────────────────────────────────────────
+  // ── 02 what the harness stopped ─────────────────────────────────────────
+  const caughtLines = [];
+  if (cg) {
+    if (cg.rejected.length) caughtLines.push(['stop', S.cRejected(cg.rejected.length), cg.rejected.slice(0, 4).map((r) => `${r.name} · ${r.date}${r.rounds ? ` · ×${r.rounds}` : ''}`).join('  ·  ')]);
+    if (cg.rejectedLoops.length) caughtLines.push(['stop', S.cLoops(cg.rejectedLoops.length), cg.rejectedLoops.slice(0, 4).map((r) => `${r.loop} · ${r.date || '?'}${r.stoppedBy ? ` · ${r.stoppedBy}` : ''}`).join('  ·  ')]);
+    for (const gf of cg.guardFires) caughtLines.push(['shield', S.cGuard(gf.name, gf.fires), '']);
+    if (cg.promoted.length) caughtLines.push(['check', S.cPromoted(cg.promoted.length), cg.promoted.map((c) => `${clip(c.text, 80)} → ${c.evidence}`).join('  ·  ')]);
+    for (const a of cg.ab) caughtLines.push(['star', S.cAb(a.subject, `${a.deltaScore >= 0 ? '+' : ''}${a.deltaScore}`, a.scoreMax), '']);
+    if (cg.predictions.verified || cg.predictions.falsified) caughtLines.push(['flag', S.cPred(cg.predictions.verified, cg.predictions.falsified), '']);
+    if (cg.learnings) caughtLines.push(['lesson', S.cLearn(cg.learnings), '']);
+    if (cg.roundsToGreen.length) caughtLines.push(['loop', S.cGreen(cg.roundsToGreen.join(' · ')), '']);
+  }
+  const caughtScene = scene(2, S.caught, S.caughtKicker, cg && cg.total
+    ? `<div class="receipt">
+      <div class="rhead">${pixelIcon('shield', 5, 'var(--gold)')}<div class="rv">${pixelText(String(cg.total), 9, 'var(--gold)')}</div><div class="rt">${S.timesOnRecord(cg.total)}</div></div>
+      <ul class="rlist">${caughtLines.map(([ic, line, detail]) => `<li>${pixelIcon(ic, 2, 'var(--gold)')}<div><span class="rl">${esc(line)}</span>${detail ? `<span class="rd">${esc(detail)}</span>` : ''}</div></li>`).join('')}</ul>
+      ${cg.nudges ? `<p class="fine">${S.cNudges(cg.nudges)}</p>` : ''}
+      <p class="fine">${S.caughtNot}</p>
+    </div>`
+    : `<p class="fine">${S.caughtNone}</p>`, 'gold');
+
+  // ── 03 how the driving went ─────────────────────────────────────────────
   const tile = (icon, label, n, sub, chipHtml, hot) => `<div class="tile${hot ? ' hot' : ''}">
       <div class="tl">${pixelIcon(icon, 2)}<span>${label}</span></div>
       <div class="tv">${pixelText(String(n), 4)}</div>
       <div class="ts">${sub}</div>${chipHtml}</div>`;
-  const driving = !h ? '' : scene(2, 'How the driving went', prev && prev.comparable
-    ? `Against the ${days} days before — rates per 100 prompts, so a busier month does not read as a worse one.`
-    : prev ? `The ${days} days before this window were too quiet to compare against (${prev.sessions} session${prev.sessions === 1 ? '' : 's'}, ${prev.humanPrompts} prompts). Next month there will be a baseline.` : 'Pass --since to get a comparison against the window before.',
+  const driving = !h ? '' : scene(3, S.driving, prev && prev.comparable
+    ? S.drivingCmp(days)
+    : prev ? S.drivingQuiet(days, prev.sessions, prev.humanPrompts) : S.drivingNoSince,
   `<div class="tiles">
-    ${tile('loop', 'bare «continua»', h.continuations.count, `${h.continuations.afterAgentTurn} of ${h.continuations.count} right after the agent stopped`, chip(h.continuations.count, prev ? prev.continuations : 0), h.continuations.count >= 5)}
-    ${tile('bolt', 'interrupted', h.interrupts, `${h.humanPrompts ? pct(h.interrupts / h.humanPrompts) : '0%'} of your turns stopped mid-flight`, chip(h.interrupts, prev ? prev.interrupts : 0), h.interrupts >= 10)}
-    ${tile('swap', '/model by hand', h.modelSwitches.count, esc(Object.entries(h.modelSwitches.targets).slice(0, 3).map(([k, v]) => `${k} ×${v}`).join(' · ')) || 'no target recorded', chip(h.modelSwitches.count, prev ? prev.modelSwitches : 0), h.modelSwitches.count >= 5)}
-    ${tile('cut', 'compactions', h.compactions.count, `${h.compactions.auto} automatic${h.compactions.avgPreTokens ? ` · avg ${human(h.compactions.avgPreTokens)} tokens before the cut` : ''}`, chip(h.compactions.count, prev ? prev.compactions : 0), h.compactions.auto >= 3)}
+    ${tile('loop', S.tContinua, h.continuations.count, S.tContinuaSub(h.continuations.afterAgentTurn, h.continuations.count), chip(h.continuations.count, prev ? prev.continuations : 0), h.continuations.count >= 5)}
+    ${tile('bolt', S.tInterrupt, h.interrupts, S.tInterruptSub(h.humanPrompts ? pct(h.interrupts / h.humanPrompts) : '0%'), chip(h.interrupts, prev ? prev.interrupts : 0), h.interrupts >= 10)}
+    ${tile('swap', S.tModel, h.modelSwitches.count, esc(Object.entries(h.modelSwitches.targets).slice(0, 3).map(([k, v]) => `${k} ×${v}`).join(' · ')) || S.tModelNone, chip(h.modelSwitches.count, prev ? prev.modelSwitches : 0), h.modelSwitches.count >= 5)}
+    ${tile('cut', S.tCompact, h.compactions.count, S.tCompactSub(h.compactions.auto, h.compactions.avgPreTokens ? human(h.compactions.avgPreTokens) : ''), chip(h.compactions.count, prev ? prev.compactions : 0), h.compactions.auto >= 3)}
   </div>
-  <p class="fine">${h.humanPrompts} human prompts over ${h.sessions} sessions. ${h.droppedAgentShaped} turns that looked human but were written by a loop to its own subagent were dropped; ${h.dedupedRecords} duplicate record${h.dedupedRecords === 1 ? '' : 's'} collapsed. ${h.corrections.count} turn${h.corrections.count === 1 ? '' : 's'} opened like a correction <span class="proxy">proxy</span> — the reasons you typed while refusing a call, in scene 07, are the only corrections here that are not a guess.</p>`);
+  <p class="fine">${S.drivingFine(h.humanPrompts, h.sessions, h.droppedAgentShaped, h.dedupedRecords, h.corrections.count)} <span class="proxy">proxy</span> ${S.drivingFine2}</p>`);
 
-  // ── 03 what kept breaking ───────────────────────────────────────────────
+  // ── 04 what kept breaking ───────────────────────────────────────────────
   const boss = t && t.errorClusters[0];
-  const breaking = !t ? '' : scene(3, 'What kept breaking', boss ? 'The failure that came back most. A failure that repeats is a preflight check nobody wrote.' : 'Nothing failed the same way twice in this window.',
+  const breaking = !t ? '' : scene(4, S.breaking, boss ? S.breakingKicker : S.breakingNone,
     boss ? `<div class="boss">
-      <div class="bl">${pixelIcon('skull', 5, 'var(--red)')}<div class="bv">${pixelText(`${boss.count}`, 8, 'var(--red)')}</div><div class="bt">times, across ${plural(boss.sessions, 'session')} · last on ${esc(String(boss.lastAt).slice(0, 10))}</div></div>
+      <div class="bl">${pixelIcon('skull', 5, 'var(--red)')}<div class="bv">${pixelText(`${boss.count}`, 8, 'var(--red)')}</div><div class="bt">${S.bossSub(sessionsWord(boss.sessions), esc(String(boss.lastAt).slice(0, 10)))}</div></div>
       <blockquote class="quote">${esc(clip(boss.sample, 220))}</blockquote>
-      <p class="fine">Tool: <b>${esc(boss.tool || '?')}</b>. Clustered by the first eight words of the error, so this may be more than one root cause wearing the same message.</p>
+      <p class="fine">${S.bossTool(esc(boss.tool || '?'))}</p>
     </div>
     ${t.errorClusters.length > 1 ? `<ul class="list">${t.errorClusters.slice(1, 5).map((c) => `<li><span class="n">×${c.count}</span> <span class="q">${esc(clip(c.sample, 110))}</span></li>`).join('')}</ul>` : ''}
-    <p class="fine">${withCommas(t.totalCalls)} tool calls in all · ${t.totalErrors} errors${t.staleEdits ? ` · ${t.staleEdits} edit${t.staleEdits === 1 ? '' : 's'} hit a file that had changed since it was read` : ''}${t.apiErrors ? ` · ${t.apiErrors} transport retr${t.apiErrors === 1 ? 'y' : 'ies'}, which are slow rather than failed` : ''}. ${chip(t.totalErrors, prev ? prev.toolErrors : 0)}</p>`
-      : `<p class="fine">${withCommas(t.totalCalls)} tool calls, ${t.totalErrors} errors, none of them repeated. ${chip(t.totalErrors, prev ? prev.toolErrors : 0)}</p>`);
+    <p class="fine">${S.toolsFine(withCommas(t.totalCalls), t.totalErrors)}${t.staleEdits ? ` · ${S.stale(t.staleEdits)}` : ''}${t.apiErrors ? ` · ${S.retries(t.apiErrors)}` : ''}. ${chip(t.totalErrors, prev ? prev.toolErrors : 0)}</p>`
+      : `<p class="fine">${S.toolsNone(withCommas(t.totalCalls), t.totalErrors)} ${chip(t.totalErrors, prev ? prev.toolErrors : 0)}</p>`);
 
-  // ── 04 your top skills ──────────────────────────────────────────────────
-  // A typed /model or /compact is a built-in, not a skill you reached for: only names the Skill tool
-  // invoked, or that are installed as a skill or command, make the ranking.
+  // ── 05 your skills ──────────────────────────────────────────────────────
   const used = sk ? sk.used.filter((u) => (u.viaSkillTool > 0 || u.sources.length > 0) && u.viaSkillTool + u.viaSlash > 0) : [];
+  const adv = sk && sk.advice ? sk.advice : { keep: [], improve: [], uninstall: [], uninstallTotal: 0 };
   const medal = (i) => (i === 0 ? pixelIcon('star', 3, 'var(--gold)') : i === 1 ? pixelIcon('star', 3, 'var(--ink-dim)') : i === 2 ? pixelIcon('star', 3, 'var(--bronze)') : `<span class="rank">${i + 1}</span>`);
-  const topSkills = !sk ? '' : scene(4, 'Your top skills', used.length ? 'What you actually reached for — through the Skill tool or by typing its name.' : 'Nothing was invoked through the Skill tool or by name in this window.',
-    `${used.length ? `<ol class="ranked">${used.slice(0, 5).map((u, i) => `<li>${medal(i)}<span class="name">${esc(u.name)}</span>${blocks(u.viaSkillTool + u.viaSlash, used[0].viaSkillTool + used[0].viaSlash, 'gold')}<span class="cnt">×${u.viaSkillTool + u.viaSlash}</span><span class="where">${esc(u.sources.join(', ') || 'not installed here')}</span></li>`).join('')}</ol>` : ''}
-    ${sk.installedNotUsed.project.length ? `<div class="shelf">
-      <p class="shelf-h">${pixelIcon('box', 2)} <b>${sk.installedNotUsed.project.length} of ${sk.installedNotUsed.projectTotal}</b> project skills never came off the shelf</p>
-      <p class="chips">${sk.installedNotUsed.project.slice(0, 24).map((n) => `<span class="chipname">${esc(n)}</span>`).join('')}</p>
-      <p class="fine">Each SKILL.md costs context on every session whether it is used or not. A skill whose description auto-triggered without the Skill tool leaves no trace here — so this is what the Skill tool saw, not proof a skill is useless.</p>
-    </div>` : ''}
-    ${sk.usedNotInstalled.length ? `<p class="fine">Invoked but with no SKILL.md under this project or your home: ${esc(sk.usedNotInstalled.join(', '))} — a workflow, or a skill the client ships.</p>` : ''}
-    ${prev && prev.comparable ? `<p class="fine">${Object.keys(h.skillCalls).length} distinct skills this window ${chip(Object.keys(h.skillCalls).length, prev.skillsInvoked, { asRate: false, lowerIsBetter: false })}</p>` : ''}`);
+  const reasonText = (r) => ({
+    'followed-by-correction': S.rFollowed, 'never-looped': S.rLooped, 'old-for-its-use': S.rOld, heavy: S.rHeavy,
+    unused: S.uUnused, duplicate: S.uDup, disabled: () => S.uDisabled, stale: S.uStale,
+  }[r.code] || (() => r.code))(r);
+  const topList = used.length ? `<ol class="ranked">${used.slice(0, 6).map((u, i) => `<li>${medal(i)}<span class="name">${esc(u.name)}</span>${blocks(u.viaSkillTool + u.viaSlash, used[0].viaSkillTool + used[0].viaSlash, 'gold')}<span class="cnt">×${u.viaSkillTool + u.viaSlash}</span><span class="where">${esc(u.sources.join(', ') || S.notInstalled)}${u.outcomes && S.outcomes(u.outcomes) ? ` · ${esc(S.outcomes(u.outcomes))}` : ''}</span></li>`).join('')}</ol>` : `<p class="fine">${S.usedNone}</p>`;
+  const improveList = adv.improve.length ? `<ul class="advice">${adv.improve.slice(0, 6).map((x) => `<li>${pixelIcon('wrench', 2, 'var(--amber)')}<div><span class="an">${esc(x.name)} <span class="mute">×${x.uses}</span></span>
+      <ul class="why">${x.reasons.map((r) => `<li>${esc(reasonText(r))}</li>`).join('')}</ul>
+      <span class="how">${x.editable ? S.improveHow(esc(x.name)) : S.improveBundled}</span></div></li>`).join('')}</ul>` : `<p class="fine">${S.improveNone}</p>`;
+  const uninstallList = adv.uninstall.length ? `<ul class="advice">${adv.uninstall.slice(0, 10).map((x) => `<li>${pixelIcon('trash', 2, 'var(--ink-dim)')}<div><span class="an">${esc(x.name)} <span class="mute">${esc(x.sources.join(', '))}</span></span>
+      <ul class="why">${x.reasons.map((r) => `<li>${esc(reasonText(r))}</li>`).join('')}</ul></div></li>`).join('')}</ul>${adv.uninstallTotal > 10 ? `<p class="fine">${S.more(adv.uninstallTotal - 10)}</p>` : ''}` : `<p class="fine">${S.uninstallNone}</p>`;
+  const skillsScene = !sk ? '' : scene(5, S.skills, S.skillsKicker,
+    `<h4 class="sub-h">${S.topUsed}</h4>
+    ${topList}
+    <div class="three">
+      <div class="col keep"><h4 class="sub-h">${pixelIcon('check', 2, 'var(--green)')} ${S.keep}</h4><p class="fine top0">${S.keepSub}</p>
+        ${adv.keep.length ? `<p class="chips">${adv.keep.map((n) => `<span class="chipname on">${esc(n)}</span>`).join('')}</p>` : ''}</div>
+      <div class="col improve"><h4 class="sub-h">${pixelIcon('wrench', 2, 'var(--amber)')} ${S.improve}</h4><p class="fine top0">${S.improveSub}</p>${improveList}</div>
+      <div class="col uninstall"><h4 class="sub-h">${pixelIcon('trash', 2, 'var(--ink-dim)')} ${S.uninstall}</h4><p class="fine top0">${S.uninstallSub(Math.min(10, adv.uninstallTotal), sk.installed)}</p>${uninstallList}</div>
+    </div>
+    <p class="fine">${S.uninstallNot}${sk.usedNotInstalled.length ? ` ${S.usedNotInstalled(esc(sk.usedNotInstalled.join(', ')))}` : ''}${prev && prev.comparable ? ` ${S.distinct(Object.keys(h.skillCalls).length)} ${chip(Object.keys(h.skillCalls).length, prev.skillsInvoked, { asRate: false, lowerIsBetter: false })}` : ''}</p>`);
 
-  // ── 05 report card ──────────────────────────────────────────────────────
+  // ── 06 report card ──────────────────────────────────────────────────────
   const stateIcon = { promoted: pixelIcon('check', 2, 'var(--green)'), pending: pixelIcon('box', 2, 'var(--amber)'), 'n/a': pixelIcon('dash', 2, 'var(--ink-dim)') };
-  const reportCard = scene(5, 'Report card', rv && rv.latest
-    ? `What your last <code>/session-review</code> proposed on ${esc(rv.latest.date || '?')}, ${rv.latest.ageDays} days ago, and where each card is now. Checked means the repo now contains it.`
-    : 'Loop 6 has never run in this repo, so nothing has ever been proposed, promoted or rejected on the record.',
+  const reportCard = scene(6, S.reportCard, rv && rv.latest ? S.rcKicker(esc(rv.latest.date || '?'), rv.latest.ageDays) : S.rcNever,
   rv && rv.latest ? `<div class="rc">
       <div class="rc-score">
         <div class="rv">${pixelText(`${rv.latest.promoted}/${rv.latest.cards.length}`, 6, 'var(--gold)')}</div>
-        <div class="rl">promoted</div>
-        <div class="trail"><span><b>${rv.latest.cards.length}</b> proposed</span><span class="arr">→</span><span><b>${rv.latest.promoted}</b> promoted</span><span class="arr">→</span><span class="pend"><b>${rv.latest.pending}</b> pending</span><span class="arr">→</span><span><b>${rv.latest.cards.length - rv.latest.promoted - rv.latest.pending}</b> n/a</span></div>
+        <div class="rl">${S.promoted}</div>
+        <div class="trail"><span><b>${rv.latest.cards.length}</b> ${S.proposed}</span><span class="arr">→</span><span><b>${rv.latest.promoted}</b> ${S.promoted}</span><span class="arr">→</span><span class="pend"><b>${rv.latest.pending}</b> ${S.pending}</span><span class="arr">→</span><span><b>${rv.latest.cards.length - rv.latest.promoted - rv.latest.pending}</b> n/a</span></div>
       </div>
-      <ul class="checklist">${rv.latest.cards.map((c) => `<li class="${c.state.replace('/', '')}">${stateIcon[c.state] || stateIcon['n/a']}<div><span class="ct">${esc(c.type)}</span><span class="txt">${esc(clip(c.text, 140))}</span><span class="evd">${esc(c.evidence)}</span></div></li>`).join('')}</ul>
+      <ul class="checklist">${rv.latest.cards.map((c) => `<li class="${c.state.replace('/', '')}">${stateIcon[c.state] || stateIcon['n/a']}<div><span class="ct">${esc(typeLabel(c.type))}</span><span class="txt">${esc(clip(c.text, 140))}</span><span class="evd">${esc(c.evidence)}</span></div></li>`).join('')}</ul>
     </div>
-    <p class="fine">${rv.latest.unreadable ? `The report is present but ${esc(rv.latest.unreadable)} — not the same fact as "no review yet".` : 'Promotion is checked by grepping this repo\'s contract and skills for what each card quoted. A DISPATCH or HABIT card leaves nothing on disk to grep, so it reads n/a rather than pending.'} Next lesson: <code>/session-review</code> — it now starts from the cards in this report.</p>`
-    : `<p class="fine">Run <code>/session-review</code> once. From then on this scene shows what it proposed and whether you kept it.</p>`);
+    <p class="fine">${rv.latest.unreadable ? S.rcUnreadable(esc(rv.latest.unreadable)) : S.rcHow} ${S.nextLesson} <code>/session-review</code> ${S.rcStarts}</p>`
+    : `<p class="fine">${S.rcRun}</p>`);
 
-  // ── 06 the rest of the cards ────────────────────────────────────────────
-  const rest = cards.slice(1);
-  const moreCards = rest.length ? scene(6, 'The rest of the cards', `${rest.length} more, in order. Open one for its evidence and its limits. None of them edits anything — you promote.`,
+  // ── 07 the rest of the cards ────────────────────────────────────────────
+  const rest = stageCards.slice(1);
+  const moreCards = rest.length ? scene(7, S.rest, S.restKicker(rest.length),
     `<div class="crows">${rest.map(cardRow).join('')}</div>
-    <p class="fine">${d.rulesSilent.length} rule${d.rulesSilent.length === 1 ? '' : 's'} checked and quiet: ${esc(d.rulesSilent.join(', '))}. A rule with no evidence prints nothing — padding a report to fill the grid is how an instrument becomes a horoscope.</p>`) : '';
+    <p class="fine">${S.silent(d.rulesSilent.length, esc(d.rulesSilent.join(', ')))}</p>`) : '';
 
-  // ── 07 guards & refusals ────────────────────────────────────────────────
+  // ── 08 guards & refusals ────────────────────────────────────────────────
   const fires = g && g.pluginGuards ? g.pluginGuards.reduce((n, x) => n + x.fires, 0) : 0;
-  const guards = !g ? '' : scene(7, 'Guards, and the calls you refused', 'What blocked a call by rule, and what you blocked by hand — with the reason you typed.',
+  const guards = !g ? '' : scene(8, S.guards, S.guardsKicker,
     `<div class="two">
       <div>
-        <p class="gh">${pixelIcon('shield', 3, fires ? 'var(--amber)' : 'var(--green)')} <b>${g.pluginGuards ? g.pluginGuards.length : 0}</b> guards installed · <b>${fires}</b> fire${fires === 1 ? '' : 's'} in ${plural(h ? h.sessions : 0, 'session')}</p>
-        ${g.pluginGuards ? `<ul class="list plain">${g.pluginGuards.map((x) => `<li><span class="n">${x.fires}</span> ${esc(x.name)}${x.advisory ? ' <span class="mute">(advisory)</span>' : ''}</li>`).join('')}</ul>` : '<p class="fine">hooks.json is not readable from here, so no guard list is shown — an empty list would read as "none installed".</p>'}
-        <p class="fine">A fire is a result beginning <code>harness-audit &lt;guard&gt;: blocked</code>. Zero fires does not mean nothing dangerous happened; the guards are conservative by design.${g.otherHooks.length ? ` Other hooks ran ${g.otherHooks.reduce((n, x) => n + x.runs, 0)} times: ${esc(g.otherHooks.slice(0, 3).map((x) => `${x.command} ×${x.runs}`).join(', '))}.` : ''}</p>
+        <p class="gh">${pixelIcon('shield', 3, fires ? 'var(--amber)' : 'var(--green)')} ${S.gInstalled(g.pluginGuards ? g.pluginGuards.length : 0, fires, sessionsWord(h ? h.sessions : 0))}</p>
+        ${g.pluginGuards ? `<ul class="list plain">${g.pluginGuards.map((x) => `<li><span class="n">${x.fires}</span> ${esc(x.name)}${x.advisory ? ` <span class="mute">${S.advisory}</span>` : ''}</li>`).join('')}</ul>` : `<p class="fine">${S.gNoList}</p>`}
+        <p class="fine">${S.gFine}${g.otherHooks.length ? S.gOther(g.otherHooks.reduce((n, x) => n + x.runs, 0), esc(g.otherHooks.slice(0, 3).map((x) => `${x.command} ×${x.runs}`).join(', '))) : ''}</p>
       </div>
       <div>
-        <p class="gh">${pixelIcon('flag', 3, 'var(--gold)')} <b>${t ? t.denials.count : 0}</b> call${t && t.denials.count === 1 ? '' : 's'} you refused${t && t.denials.reasons.length ? `, <b>${t.denials.reasons.length}</b> with a reason` : ''} ${chip(t ? t.denials.count : 0, prev ? prev.denials : 0)}</p>
+        <p class="gh">${pixelIcon('flag', 3, 'var(--gold)')} ${S.refused(t ? t.denials.count : 0, t ? t.denials.reasons.length : 0)} ${chip(t ? t.denials.count : 0, prev ? prev.denials : 0)}</p>
         ${t && t.denials.reasons.length ? `<ul class="list quotes">${t.denials.reasons.slice(0, 5).map((r) => `<li><span class="q">«${esc(clip(r.reason, 140))}»</span><span class="mute"> — ${esc(r.tool || 'tool')}</span></li>`).join('')}</ul>
-        <p class="fine">These are the only corrections in this report that are not a proxy: you typed them. Each one is a candidate line for AGENTS.md, and you are the one who promotes it.</p>` : '<p class="fine">No refusal carried a typed reason this window.</p>'}
+        <p class="fine">${S.refusedFine}</p>` : `<p class="fine">${S.refusedNone}</p>`}
       </div>
     </div>`);
 
-  // ── 08 the ledger (the old report, folded) ──────────────────────────────
+  // ── 09 the ledger (the old report, folded) ──────────────────────────────
   const agentRows = d.agents.map((a) => `<tr>
       <td class="k">${esc(a.agentType)}<span class="mute"> · ${esc(a.model)}</span></td>
       <td>${a.runs}</td><td>${human(a.in)}</td><td>${human(a.out)}</td>
@@ -2315,34 +2746,33 @@ function renderHtml(d) {
       <td class="k mute">«${esc(x.sample.replace(/\s+/g, ' ').slice(0, 90))}»</td></tr>`).join('');
   const table = (head, body) => (body ? `<div class="scroll"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>` : '');
   const savingsText = sv ? `<p class="fine">${!sv.predictions
-    ? 'No process-log.md — /iterate has never run in this repo.'
+    ? S.lNoPred
     : sv.predictions.unreadable
-      ? `process-log.md is present but its ledger is unreadable (${esc(String(sv.predictions.unreadable))}) — <b>no prediction counted</b>, and that is not the same as none falsified.`
-      : `Optimizer predictions: <b>${sv.predictions.verified} verified · ${sv.predictions.falsified} falsified · ${sv.predictions.pending} pending · ${sv.predictions.unknown} unreadable</b>.`}
-    ${sv.roundsToGreen ? ` Rounds-to-green ${sv.roundsToGreen.trend.join(' · ')} — a proxy, explicitly not a saving.` : ' No approved develop-phase run in scope.'}
-    Nothing here is a multiplier; an unmeasured quantity is printed n/a with its reason.</p>` : '<p class="fine">No counterfactual in scope — pass --repo to read loop-runs and process-log.md.</p>';
+      ? S.lPredUnread(esc(String(sv.predictions.unreadable)))
+      : S.lPred(sv.predictions.verified, sv.predictions.falsified, sv.predictions.pending, sv.predictions.unknown)}
+    ${sv.roundsToGreen ? S.lGreen(sv.roundsToGreen.trend.join(' · ')) : S.lNoGreen}${S.lNoMult}</p>` : `<p class="fine">${S.lNoRepo}</p>`;
 
-  const ledger = `<details class="ledger" id="s8">
-    <summary><span class="num">${pixelText('08', 3)}</span><h2>The ledger</h2><p class="kicker">Tokens, cost, workflows, savings — the accounting that used to be the whole report. Open it when you need a number.</p></summary>
+  const ledger = `<details class="ledger" id="s9">
+    <summary><span class="num">${pixelText('09', 3)}</span><h2>${S.ledger}</h2><p class="kicker">${S.ledgerKicker}</p></summary>
     <div class="lbody">
-      <h4>Tokens by agent × model</h4>
+      <h4>${S.lAgents}</h4>
       ${table('<th class="k">agent</th><th>runs</th><th>in</th><th>out</th><th>cache-r</th><th>cache-w</th><th>est.$</th>', `${agentRows}<tr class="total"><td class="k">TOTAL</td><td>${d.totals.runs}</td><td>${human(d.totals.in)}</td><td>${human(d.totals.out)}</td><td>${human(d.totals.cacheRead)}</td><td>${human(d.totals.cacheWrite)}</td><td>${d.totals.costUsd.toFixed(2)}</td></tr>`)}
-      ${d.unpricedModels.length ? `<p class="fine">est.$ excludes unpriced models: ${esc(d.unpricedModels.join(', '))} — a floor, not a total.</p>` : ''}
-      ${d.introPricedModels.length ? `<p class="fine">priced at introductory rate: ${esc(d.introPricedModels.join(', '))}</p>` : ''}
-      ${lineupRows ? `<h4>Model line-up — configured vs. observed</h4>${table('<th class="k">role</th><th class="k">configured</th><th class="k">observed</th><th>runs</th>', lineupRows)}<p class="fine">⚠ = drift: the role ran on a different model family than model-lineup.json configures.</p>` : ''}
-      <h4>Tokens per day</h4>
+      ${d.unpricedModels.length ? `<p class="fine">${S.lUnpriced(esc(d.unpricedModels.join(', ')))}</p>` : ''}
+      ${d.introPricedModels.length ? `<p class="fine">${S.lIntro(esc(d.introPricedModels.join(', ')))}</p>` : ''}
+      ${lineupRows ? `<h4>${S.lLineup}</h4>${table('<th class="k">role</th><th class="k">configured</th><th class="k">observed</th><th>runs</th>', lineupRows)}<p class="fine">${S.lDrift}</p>` : ''}
+      <h4>${S.lDays}</h4>
       <div class="tchart">${bars}</div>
-      ${wfRows ? `<h4>Workflow activations</h4>${table('<th class="k">run</th><th class="k">workflow</th><th class="k">started</th><th>duration</th><th>rounds</th><th>tokens</th><th class="k">verdict</th>', wfRows)}` : ''}
-      ${loopRows ? `<h4>Loop runs (findings JSON)</h4>${table('<th class="k">date</th><th class="k">loop</th><th>rounds</th><th class="k">verdict</th><th class="k">stopped by</th>', loopRows)}` : ''}
-      <h4>Savings — measured counterfactuals only</h4>
-      ${abRows ? table('<th class="k">A/B run</th><th>rounds</th><th>Δ score</th><th>Δ tokens</th><th class="k">note</th>', abRows) : '<p class="fine">No two-armed run in scope — /skill-loop is the only loop that produces one.</p>'}
+      ${wfRows ? `<h4>${S.lWorkflows}</h4>${table('<th class="k">run</th><th class="k">workflow</th><th class="k">started</th><th>duration</th><th>rounds</th><th>tokens</th><th class="k">verdict</th>', wfRows)}` : ''}
+      ${loopRows ? `<h4>${S.lLoops}</h4>${table('<th class="k">date</th><th class="k">loop</th><th>rounds</th><th class="k">verdict</th><th class="k">stopped by</th>', loopRows)}` : ''}
+      <h4>${S.lSavings}</h4>
+      ${abRows ? table('<th class="k">A/B run</th><th>rounds</th><th>Δ score</th><th>Δ tokens</th><th class="k">note</th>', abRows) : `<p class="fine">${S.lNoAb}</p>`}
       ${savingsText}
-      ${predRows ? `<h4>Optimizer predictions</h4>${table('<th class="k">v</th><th class="k">date</th><th class="k">change</th><th class="k">prediction</th><th class="k">outcome</th>', predRows)}` : ''}
-      ${learnRows ? `<h4>Learnings</h4>${table('<th class="k">date</th><th class="k">skill</th><th class="k">entry</th>', learnRows)}` : ''}
-      <h4>Prompts</h4>
-      <p class="fine">${d.prompts.total} user turns · ${d.prompts.avgWords.toFixed(1)} words avg · ${d.prompts.sessionsPerDay.toFixed(1)} sessions/day · ${Math.round(d.prompts.followUpRate * 100)}% follow-ups <span class="proxy">proxy</span>. These are turns, not keystrokes: a loop that re-prompts its session writes one too.</p>
-      ${table('<th class="k">×</th><th class="k">recurring prompt</th>', topRows)}
-      ${t ? `<h4>Every tool</h4>${table('<th class="k">tool</th><th>calls</th><th>errors</th>', t.byName.map((r) => `<tr><td class="k">${esc(r.name)}</td><td>${r.calls}</td><td class="${r.errors ? '' : 'mute'}">${r.errors || '—'}</td></tr>`).join(''))}` : ''}
+      ${predRows ? `<h4>${S.lPredictions}</h4>${table('<th class="k">v</th><th class="k">date</th><th class="k">change</th><th class="k">prediction</th><th class="k">outcome</th>', predRows)}` : ''}
+      ${learnRows ? `<h4>${S.lLearnings}</h4>${table('<th class="k">date</th><th class="k">skill</th><th class="k">entry</th>', learnRows)}` : ''}
+      <h4>${S.lPrompts}</h4>
+      <p class="fine">${S.lPromptsFine(d.prompts.total, d.prompts.avgWords.toFixed(1), d.prompts.sessionsPerDay.toFixed(1), `${Math.round(d.prompts.followUpRate * 100)}%`)} <span class="proxy">proxy</span>${S.lTurns}</p>
+      ${table('<th class="k">×</th><th class="k">prompt</th>', topRows)}
+      ${t ? `<h4>${S.lEvery}</h4>${table('<th class="k">tool</th><th>calls</th><th>errors</th>', t.byName.map((r) => `<tr><td class="k">${esc(r.name)}</td><td>${r.calls}</td><td class="${r.errors ? '' : 'mute'}">${r.errors || '—'}</td></tr>`).join(''))}` : ''}
     </div>
   </details>`;
 
@@ -2366,11 +2796,11 @@ function renderHtml(d) {
   b { font-weight:600; color:var(--ink); }
   p { margin:0; max-width:64ch; }
   .fine { color:var(--ink-dim); font-size:.9rem; margin-top:1rem; max-width:70ch; }
+  .fine.top0 { margin-top:.2rem; margin-bottom:.6rem; }
   .mute { color:var(--mute); }
   .px, .ico { display:inline-block; vertical-align:middle; image-rendering:pixelated; }
   .px { filter:drop-shadow(0 0 6px rgba(61,255,122,.35)); }
 
-  /* cover */
   .cover { border:3px solid var(--line2); background:var(--panel); padding:2rem 2rem 1.75rem; box-shadow:8px 8px 0 #000; }
   .eyebrow { font-family:var(--mono); font-size:.72rem; letter-spacing:.22em; text-transform:uppercase; color:var(--green-deep); }
   h1 { margin:.5rem 0 .75rem; display:flex; flex-direction:column; gap:.4rem; font-weight:600; }
@@ -2382,15 +2812,16 @@ function renderHtml(d) {
   .hero .hv { color:var(--green); margin-bottom:.4rem; }
   .hero .hl { font-size:.85rem; color:var(--ink-dim); text-transform:uppercase; letter-spacing:.1em; font-family:var(--mono); }
 
-  /* scenes */
   .scene { border:2px solid var(--line); background:var(--panel); padding:1.5rem 1.75rem 1.75rem; box-shadow:6px 6px 0 #000; }
-  .scene.stage { border-color:var(--gold); box-shadow:6px 6px 0 #000, 0 0 0 4px rgba(255,210,63,.08); }
+  .scene.stage { border-color:var(--amber); box-shadow:6px 6px 0 #000, 0 0 0 4px rgba(245,197,66,.08); }
+  .scene.gold { border-color:var(--gold); box-shadow:6px 6px 0 #000, 0 0 0 4px rgba(255,210,63,.08); }
   .sh { display:grid; grid-template-columns:auto 1fr; gap:.25rem 1rem; align-items:center; margin-bottom:1.25rem; }
   .sh .num { color:var(--green-deep); grid-row:1 / span 2; align-self:start; margin-top:.3rem; }
   h2 { margin:0; font-size:1.45rem; font-weight:650; letter-spacing:-.01em; text-wrap:balance; line-height:1.2; }
   .kicker { color:var(--ink-dim); font-size:.95rem; max-width:64ch; }
+  .sub-h { margin:1.25rem 0 .5rem; font-family:var(--mono); font-size:.72rem; letter-spacing:.2em; text-transform:uppercase; color:var(--ink-dim); font-weight:500; display:flex; align-items:center; gap:.4rem; }
+  .sub-h:first-child { margin-top:0; }
 
-  /* cards */
   .card { border:2px solid var(--line2); background:var(--panel2); padding:1.25rem 1.4rem 2rem; position:relative; display:flex; flex-direction:column; gap:.7rem; }
   .card.warn { border-color:var(--amber); }
   .card .top { display:flex; align-items:center; gap:.6rem; flex-wrap:wrap; }
@@ -2415,7 +2846,16 @@ function renderHtml(d) {
   .crow .ev { font-family:var(--mono); font-size:.84rem; color:var(--ink-dim); border-left:4px solid var(--line2); padding-left:.8rem; max-width:none; word-break:break-word; }
   .crow .not { color:var(--ink-dim); font-size:.9rem; }
 
-  /* tiles */
+  .receipt { display:flex; flex-direction:column; gap:1rem; }
+  .rhead { display:flex; align-items:center; gap:1rem; flex-wrap:wrap; }
+  .rhead .rt { color:var(--ink-dim); font-size:1.05rem; }
+  .rlist { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:.5rem; }
+  .rlist li { display:flex; gap:.7rem; align-items:flex-start; border:2px solid var(--line); background:var(--panel2); padding:.65rem .9rem; }
+  .rlist li > svg { margin-top:.25rem; flex:none; }
+  .rlist div { display:flex; flex-direction:column; gap:.15rem; }
+  .rlist .rl { font-weight:500; }
+  .rlist .rd { font-family:var(--mono); font-size:.78rem; color:var(--mute); word-break:break-word; }
+
   .tiles { display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:.9rem; }
   .tile { border:2px solid var(--line); background:var(--panel2); padding:.9rem 1rem 1rem; display:flex; flex-direction:column; gap:.4rem; }
   .tile.hot { border-color:var(--amber); }
@@ -2426,7 +2866,6 @@ function renderHtml(d) {
   .chip.good { color:var(--green); } .chip.bad { color:var(--amber); } .chip.mute { color:var(--mute); border-style:dashed; }
   .proxy { font-family:var(--mono); font-size:.62rem; color:var(--amber); border:1px dashed var(--amber); padding:0 .35rem; letter-spacing:.1em; vertical-align:middle; }
 
-  /* boss */
   .boss { display:flex; flex-direction:column; gap:1rem; }
   .boss .bl { display:flex; align-items:center; gap:1rem; flex-wrap:wrap; }
   .boss .bt { color:var(--ink-dim); }
@@ -2439,9 +2878,8 @@ function renderHtml(d) {
   .list.quotes li { display:block; }
   .list.quotes .q { color:var(--ink); font-family:var(--sans); font-size:.98rem; }
 
-  /* ranked + shelf */
-  .ranked { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:.55rem; counter-reset:r; }
-  .ranked li { display:grid; grid-template-columns:2rem 1fr minmax(120px,220px) 3rem; gap:.8rem; align-items:center; border:2px solid var(--line); background:var(--panel2); padding:.6rem .9rem; }
+  .ranked { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:.55rem; }
+  .ranked li { display:grid; grid-template-columns:2rem 1fr minmax(120px,220px) 3rem; gap:.5rem .8rem; align-items:center; border:2px solid var(--line); background:var(--panel2); padding:.6rem .9rem; }
   .ranked .rank { font-family:var(--mono); color:var(--mute); text-align:center; }
   .ranked .name { font-weight:600; }
   .ranked .cnt { font-family:var(--mono); color:var(--gold); text-align:right; }
@@ -2450,12 +2888,21 @@ function renderHtml(d) {
   .bar i { flex:1; background:var(--line); min-width:4px; }
   .bar i.on { background:var(--green); }
   .bar.gold i.on { background:var(--gold); }
-  .shelf { margin-top:1.25rem; border:2px dashed var(--line2); padding:1rem 1.1rem; }
-  .shelf-h { display:flex; align-items:center; gap:.5rem; }
-  .chips { display:flex; flex-wrap:wrap; gap:.35rem; margin-top:.6rem; max-width:none; }
+  .three { display:grid; grid-template-columns:1fr 1.3fr 1.3fr; gap:1rem; margin-top:1.25rem; align-items:start; }
+  @media (max-width:820px) { .three { grid-template-columns:1fr; } }
+  .col { border:2px solid var(--line); background:var(--panel2); padding:.9rem 1rem 1rem; }
+  .col.keep { border-color:var(--green-deep); } .col.improve { border-color:var(--amber-dim, #8a6d1c); }
+  .advice { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:.6rem; }
+  .advice > li { display:flex; gap:.6rem; align-items:flex-start; }
+  .advice > li > svg { flex:none; margin-top:.3rem; }
+  .advice > li > div { display:flex; flex-direction:column; gap:.2rem; min-width:0; }
+  .advice .an { font-weight:600; word-break:break-word; }
+  .advice .why { margin:0; padding-left:1rem; font-size:.84rem; color:var(--ink-dim); }
+  .advice .how { font-size:.84rem; color:var(--ink); }
+  .chips { display:flex; flex-wrap:wrap; gap:.35rem; margin-top:.4rem; max-width:none; }
   .chipname { border:1px solid var(--line2); padding:.05rem .5rem; font-family:var(--mono); font-size:.74rem; color:var(--ink-dim); }
+  .chipname.on { color:var(--green); border-color:var(--green-deep); }
 
-  /* report card */
   .rc { display:grid; grid-template-columns:minmax(200px,1fr) 2fr; gap:1.25rem; align-items:start; }
   @media (max-width:760px) { .rc { grid-template-columns:1fr; } }
   .rc-score { border:2px solid var(--line2); background:var(--panel2); padding:1rem 1.1rem; }
@@ -2474,12 +2921,10 @@ function renderHtml(d) {
   .checklist .txt { font-size:.95rem; }
   .checklist .evd { font-family:var(--mono); font-size:.76rem; color:var(--mute); }
 
-  /* guards */
   .two { display:grid; grid-template-columns:1fr 1fr; gap:1.5rem; align-items:start; }
   @media (max-width:760px) { .two { grid-template-columns:1fr; } }
   .gh { display:flex; align-items:center; gap:.5rem; flex-wrap:wrap; }
 
-  /* ledger */
   .ledger { border:2px solid var(--line); background:var(--panel); box-shadow:6px 6px 0 #000; }
   .ledger summary { list-style:none; cursor:pointer; padding:1.5rem 1.75rem; display:grid; grid-template-columns:auto 1fr; gap:.25rem 1rem; align-items:center; }
   .ledger summary::-webkit-details-marker { display:none; }
@@ -2503,18 +2948,19 @@ function renderHtml(d) {
   @media (prefers-reduced-motion: no-preference) { .crow, .tile, .card { transition:border-color .15s; } }
   @media (max-width:560px) { .scene, .cover { padding:1.1rem 1rem 1.25rem; } .ranked li { grid-template-columns:2rem 1fr 3rem; } .ranked .bar { display:none; } }
 </style>
-<main>
+<main lang="${lang}">
   ${cover}
   ${oneThing}
+  ${caughtScene}
   ${driving}
   ${breaking}
-  ${topSkills}
+  ${skillsScene}
   ${reportCard}
   ${moreCards}
   ${guards}
   ${ledger}
 </main>
-<footer>v2.7 · every figure is measured from local transcripts and the repo's own loop records. Cards are rule-based recommendations: each prints its evidence, the field it came from and what it does not prove, and a rule that finds no evidence prints nothing. est.$ is list price × measured tokens, never a multiplier. A comparison is shown only where the window before was busy enough to anchor one. Nothing here edits anything — you promote.${d.warnings ? ` ${d.warnings} transcript line(s) could not be read.` : ''}</footer>`;
+<footer>v2.7 · ${S.footer}${d.warnings ? S.unreadableLines(d.warnings) : ''}</footer>`;
 }
 
 // The cross-project view shares the CRT shell but not the report: no cards, because a card belongs to
@@ -2608,7 +3054,7 @@ function main() {
   if (args.html) {
     const out = resolveHtmlPath(args);
     try {
-      fs.writeFileSync(out, data.mode === 'all' ? renderAllHtml(data) : renderHtml(data));
+      fs.writeFileSync(out, data.mode === 'all' ? renderAllHtml(data) : renderHtml(data, args.lang));
       process.stderr.write(`loop-stats: wrote ${out}\n`);
     }
     catch (e) { process.stderr.write(`loop-stats: cannot write ${out}: ${e.code}\n`); process.exit(1); }
