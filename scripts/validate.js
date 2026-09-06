@@ -552,6 +552,88 @@ check('loop-stats round-trips its aggregate through --json-out / --from-json', (
   return '--json-out → --from-json renders without touching transcripts';
 });
 
+// The signals fixture pins every transcript shape the operator blocks read. It exists because those
+// shapes are internal and undocumented: a Claude Code release that renames `compactMetadata` or
+// stops writing hook attachments must break CI here rather than quietly zero a column.
+//
+// Two of its records exist only to be NOT counted, which is the half of the fixture that matters:
+// a prompt that merely mentions destructive-guard by name (a mention is not a fire — this repo
+// discusses its own guards in the very sessions it measures), and a `Round 1.` turn a loop wrote to
+// its own subagent (byte-identical to a keystroke; only its shape gives it away).
+//
+// Negative controls (2026-09-06, each applied by hand, observed, reverted — all exit 1):
+//   GUARD_FIRE unanchored (/harness-audit .../ without ^) ... destructive-guard fires = 1, expected 0
+//   is_error requirement dropped from the guard matcher .... destructive-guard fires = 1, expected 0
+//   looksAgentAuthored disabled ............................ droppedAgentShaped = 0, expected 1
+//   dedup window 60s → 0s .................................. dedupedRecords = 0, expected 1
+//   Task-only spawn lookup (the pre-P0 code) ............... reviewer row absent — agent lands as "subagent"
+//   hook attachments keyed per record instead of per toolUseID  otherHooks[0].runs = 3, expected 2
+check('loop-stats mines tools, guards and hygiene from the signals fixture', () => {
+  const script = path.join(ROOT, 'scripts/loop-stats.js');
+  const raw = execFileSync('node', [script, '--root', path.join(ROOT, 'scripts/fixtures/telemetry'),
+    '--project', 'demo-signals', '--json'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  const d = JSON.parse(raw);
+  if (d.warnings !== 0) throw new Error(`${d.warnings} line(s) became unreadable`);
+
+  // tools: five Bash calls, four of which failed — three the same way, one blocked by a guard.
+  const bash = d.tools.byName.find((r) => r.name === 'Bash');
+  if (!bash || bash.calls !== 5 || bash.errors !== 4) throw new Error(`Bash = ${JSON.stringify(bash)}, expected 5 calls / 4 errors`);
+  if (d.tools.totalCalls !== 9) throw new Error(`totalCalls = ${d.tools.totalCalls}, expected 9`);
+  if (d.tools.errorClusters.length !== 1) throw new Error(`errorClusters = ${d.tools.errorClusters.length}, expected 1`);
+  const [cluster] = d.tools.errorClusters;
+  if (cluster.count !== 3 || cluster.tool !== 'Bash') throw new Error(`cluster = ${cluster.count}×${cluster.tool}, expected 3×Bash`);
+  // A blocked call and a refused call are the guard and the human, never a crash to cluster.
+  if (/no-verify|doesn't want to proceed/.test(cluster.sample)) throw new Error('a guard fire or a denial leaked into the crash clusters');
+
+  if (d.tools.denials.count !== 1) throw new Error(`denials = ${d.tools.denials.count}, expected 1`);
+  if (d.tools.denials.reasons[0].reason !== 'use the helper, do not inline it') {
+    throw new Error(`denial reason = ${JSON.stringify(d.tools.denials.reasons[0].reason)}`);
+  }
+  if (d.tools.denials.reasons[0].tool !== 'Edit') throw new Error('the denial must name the tool it refused');
+  if (d.tools.subagents.byType.reviewer !== 1) throw new Error('Agent spawn lost — subagent_type never reached the count');
+  if (d.tools.planMode.exitPlanMode !== 1 || d.tools.planMode.sessionsWithPlanMode !== 1) throw new Error('plan mode not detected');
+  if (d.tools.apiErrors !== 1) throw new Error(`apiErrors = ${d.tools.apiErrors}, expected 1`);
+
+  // The Agent spawn also has to name the row its tokens land in.
+  if (!d.agents.some((a) => a.agentType === 'reviewer')) throw new Error('Agent-spawned subagent lost its role — check the Task|Agent join');
+
+  // guards: one real fire, and one guard named in prose that must stay at zero.
+  const guards = Object.fromEntries(d.guards.pluginGuards.map((g) => [g.name, g.fires]));
+  if (guards['block-no-verify'] !== 1) throw new Error(`block-no-verify fires = ${guards['block-no-verify']}, expected 1`);
+  if (guards['destructive-guard'] !== 0) throw new Error('a guard named in a prompt was counted as a fire');
+  if (d.guards.otherHooks.length !== 1) throw new Error(`otherHooks = ${d.guards.otherHooks.length}, expected 1 (two attachments, one hook)`);
+  if (d.guards.otherHooks[0].runs !== 2 || d.guards.otherHooks[0].nonZeroExit !== 1) {
+    throw new Error(`hook runs/nonZero = ${d.guards.otherHooks[0].runs}/${d.guards.otherHooks[0].nonZeroExit}, expected 2/1`);
+  }
+
+  // hygiene: 10 user turns, minus one agent-shaped and one duplicate, is 8 events.
+  const h = d.hygiene;
+  if (d.prompts.total !== 10) throw new Error(`prompts.total = ${d.prompts.total}, expected 10`);
+  if (h.humanPrompts !== 8) throw new Error(`humanPrompts = ${h.humanPrompts}, expected 8`);
+  if (h.droppedAgentShaped !== 1) throw new Error(`droppedAgentShaped = ${h.droppedAgentShaped}, expected 1`);
+  if (h.dedupedRecords !== 1) throw new Error(`dedupedRecords = ${h.dedupedRecords}, expected 1`);
+  if (h.continuations.count !== 3 || h.continuations.afterAgentTurn !== 3) {
+    throw new Error(`continuations = ${h.continuations.count}/${h.continuations.afterAgentTurn}, expected 3/3`);
+  }
+  if (h.corrections.count !== 1 || h.corrections.proxy !== true) throw new Error('the correction count must be 1 and must carry proxy: true');
+  if (h.interrupts !== 1) throw new Error(`interrupts = ${h.interrupts}, expected 1`);
+  if (h.compactions.count !== 1 || h.compactions.auto !== 1 || h.compactions.avgPreTokens !== 500000) {
+    throw new Error(`compactions = ${JSON.stringify(h.compactions)}`);
+  }
+  if (h.modelSwitches.count !== 2 || h.modelSwitches.targets['opus[1m]'] !== 2) throw new Error('model switches lost — the wrapper tags arrive in either order');
+  if (h.slashCommands['/grilling'] !== 1) throw new Error('a skill-backed slash command must be counted even when <command-message> comes first');
+  if (h.skillCalls.grilling !== 1) throw new Error('Skill tool invocation lost');
+
+  // The clean fixture must stay clean: new parsers may not invent signals where there are none.
+  const old = JSON.parse(execFileSync('node', [script, '--root', path.join(ROOT, 'scripts/fixtures/telemetry'),
+    '--project', 'demo', '--json'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }));
+  if (old.prompts.total !== 3) throw new Error(`the signal parsers moved prompts.total to ${old.prompts.total}`);
+  if (old.hygiene.continuations.count !== 0 || old.hygiene.interrupts !== 0) throw new Error('hygiene invented a signal on the clean fixture');
+  if (old.guards.pluginGuards.some((g) => g.fires)) throw new Error('a guard fired on a fixture with no blocked call');
+
+  return `${d.tools.totalCalls} calls · 1 cluster ×3 · 1 denial · 1 guard fire · ${h.humanPrompts} human prompts`;
+});
+
 // D25a — the HARD guardrail is the one piece of F11 that must never have a confirmable escape
 // hatch: a lineup that puts the reviewer in the implementer's model family has to be rejected by
 // construction, not by a prompt someone can click through. So each fixture below pins an id shape
