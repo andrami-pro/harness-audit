@@ -472,6 +472,7 @@ nothing, costs zero tokens, edits nothing, and never leaves your machine.
 ```bash
 /dashboard-harness                       # inside Claude Code — this project, last 30 days
 /dashboard-harness --since 7d --open     # …and open the HTML report in a browser
+/dashboard-harness --lang es             # the report's own words in es or fr; quotes stay verbatim
 bin/loop-stats --project ~/code/my-app --since 30d --html   # or from any shell
 ```
 
@@ -499,6 +500,7 @@ node scripts/loop-stats.js --since 7d             # window the report to the las
 node scripts/loop-stats.js --top 20               # how many recurring prompts to surface (default 3)
 node scripts/loop-stats.js --html [out] --open    # CRT report; no path = ~/.cache/harness-audit/
 node scripts/loop-stats.js --all                  # every project on this machine, cost and cards
+node scripts/loop-stats.js --lang en|es|fr        # report language (default: the shell's LANG)
 node scripts/loop-stats.js --json [--brief]       # the aggregate; --brief drops the accounting
 ```
 
