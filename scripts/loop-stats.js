@@ -593,6 +593,217 @@ function parseRepo(repo) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// CARDS — rule-based recommendations, zero tokens
+// ─────────────────────────────────────────────────────────────────────────────
+
+// A card is a recommendation with its evidence and its limits attached. Three properties are not
+// negotiable, and they are what separate this from a horoscope:
+//
+//   1. A rule that finds no evidence prints NOTHING. There is no "all clear" card, no filler to make
+//      the grid look full. The count of rules that stayed silent is printed instead.
+//   2. Every card carries `doesNotProve`. A number that is a proxy says so next to itself.
+//   3. No card edits anything. /session-review proposes and never applies; so does this.
+//
+// Thresholds are deliberately blunt (5 events, 3 sessions, 70%). A tuned threshold is a threshold
+// nobody can argue with, and these are meant to be argued with.
+const RULES = [
+  {
+    id: 'continue-token',
+    type: 'HABIT',
+    severity: 'warn',
+    when: (d) => d.hygiene.continuations.count >= 5
+      && d.hygiene.continuations.afterAgentTurn / d.hygiene.continuations.count >= 0.8,
+    headline: (d) => `${d.hygiene.continuations.count} bare continuation turns — ${d.hygiene.continuations.afterAgentTurn} of them right after the agent ended its turn`,
+    evidence: (d) => `${pctOf(d.hygiene.continuations.count, d.hygiene.humanPrompts)} of human prompts in the window`,
+    recommendation: 'The agent stops before the unit of work ends. Candidate AGENTS.md rule: finish the unit, or say what is missing before stopping.',
+    doesNotProve: 'that the agent was wrong to stop — a human pacing the work produces the same shape',
+    source: 'hygiene.continuations',
+  },
+  {
+    id: 'manual-model-switch',
+    type: 'DISPATCH',
+    severity: 'warn',
+    when: (d) => d.hygiene.modelSwitches.count >= 5,
+    headline: (d) => `/model typed ${d.hygiene.modelSwitches.count} times in this window`,
+    evidence: (d) => Object.entries(d.hygiene.modelSwitches.targets).map(([k, v]) => `${k} ×${v}`).join(' · ') || 'no target recorded',
+    recommendation: 'A switch made by hand every session is a configuration nobody wrote down: settings.model for the main thread, `model:` in an agent file, or .agents/model-lineup.json for the roles.',
+    doesNotProve: 'that any of those targets is the better model — nothing here compares them',
+    source: 'hygiene.modelSwitches',
+  },
+  {
+    id: 'skill-shelfware',
+    type: 'SKILL CANDIDATE',
+    severity: 'warn',
+    when: (d) => d.skills && d.skills.installedNotUsed.project.length >= 5 && d.skills.shelfRatio.project >= 0.6,
+    headline: (d) => `${d.skills.installedNotUsed.project.length} of the project's ${Math.round(d.skills.installedNotUsed.project.length / d.skills.shelfRatio.project)} installed skills were never invoked here`,
+    evidence: (d) => d.skills.installedNotUsed.project.slice(0, 12).join(', '),
+    recommendation: 'Prune them, or name the invocation in AGENTS.md so the use becomes observable.',
+    doesNotProve: 'that a skill is useless — a description that auto-triggered without the Skill tool leaves no trace in the transcript',
+    source: 'skills.installedNotUsed',
+  },
+  {
+    id: 'skill-used-not-installed',
+    type: 'SKILL CANDIDATE',
+    severity: 'info',
+    when: (d) => d.skills && d.skills.usedNotInstalled.length > 0,
+    headline: (d) => `${d.skills.usedNotInstalled.length} name(s) were invoked that no SKILL.md or command file backs`,
+    evidence: (d) => d.skills.usedNotInstalled.join(', '),
+    recommendation: 'Check whether each is a workflow (which is fine) or a skill that was removed while the habit of calling it stayed.',
+    doesNotProve: 'that anything is broken — built-in commands and workflows land here too',
+    source: 'skills.usedNotInstalled',
+  },
+  {
+    id: 'repeated-crash',
+    type: 'HABIT',
+    severity: 'warn',
+    when: (d) => d.tools.errorClusters.some((c) => c.count >= 3),
+    headline: (d) => `the same failure came back ${d.tools.errorClusters[0].count} times across ${d.tools.errorClusters[0].sessions} session(s)`,
+    evidence: (d) => `«${clip(d.tools.errorClusters[0].sample, 120)}» · last seen ${String(d.tools.errorClusters[0].lastAt).slice(0, 10)}`,
+    recommendation: 'A failure that repeats is a preflight check nobody wrote. Add it to the project preflight, or record the fix in the relevant LEARNINGS.md.',
+    doesNotProve: 'that all of them share one root cause — the cluster key is the first eight words of the error',
+    source: 'tools.errorClusters',
+  },
+  {
+    id: 'denials-as-rules',
+    type: 'AGENTS.md RULE',
+    severity: 'info',
+    when: (d) => d.tools.denials.reasons.length >= 3,
+    headline: (d) => `${d.tools.denials.count} tool call(s) refused — ${d.tools.denials.reasons.length} with a reason you typed`,
+    evidence: (d) => d.tools.denials.reasons.slice(0, 4).map((r) => `«${clip(r.reason, 70)}»`).join(' · '),
+    recommendation: 'A denial reason is the only correction in this file that is not a proxy. Read them as candidate contract lines; the grep for each is in the Tools section.',
+    doesNotProve: 'that the rule belongs in AGENTS.md — it may belong in a skill, and you are the one who promotes it',
+    source: 'tools.denials.reasons',
+  },
+  {
+    id: 'interrupt-rate',
+    type: 'HABIT',
+    severity: 'info',
+    when: (d) => d.hygiene.interrupts >= 10 && d.hygiene.humanPrompts > 0
+      && d.hygiene.interrupts / d.hygiene.humanPrompts >= 0.08,
+    headline: (d) => `${d.hygiene.interrupts} interrupted turns — ${pctOf(d.hygiene.interrupts, d.hygiene.humanPrompts)} of your prompts`,
+    evidence: (d) => `${d.hygiene.interrupts} of ${d.hygiene.humanPrompts} prompts followed a turn you stopped mid-flight`,
+    recommendation: 'Interrupting this often usually means the unit of work is too large to watch. Plan mode, or smaller units, gives you a decision point instead of a stop button.',
+    doesNotProve: 'that the interrupted turns were going wrong — stopping a correct turn early looks identical',
+    source: 'hygiene.interrupts',
+  },
+  {
+    id: 'compaction-pressure',
+    type: 'HABIT',
+    severity: 'info',
+    when: (d) => d.hygiene.compactions.auto >= 3,
+    headline: (d) => `${d.hygiene.compactions.auto} sessions were compacted automatically`,
+    evidence: (d) => `average ${human(d.hygiene.compactions.avgPreTokens)} tokens before the cut · /handoff typed ×${d.hygiene.slashCommands['/handoff'] || 0}`,
+    recommendation: 'An automatic summary is a handoff nobody wrote. Close the session on your own terms before the context runs out.',
+    doesNotProve: 'that shorter sessions produce better work — only that these were cut without your hand',
+    source: 'hygiene.compactions',
+  },
+  {
+    id: 'hand-dispatched-role',
+    type: 'DISPATCH',
+    severity: 'info',
+    when: (d) => d.skills && Object.entries(d.tools.subagents.byType)
+      .some(([role, n]) => n >= 5 && d.skills.roles.includes(role)),
+    headline: (d) => {
+      const [role, n] = Object.entries(d.tools.subagents.byType).find(([r, x]) => x >= 5 && d.skills.roles.includes(r));
+      return `${role} was spawned by hand ${n} times — a role this repo already defines`;
+    },
+    evidence: (d) => {
+      const [role] = Object.entries(d.tools.subagents.byType).find(([r, x]) => x >= 5 && d.skills.roles.includes(r));
+      return `.claude/agents/${role}.md exists · ${d.workflows.length} workflow run(s) in the same window`;
+    },
+    recommendation: 'Candidate dispatch criterion: say in AGENTS.md when this role runs itself, instead of describing it in prose each time.',
+    doesNotProve: 'that a workflow would have been cheaper — no counterfactual was measured',
+    source: 'tools.subagents.byType',
+  },
+  {
+    id: 'main-thread-heavy',
+    type: 'HABIT',
+    severity: 'info',
+    when: (d) => d.totals.costUsd >= 50 && mainShare(d) >= 0.7,
+    headline: (d) => `the main thread is ${pctOf(1, 1 / mainShare(d))} of priced spend`,
+    evidence: (d) => `$${d.totals.costUsd.toFixed(0)} priced · ${d.tools.subagents.total} subagent spawns in the same window`,
+    recommendation: 'Work that runs in the main thread pays full context on every turn. The roles in .claude/agents exist to move some of it off that thread.',
+    doesNotProve: 'that delegating would have cost less — no run here measured the alternative',
+    source: 'agents',
+  },
+  {
+    id: 'unpriced-model',
+    type: 'DASHBOARD',
+    severity: 'info',
+    when: (d) => d.unpricedModels.length > 0,
+    headline: (d) => `${d.unpricedModels.join(', ')} has no list price here`,
+    evidence: (d) => {
+      const rows = d.agents.filter((a) => !a.priced);
+      return `${rows.reduce((n, a) => n + a.runs, 0)} run(s) · ${human(rows.reduce((n, a) => n + a.tokens, 0))} tokens excluded from est.$`;
+    },
+    recommendation: 'Verify the list price and add it to PRICE_PER_MTOK. Never from memory: an invented price is worse than none.',
+    doesNotProve: 'anything about the work — only that the total below is a floor',
+    source: 'unpricedModels',
+  },
+  {
+    id: 'review-pending',
+    type: 'LIFECYCLE',
+    severity: 'warn',
+    when: (d) => !!(d.reviews && d.reviews.latest && d.reviews.latest.pending > 0),
+    headline: (d) => `${plural(d.reviews.latest.pending, 'card')} from the last /session-review ${d.reviews.latest.pending === 1 ? 'is' : 'are'} still open after ${d.reviews.latest.ageDays} days`,
+    evidence: (d) => d.reviews.latest.cards.filter((c) => c.state === 'pending')
+      .map((c) => `«${clip(c.text, 70)}» — ${c.evidence}`).join(' · '),
+    recommendation: 'Promote it, or reject it in the report so it stops surfacing here.',
+    doesNotProve: 'that you rejected it — a rejected card is a valid outcome, and nothing on disk records that decision',
+    source: 'reviews.latest.cards',
+  },
+  {
+    id: 'review-stale',
+    type: 'LIFECYCLE',
+    severity: 'info',
+    when: (d) => (d.reviews === null && d.hygiene.sessions >= 10)
+      || !!(d.reviews && d.reviews.latest && d.reviews.latest.ageDays !== null && d.reviews.latest.ageDays >= 21),
+    headline: (d) => (d.reviews && d.reviews.latest
+      ? `the last /session-review ran ${d.reviews.latest.ageDays} days ago`
+      : `${d.hygiene.sessions} sessions here and no /session-review has ever run`),
+    evidence: (d) => (d.reviews && d.reviews.latest ? d.reviews.latest.file : 'docs/harness-dev/loop-runs/ holds no *-session-review.md'),
+    recommendation: 'Run /session-review. It starts from the cards above rather than from the raw corpus, so it is cheaper than it was.',
+    doesNotProve: 'that anything has gone wrong in the meantime',
+    source: 'reviews',
+  },
+];
+
+const pctOf = (a, b) => (b ? `${Math.round((a / b) * 100)}%` : 'n/a');
+const mainShare = (d) => {
+  if (!d.totals.costUsd) return 0;
+  return d.agents.filter((a) => a.agentType === 'main').reduce((n, a) => n + a.costUsd, 0) / d.totals.costUsd;
+};
+
+function evaluateCards(d) {
+  const fired = [];
+  const silent = [];
+  for (const rule of RULES) {
+    let hit = false;
+    try { hit = !!rule.when(d); } catch { hit = false; }
+    if (!hit) { silent.push(rule.id); continue; }
+    try {
+      fired.push({
+        rule: rule.id,
+        type: rule.type,
+        severity: rule.severity,
+        headline: rule.headline(d),
+        evidence: rule.evidence(d),
+        recommendation: rule.recommendation,
+        doesNotProve: rule.doesNotProve,
+        source: rule.source,
+      });
+    } catch (e) {
+      // A rule that matched but cannot describe what it matched is a broken rule, not a finding.
+      warn(`card rule ${rule.id} matched but could not render — skipped (${e.message})`);
+      silent.push(rule.id);
+    }
+  }
+  const order = { warn: 0, info: 1 };
+  fired.sort((a, b) => (order[a.severity] - order[b.severity]) || a.rule.localeCompare(b.rule));
+  return { fired, silent };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // AGGREGATE
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -613,6 +824,232 @@ function pluginGuardNames() {
     }
   }
   return [...names].sort();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// INVENTORY — what is installed, against what actually ran
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Every place a skill can be installed for this machine. Read-only, and tolerant of every one of
+// them being absent: most projects have two of these five.
+function inventorySkills(repo) {
+  const home = os.homedir();
+  const out = [];
+  const seen = new Set();
+  const add = (name, source, file, enabled = true) => {
+    const key = `${source}:${name}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push({ name, source, path: file, enabled });
+  };
+  const scanSkills = (dir, source) => {
+    for (const e of ls(dir)) {
+      if (fs.existsSync(path.join(dir, e, 'SKILL.md'))) add(e, source, path.join(dir, e), true);
+    }
+  };
+  const scanCommands = (dir, source) => {
+    for (const f of ls(dir).filter((f) => f.endsWith('.md'))) add(f.replace(/\.md$/, ''), source, path.join(dir, f), true);
+  };
+
+  scanSkills(path.join(repo, '.claude', 'skills'), 'project');
+  scanSkills(path.join(repo, '.agents', 'skills'), 'project-agents');
+  scanSkills(path.join(home, '.claude', 'skills'), 'user');
+  scanSkills(path.join(home, '.agents', 'skills'), 'user-agents');
+  scanCommands(path.join(repo, '.claude', 'commands'), 'project-command');
+  scanCommands(path.join(home, '.claude', 'commands'), 'user-command');
+
+  // Plugins: only the ones installed for this user or for this very project, and only the ones the
+  // settings still enable. A disabled plugin is installed-but-off, which is a third state, not zero.
+  const installed = readJson(path.join(home, '.claude', 'plugins', 'installed_plugins.json'));
+  let enabledMap = {};
+  const settings = readJson(path.join(home, '.claude', 'settings.json'));
+  // Only this one key is read. The rest of settings.json is none of the dashboard's business.
+  if (settings && settings.enabledPlugins && typeof settings.enabledPlugins === 'object') enabledMap = settings.enabledPlugins;
+  for (const [key, entries] of Object.entries((installed && installed.plugins) || {})) {
+    const pluginName = key.split('@')[0];
+    const enabled = enabledMap[key] !== false;
+    for (const inst of entries || []) {
+      if (inst.scope !== 'user' && path.resolve(String(inst.projectPath || '')) !== repo) continue;
+      const base = inst.installPath;
+      if (!base) continue;
+      for (const e of ls(path.join(base, 'skills'))) {
+        if (fs.existsSync(path.join(base, 'skills', e, 'SKILL.md'))) add(`${pluginName}:${e}`, 'plugin', path.join(base, 'skills', e), enabled);
+      }
+      for (const f of ls(path.join(base, 'commands')).filter((f) => f.endsWith('.md'))) {
+        add(f.replace(/\.md$/, ''), 'plugin-command', path.join(base, 'commands', f), enabled);
+      }
+    }
+  }
+  // Role files are not skills, but the DISPATCH rule needs to know a role exists before it can say
+  // the human is doing that role's dispatching by hand.
+  const roles = ls(path.join(repo, '.claude', 'agents')).filter((f) => f.endsWith('.md')).map((f) => f.replace(/\.md$/, ''));
+  return { skills: out, roles };
+}
+
+// A plugin skill is invoked as `plugin:skill` but installed under `skill`; a typed /name may be a
+// command or a skill. Both are normalised to the bare name before the two sets are compared.
+const bareName = (n) => String(n).replace(/^[^:]+:/, '').replace(/^\//, '');
+
+function buildInventory(repo, hygiene) {
+  const { skills, roles } = inventorySkills(repo);
+  const usedCounts = new Map();
+  for (const [name, n] of Object.entries(hygiene.skillCalls)) {
+    usedCounts.set(bareName(name), { viaSkillTool: n, viaSlash: 0, raw: name });
+  }
+  for (const [name, n] of Object.entries(hygiene.slashCommands)) {
+    const bare = bareName(name);
+    const r = usedCounts.get(bare) || { viaSkillTool: 0, viaSlash: 0, raw: name };
+    r.viaSlash += n;
+    usedCounts.set(bare, r);
+  }
+
+  const installedByName = new Map();
+  for (const sk of skills) {
+    const bare = bareName(sk.name);
+    if (!installedByName.has(bare)) installedByName.set(bare, []);
+    installedByName.get(bare).push(sk);
+  }
+
+  const used = [...usedCounts.entries()].map(([name, r]) => ({
+    name,
+    viaSkillTool: r.viaSkillTool,
+    viaSlash: r.viaSlash,
+    sources: (installedByName.get(name) || []).map((sk) => sk.source),
+  })).sort((a, b) => (b.viaSkillTool + b.viaSlash) - (a.viaSkillTool + a.viaSlash));
+
+  const bySource = {};
+  for (const sk of skills) bySource[sk.source] = (bySource[sk.source] || 0) + 1;
+
+  const unusedIn = (sources) => skills.filter((sk) => sources.includes(sk.source) && !usedCounts.has(bareName(sk.name)))
+    .map((sk) => sk.name).sort();
+  const countIn = (sources) => skills.filter((sk) => sources.includes(sk.source)).length;
+  const projectSources = ['project', 'project-agents', 'project-command'];
+  const userSources = ['user', 'user-agents', 'user-command'];
+  const projectUnused = unusedIn(projectSources);
+  const userUnused = unusedIn(userSources);
+  const projectCount = countIn(projectSources);
+  const userCount = countIn(userSources);
+
+  return {
+    repo,
+    roles,
+    installed: skills.length,
+    enabled: skills.filter((sk) => sk.enabled).length,
+    bySource,
+    used,
+    // Invoked through the Skill tool but nowhere on disk: a workflow, or a skill removed after the
+    // habit of calling it stayed. A typed /name that is not installed is almost always a built-in
+    // (/model, /compact), so it is left in commands.typed rather than reported as a missing skill.
+    usedNotInstalled: used.filter((u) => !u.sources.length && u.viaSkillTool > 0)
+      .map((u) => u.name).sort(),
+    installedNotUsed: { project: projectUnused, user: userUnused.slice(0, 20), userCount: userUnused.length },
+    shelfRatio: {
+      project: projectCount ? projectUnused.length / projectCount : 0,
+      user: userCount ? userUnused.length / userCount : 0,
+    },
+    note: 'used = the Skill tool\'s own input.skill, plus every typed /name. A skill whose description auto-triggered without the Skill tool leaves no trace in a transcript and cannot be counted here.',
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// REVIEWS — what Loop 6 proposed, and whether the human promoted it
+// ─────────────────────────────────────────────────────────────────────────────
+
+const CARD_TYPES = ['SKILL CANDIDATE', 'AGENTS.md RULE', 'DISPATCH', 'HABIT', 'LIFECYCLE'];
+
+// The report format is a contract, not a style: these are the lines read back here. session-review.md
+// says so at the point where it writes them.
+function parseReviewCards(text) {
+  const cards = [];
+  for (const line of text.split('\n')) {
+    const m = /^▸\s+\*\*([A-Za-z. ]+)\*\*\s+(.+?)\s*$/.exec(line.trim());
+    if (!m) continue;
+    const type = m[1].trim();
+    if (!CARD_TYPES.includes(type)) continue;
+    const body = m[2].trim();
+    const count = Number((/×(\d+)/.exec(body) || [])[1]) || null;
+    // The terms a promotion can be grepped for: what the card quoted, and any /name it named.
+    const terms = [
+      ...[...body.matchAll(/«([^»]{2,60})»/g)].map((x) => x[1]),
+      ...[...body.matchAll(/(?:^|\s)\/([a-z][a-z0-9-]{2,30})/g)].map((x) => x[1]),
+    ];
+    cards.push({ type, text: body, count, terms });
+  }
+  return cards;
+}
+
+// The distinctive word of a quoted term — the one worth grepping a contract for. A whole sentence
+// never matches; its rarest long word usually does.
+function keyTerm(term) {
+  const words = String(term).toLowerCase().match(/[\p{L}][\p{L}\p{N}-]{3,}/gu) || [];
+  const stop = new Set(['pasa', 'esto', 'por', 'para', 'que', 'con', 'the', 'this', 'that', 'from', 'into', 'sesion', 'sesión', 'session', 'mis', 'mi', 'todo', 'toda', 'cada']);
+  const useful = words.filter((w) => !stop.has(w));
+  return (useful.sort((a, b) => b.length - a.length)[0] || words[0] || '').trim();
+}
+
+function grepContract(repo, term) {
+  for (const file of ['AGENTS.md', 'CLAUDE.md']) {
+    const abs = path.join(repo, file);
+    if (!fs.existsSync(abs)) continue;
+    let text = '';
+    try { text = fs.readFileSync(abs, 'utf8'); } catch { continue; }
+    const lines = text.split('\n');
+    const i = lines.findIndex((l) => l.toLowerCase().includes(term.toLowerCase()));
+    if (i >= 0) return `${file}:${i + 1}`;
+  }
+  return null;
+}
+
+function parseReviews(repo, inventory) {
+  const dir = path.join(repo, 'docs', 'harness-dev', 'loop-runs');
+  if (!fs.existsSync(dir)) return null;
+  const files = ls(dir).filter((f) => /session-review\.md$/.test(f)).sort().reverse();
+  if (!files.length) return null;
+
+  const history = [];
+  let latest = null;
+  for (const f of files) {
+    let text = '';
+    try { text = fs.readFileSync(path.join(dir, f), 'utf8'); } catch { continue; }
+    const date = (/(\d{4}-\d{2}-\d{2})/.exec(f) || [])[1] || null;
+    const cards = parseReviewCards(text).map((c) => {
+      if (c.type === 'AGENTS.md RULE') {
+        for (const term of c.terms) {
+          const key = keyTerm(term);
+          const hit = key ? grepContract(repo, key) : null;
+          if (hit) return { ...c, state: 'promoted', evidence: hit };
+        }
+        return { ...c, state: 'pending', evidence: `no term of this card appears in AGENTS.md or CLAUDE.md` };
+      }
+      if (c.type === 'SKILL CANDIDATE') {
+        const wanted = c.terms.map(keyTerm).filter(Boolean);
+        const hit = (inventory ? inventory.used.concat(
+          (inventory.installedNotUsed.project || []).concat(inventory.installedNotUsed.user || []).map((n) => ({ name: n })),
+        ) : []).find((sk) => wanted.some((w) => bareName(sk.name).includes(w)));
+        return hit
+          ? { ...c, state: 'promoted', evidence: `a skill or command named ${hit.name} now exists` }
+          : { ...c, state: 'pending', evidence: `nothing named ${wanted.join(' / ') || '(unnamed)'} is installed` };
+      }
+      // A dispatch criterion and a habit leave no artefact to grep for. Saying "pending" would be a
+      // guess; saying n/a is the honest answer and keeps them out of the pending count.
+      return { ...c, state: 'n/a', evidence: 'nothing on disk settles this card either way' };
+    });
+    const row = {
+      file: path.join('docs', 'harness-dev', 'loop-runs', f),
+      date,
+      ageDays: date ? Math.round((Date.now() - Date.parse(`${date}T12:00:00Z`)) / 864e5) : null,
+      cards,
+      promoted: cards.filter((c) => c.state === 'promoted').length,
+      pending: cards.filter((c) => c.state === 'pending').length,
+    };
+    if (!latest) latest = row;
+    history.push({ date: row.date, cards: cards.length, promoted: row.promoted, pending: row.pending });
+  }
+  if (latest && !latest.cards.length) {
+    // Present but with no card line parsed is not the same fact as "no review yet".
+    return { latest: { ...latest, unreadable: 'no ▸ **TYPE** card line parsed' }, history };
+  }
+  return { latest, history };
 }
 
 function buildSignals(sessions, prompts, args) {
@@ -890,8 +1327,11 @@ function aggregate(args) {
   const repo = args.repo ? parseRepo(args.repo) : { loopRuns: [], learnings: [], savings: null };
   const agents = [...rows.values()].sort((a, b) => b.tokens - a.tokens);
   const signals = buildSignals(events, prompts, args);
+  const inventoryRepo = args.repo || process.cwd();
+  const skillsInventory = buildInventory(inventoryRepo, signals.hygiene);
+  const reviews = parseReviews(inventoryRepo, skillsInventory);
 
-  return {
+  const data = {
     project: args.project,
     generatedAt: new Date().toISOString(),
     window: args.sinceMs ? new Date(args.sinceMs).toISOString() : 'all',
@@ -908,9 +1348,19 @@ function aggregate(args) {
     tools: signals.tools,
     guards: signals.guards,
     hygiene: signals.hygiene,
+    skills: skillsInventory,
+    reviews,
     lineup: buildLineup(args, agents),
     warnings: warnings.length,
   };
+
+  // Cards read the finished aggregate, so a rule can cross fields (a role in .claude/agents against
+  // the subagents that ran, a pending review card against the skills on disk).
+  const cards = evaluateCards(data);
+  data.cards = cards.fired;
+  data.rulesSilent = cards.silent;
+  data.warnings = warnings.length;
+  return data;
 }
 
 // D25/F11 — configured vs. observed, free from telemetry that already carries message.model per
@@ -1027,6 +1477,32 @@ const plural = (n, one, many) => `${n} ${n === 1 ? one : many || `${one}s`}`;
 
 // The operator blocks. Each one prints the number and, where the number is a proxy, the word proxy
 // next to it — an unlabelled proxy is the failure mode this whole file exists to avoid.
+// Cards first, because they are the only part of this report that says what to do about it.
+function renderCards(d) {
+  const out = [];
+  if (!d.cards) return out;
+  if (!d.cards.length) {
+    out.push(row(` CARDS     none — ${d.rulesSilent.length} rules checked, none found evidence`));
+    return out;
+  }
+  out.push(row(` CARDS     ${d.cards.length} fired · ${d.rulesSilent.length} rules silent (no evidence)`));
+  for (const c of d.cards.slice(0, 4)) {
+    out.push(row(`   ${c.severity === 'warn' ? '▸' : '·'} ${clip(c.headline, 50)}`));
+  }
+  if (d.cards.length > 4) out.push(row(`   +${d.cards.length - 4} more — see the HTML report`));
+
+  const r = d.reviews;
+  out.push(row(r && r.latest
+    ? `   REVIEW  ${r.latest.date} · ${r.latest.promoted} promoted · ${r.latest.pending} pending`
+    : '   REVIEW  no /session-review has run in this repo yet'));
+
+  if (d.skills) {
+    const proj = d.skills.installedNotUsed.project.length;
+    out.push(row(`   SKILLS  ${d.skills.installed} installed · ${d.skills.used.length} invoked · ${plural(proj, 'project skill')} unused`));
+  }
+  return out;
+}
+
 function renderSignals(d) {
   const out = [];
   const h = d.hygiene;
@@ -1141,6 +1617,7 @@ function renderAnsi(d) {
   out.push(...renderSavings(d.savings));
 
   const p = d.prompts;
+  out.push(...renderCards(d));
   out.push(...renderSignals(d));
   out.push(row(` PROMPTS   ${p.total} user turns · ${p.avgWords.toFixed(1)} words avg · ${p.sessionsPerDay.toFixed(1)} sess/day`));
   out.push(row(`           ${Math.round(p.followUpRate * 100)}% follow-ups (proxy: turn after agent turn)`));
@@ -1224,6 +1701,68 @@ function renderHtml(d) {
   const h = d.hygiene;
   const t = d.tools;
   const g = d.guards;
+
+  const pill = (cls, label) => `<span class="pill ${cls}">${esc(label)}</span>`;
+  const cardsBody = !d.cards ? '' : `${d.cards.length ? `<div class="cards">${d.cards.map((c) => `
+    <div class="card${c.severity === 'warn' ? ' warn' : ''}">
+      <div class="top">${pill(c.type === 'LIFECYCLE' ? 'life' : 'type', c.type)}${pill(c.severity, c.severity)}<span class="rid">${esc(c.rule)}</span></div>
+      <h3>${esc(c.headline)}</h3>
+      <div class="ev">${esc(c.evidence)}</div>
+      <div class="rec">${esc(c.recommendation)}</div>
+      <div class="not">${esc(c.doesNotProve)}</div>
+      <span class="src">${esc(c.source)}</span>
+    </div>`).join('')}</div>` : '<p class="sub">No rule found evidence in this window. Nothing is printed rather than something reassuring.</p>'}
+    <p class="sub">${d.rulesSilent.length} rule(s) checked and silent: ${esc(d.rulesSilent.join(', '))}.
+    A rule with no evidence prints nothing — padding a report to fill the grid is how an instrument becomes a horoscope.
+    Every card proposes; none of them edits anything.</p>`;
+
+  const rv = d.reviews;
+  const stateClass = { promoted: 'ok', pending: 'pend', 'n/a': 'na' };
+  const reviewRows = !rv || !rv.latest ? '' : rv.latest.cards.map((c) => `<tr>
+      <td class="k">${pill('type', c.type)}</td>
+      <td class="k wrap">${esc(clip(c.text, 120))}</td>
+      <td>${c.count || '—'}</td>
+      <td class="k">${pill(stateClass[c.state] || 'na', c.state)}</td>
+      <td class="k dim wrap">${esc(clip(c.evidence, 80))}</td></tr>`).join('');
+  const reviewBody = !rv || !rv.latest ? `<p class="sub">No <code>*-session-review.md</code> in <code>docs/harness-dev/loop-runs/</code>${d.skills ? ` under ${esc(d.skills.repo)}` : ''} — Loop 6 has never run here, so nothing above has ever been promoted or rejected on the record.</p>`
+    : `<div class="life">
+      <div class="lifebox">
+        <div class="l">latest run</div>
+        <div class="big">${esc(rv.latest.date || 'undated')} <small>· ${rv.latest.ageDays} days ago</small></div>
+        <div class="trail">
+          <span class="step"><b>${rv.latest.cards.length}</b> proposed</span><span class="arrow">→</span>
+          <span class="step"><b>${rv.latest.promoted}</b> promoted</span><span class="arrow">→</span>
+          <span class="step"><b>${rv.latest.pending}</b> pending</span><span class="arrow">→</span>
+          <span class="step"><b>${rv.latest.cards.length - rv.latest.promoted - rv.latest.pending}</b> n/a</span>
+        </div>
+        <p class="sub" style="margin-top:.8rem">${rv.latest.unreadable
+    ? `The report is present but ${esc(rv.latest.unreadable)} — which is not the same fact as "no review yet".`
+    : 'Promotion is checked by grepping this repo\'s contract and skills for what each card quoted. A DISPATCH or HABIT card leaves no artefact to grep, so it reads n/a rather than pending.'}</p>
+        <p class="sub">${esc(rv.latest.file)}</p>
+      </div>
+      <div class="scroll"><table>
+        <thead><tr><th class="k">type</th><th class="k">card, verbatim</th><th>×</th><th class="k">state</th><th class="k">evidence</th></tr></thead>
+        <tbody>${reviewRows}</tbody></table></div>
+    </div>`;
+
+  const sk = d.skills;
+  const usedRows = !sk ? '' : sk.used.slice(0, 20).map((u) => `<tr><td class="k">${esc(u.name)}</td>
+      <td>${u.viaSkillTool || '—'}</td><td>${u.viaSlash || '—'}</td>
+      <td class="k dim">${esc(u.sources.join(', ') || 'not installed here')}</td></tr>`).join('');
+  const skillsBody = !sk ? '' : `<div class="cols">
+    <div><div class="scroll"><table>
+      <thead><tr><th class="k">invoked</th><th>Skill tool</th><th>typed</th><th class="k">installed as</th></tr></thead>
+      <tbody>${usedRows}</tbody></table></div></div>
+    <div>
+      <p class="sub">${sk.installed} installed for this project and user${sk.enabled !== sk.installed ? ` (${sk.installed - sk.enabled} disabled)` : ''} ·
+      ${Object.entries(sk.bySource).map(([k, v]) => `${esc(k)} ${v}`).join(' · ') || 'none found'}</p>
+      ${sk.installedNotUsed.project.length ? `<p class="sub"><b>Project skills never invoked in this window (${sk.installedNotUsed.project.length}):</b><br>
+        <span class="chips">${sk.installedNotUsed.project.slice(0, 24).map((n) => `<span class="chip">${esc(n)}</span>`).join('')}</span></p>` : ''}
+      ${sk.installedNotUsed.userCount ? `<p class="sub">${sk.installedNotUsed.userCount} user-level skill(s) also went uninvoked.</p>` : ''}
+      ${sk.usedNotInstalled.length ? `<p class="sub">Invoked through the Skill tool but not installed here: ${esc(sk.usedNotInstalled.join(', '))}.</p>` : ''}
+      <p class="sub">${esc(sk.note)}</p>
+    </div>
+  </div>`;
 
   const hygieneBody = !h ? '' : `<div class="tiles">
     ${tile('continuations', h.continuations.count, `${h.continuations.afterAgentTurn}/${h.continuations.count || 0} after agent`, esc(h.continuations.pattern), h.continuations.count >= 5)}
@@ -1315,6 +1854,35 @@ function renderHtml(d) {
   .tile .v small { font-size:.72rem; color:var(--dim); font-weight:400; margin-left:.3rem; }
   .tile .d { font-size:.72rem; color:var(--dim); margin-top:.15rem; }
   .tile.hot .v { color:var(--warn); }
+  .cards { display:grid; grid-template-columns:repeat(auto-fill,minmax(330px,1fr)); gap:.75rem; }
+  .card { border:1px solid var(--dim); padding:.8rem .95rem 1.4rem; display:flex; flex-direction:column; gap:.45rem; position:relative; }
+  .card.warn { border-color:var(--warn-dim); }
+  .card .top { display:flex; align-items:center; gap:.5rem; }
+  .card .rid { color:var(--dim); margin-left:auto; font-size:.66rem; }
+  .card h3 { margin:0; font-size:.98rem; font-weight:500; line-height:1.35; text-wrap:balance; }
+  .card .ev { font-size:.78rem; border-left:2px solid var(--dim); padding-left:.6rem; word-break:break-word; }
+  .card .rec { font-size:.78rem; }
+  .card .rec::before { content:"→ "; color:var(--dim); }
+  .card .not { font-size:.72rem; color:var(--dim); margin-top:auto; padding-top:.4rem; border-top:1px dashed var(--dim); }
+  .card .not::before { content:"does not prove · "; letter-spacing:.08em; text-transform:uppercase; font-size:.62rem; }
+  .card .src { position:absolute; right:.95rem; bottom:.5rem; font-size:.62rem; color:var(--dim); letter-spacing:.06em; }
+  .pill { display:inline-block; padding:.05rem .45rem; border:1px solid currentColor; font-size:.64rem;
+    letter-spacing:.12em; text-transform:uppercase; text-shadow:none; line-height:1.5; }
+  .pill.type { color:var(--p); } .pill.info { color:var(--dim); }
+  .pill.warn, .pill.life, .pill.pend { color:var(--warn); }
+  .pill.ok { color:var(--p); background:rgba(51,255,102,.08); }
+  .pill.na { color:var(--dim); border-style:dashed; }
+  .life { display:grid; grid-template-columns:1fr 1.6fr; gap:1.25rem; align-items:start; }
+  @media (max-width:820px) { .life { grid-template-columns:1fr; } }
+  .lifebox { border:1px solid var(--dim); padding:.8rem .95rem; }
+  .lifebox .l { font-size:.66rem; letter-spacing:.14em; color:var(--dim); text-transform:uppercase; }
+  .lifebox .big { font-size:1.4rem; font-weight:500; line-height:1.2; }
+  .lifebox .big small { font-size:.75rem; color:var(--dim); font-weight:400; }
+  .trail { display:flex; gap:.5rem; align-items:center; margin-top:.7rem; font-size:.74rem; color:var(--dim); flex-wrap:wrap; }
+  .trail .step { border:1px solid var(--dim); padding:.2rem .55rem; }
+  .trail .step b { color:var(--p); font-weight:500; }
+  .chips { display:inline-flex; flex-wrap:wrap; gap:.35rem; margin-top:.4rem; }
+  .chip { border:1px solid var(--dim); padding:.05rem .5rem; font-size:.7rem; color:var(--dim); }
   .proxy { font-size:.6rem; color:var(--warn-dim); border:1px dashed var(--warn-dim); padding:0 .35rem; letter-spacing:.1em; text-shadow:none; }
   .fold { color:var(--dim); font-size:.74rem; text-align:center; margin:2.5rem 0 0; letter-spacing:.14em; }
   .fold::before, .fold::after { content:" ▓▒░ "; color:var(--dim); }
@@ -1330,9 +1898,12 @@ function renderHtml(d) {
   <h1>LOOP-STATS ▓ ${esc(d.project)}</h1>
   <p class="sub">${esc(d.generatedAt.slice(0, 16).replace('T', ' '))} · window: ${esc(d.window)} · ${d.totals.runs} agent runs · ${human(d.totals.tokens)} tokens${d.warnings ? ` · ${d.warnings} parse warnings` : ''}</p>
 
+  ${sectionSub('Cards', 'rule-based · zero tokens · each one carries its evidence and its limits', cardsBody)}
+  ${sectionSub('Session-review lifecycle', 'what Loop 6 proposed, and where it went', reviewBody)}
   ${sectionSub('Session hygiene', 'how the driving went — every proxy says so', hygieneBody)}
   ${sectionSub('Tools &amp; failures', t ? `${t.totalCalls} calls · ${t.totalErrors} errors · ${t.denials.count} refused` : '', toolsBody)}
   ${sectionSub('Guards &amp; hooks', 'what blocked a call, and what merely ran', guardsBody)}
+  ${sectionSub('Skills &amp; commands', 'installed against invoked', skillsBody)}
 
   <p class="fold">accounting</p>
 
@@ -1381,7 +1952,9 @@ function renderHtml(d) {
     writes one too, and nothing in the format marks it apart from a keystroke — so these are turns, not keystrokes.</p>
   <div class="scroll"><table><tbody>${topRows}</tbody></table></div>
 
-  <footer>v2 · every figure above is measured from local transcripts and the repo's own loop records;
+  <footer>v2 · cards are rule-based recommendations: each prints its evidence, the field it came from,
+  and what it does not prove, and a rule that finds no evidence prints nothing. Nothing here edits
+  anything — you promote. Every figure is measured from local transcripts and the repo's own loop records;
   est.$ is list price × measured tokens, never a multiplier, and a saving with no counterfactual behind
   it is not shown — the reason it cannot be shown is.</footer>
 </main>`;

@@ -634,6 +634,81 @@ check('loop-stats mines tools, guards and hygiene from the signals fixture', () 
   return `${d.tools.totalCalls} calls · 1 cluster ×3 · 1 denial · 1 guard fire · ${h.humanPrompts} human prompts`;
 });
 
+// The half of the dashboard that says what to do about itself: what is installed against what ran,
+// what the last /session-review proposed against what the repo now contains, and the rules that turn
+// both into cards. HOME is pointed at an empty directory so the user-level skill roots and the
+// installed-plugin manifest cannot make this check depend on the machine it runs on.
+//
+// The assertion that matters most is the set of rules that stayed SILENT. A rule engine that fires
+// on everything is the horoscope this repo keeps refusing to ship, and the thresholds are the only
+// thing standing between the two: 3 continuations is below the floor of 5, 1 denial is below 3,
+// 2 model switches are below 5. All three are present in the fixture, and none of them may fire.
+//
+// Negative controls (2026-09-06, each applied by hand, observed, reverted — all exit 1):
+//   continue-token threshold 5 → 2 .................... cards gained continue-token
+//   grepContract made case-sensitive .................. humanizer card = pending, expected promoted
+//   DISPATCH/HABIT cards given state 'pending' ........ latest.pending = 4, expected 2
+//   parseReviewCards regex loosened to /^▸/ ........... 5 cards parsed from a 4-card report
+//   usedNotInstalled counting typed /names again ...... usedNotInstalled = [model], expected []
+check('loop-stats reads the skill inventory, the review lifecycle, and fires cards only on evidence', () => {
+  const script = path.join(ROOT, 'scripts/loop-stats.js');
+  const root = path.join(ROOT, 'scripts/fixtures/telemetry');
+  const repo = path.join(ROOT, 'scripts/fixtures/repo');
+  const emptyHome = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-home-'));
+  const run = (args) => JSON.parse(execFileSync('node', [script, ...args], {
+    encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, HOME: emptyHome },
+  }));
+
+  const d = run(['--root', root, '--project', 'demo-signals', '--repo', repo, '--json']);
+
+  // inventory: two project skills, one of them invoked in the transcript.
+  if (d.skills.bySource.project !== 2) throw new Error(`project skills = ${d.skills.bySource.project}, expected 2`);
+  const grilling = d.skills.used.find((u) => u.name === 'grilling');
+  if (!grilling || grilling.viaSkillTool !== 1 || grilling.viaSlash !== 1) {
+    throw new Error(`grilling = ${JSON.stringify(grilling)}, expected 1 via the Skill tool and 1 typed`);
+  }
+  if (JSON.stringify(d.skills.installedNotUsed.project) !== JSON.stringify(['unused-one'])) {
+    throw new Error(`installedNotUsed.project = ${JSON.stringify(d.skills.installedNotUsed.project)}`);
+  }
+  // A typed /model is a built-in, not a skill someone deleted.
+  if (d.skills.usedNotInstalled.length !== 0) throw new Error(`usedNotInstalled = ${JSON.stringify(d.skills.usedNotInstalled)}, expected []`);
+  if (!d.skills.roles.includes('reviewer')) throw new Error('.claude/agents roles not read');
+
+  // lifecycle: four cards, one promoted by a term that IS in the contract, one pending because its
+  // term is not, one skill card pending because nothing of that name is installed, one n/a.
+  const rv = d.reviews;
+  if (!rv || !rv.latest) throw new Error('the session-review report was not found');
+  if (rv.latest.cards.length !== 4) throw new Error(`cards parsed = ${rv.latest.cards.length}, expected 4`);
+  const byState = rv.latest.cards.map((c) => `${c.type}:${c.state}`);
+  const want = ['AGENTS.md RULE:promoted', 'AGENTS.md RULE:pending', 'SKILL CANDIDATE:pending', 'HABIT:n/a'];
+  if (JSON.stringify(byState) !== JSON.stringify(want)) throw new Error(`states = ${JSON.stringify(byState)}`);
+  if (!/^AGENTS\.md:\d+$/.test(rv.latest.cards[0].evidence)) throw new Error(`promotion evidence = ${rv.latest.cards[0].evidence}, expected AGENTS.md:<line>`);
+  if (rv.latest.promoted !== 1 || rv.latest.pending !== 2) throw new Error(`promoted/pending = ${rv.latest.promoted}/${rv.latest.pending}, expected 1/2`);
+
+  // cards: exactly the three the evidence supports, and not one of the three below threshold.
+  const fired = d.cards.map((c) => c.rule).sort();
+  const expected = ['repeated-crash', 'review-pending', 'review-stale'];
+  if (JSON.stringify(fired) !== JSON.stringify(expected)) throw new Error(`cards = ${JSON.stringify(fired)}, expected ${JSON.stringify(expected)}`);
+  for (const belowThreshold of ['continue-token', 'denials-as-rules', 'manual-model-switch', 'skill-shelfware']) {
+    if (!d.rulesSilent.includes(belowThreshold)) throw new Error(`${belowThreshold} fired below its threshold`);
+  }
+  for (const c of d.cards) {
+    if (!c.evidence || !c.doesNotProve || !c.source) throw new Error(`card ${c.rule} is missing evidence, its limits, or its source field`);
+  }
+
+  // Without --repo there is no contract to grep and no report to read: absent, not empty.
+  const noRepo = run(['--root', root, '--project', 'demo-signals', '--json']);
+  if (noRepo.reviews !== null) throw new Error('reviews must be null when no repo carries a report');
+  if (noRepo.cards.some((c) => c.rule === 'review-pending')) throw new Error('a lifecycle card fired with no lifecycle to read');
+
+  // And a project with the same repo but a clean transcript fires only the lifecycle cards: a card
+  // needs evidence in the window, not merely a repo that has one.
+  const clean = run(['--root', root, '--project', 'demo', '--repo', repo, '--json']);
+  if (clean.cards.some((c) => c.rule === 'repeated-crash')) throw new Error('a crash card fired on a transcript with no failures');
+
+  return `${d.skills.installed} skills · ${rv.latest.cards.length} review cards (${rv.latest.promoted} promoted) · ${d.cards.length} cards · ${d.rulesSilent.length} silent`;
+});
+
 // D25a — the HARD guardrail is the one piece of F11 that must never have a confirmable escape
 // hatch: a lineup that puts the reviewer in the implementer's model family has to be rejected by
 // construction, not by a prompt someone can click through. So each fixture below pins an id shape
