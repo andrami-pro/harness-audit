@@ -5,7 +5,7 @@ allowed-tools: Bash(node:*), Bash(mkdir:*)
 disable-model-invocation: true
 ---
 
-# /dashboard — the observer
+# /dashboard-harness — the observer
 
 Loops 1–6 change something: a skill, a diff, an app, the process, the operator. This changes nothing.
 It reads the transcripts on this disk and tells you what they say about how the last month went.
@@ -21,7 +21,7 @@ you work has not saved you a step.
 ## 1. Run the script. Do not read the corpus.
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT:-.claude}/scripts/loop-stats.js" --repo "$PWD" --since 30d --html $ARGUMENTS
+node "${CLAUDE_PLUGIN_ROOT:-.claude}/scripts/loop-stats.js" --repo "$PWD" --since 30d --html --open $ARGUMENTS
 ```
 
 Pass `$ARGUMENTS` straight through — every flag it may carry (`--since`, `--all`, `--open`,

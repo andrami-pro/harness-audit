@@ -72,6 +72,7 @@ function parseArgs(argv) {
     root: path.join(os.homedir(), '.claude', 'projects'),
     project: null, repo: null, sinceMs: null, html: null, json: false, top: 3, lineup: null,
     jsonOut: null, fromJson: null, open: false, all: false, brief: false,
+    untilMs: null, windowMs: null,
   };
   for (let i = 0; i < argv.length; i++) {
     const flag = argv[i];
@@ -97,7 +98,7 @@ function parseArgs(argv) {
     }
     else if (flag === '--since') {
       const m = /^(\d+)d$/.exec(argv[++i] || '');
-      if (m) a.sinceMs = Date.now() - Number(m[1]) * 864e5;
+      if (m) { a.windowMs = Number(m[1]) * 864e5; a.sinceMs = Date.now() - a.windowMs; }
       else warn('--since expects <N>d (e.g. 7d) — ignored, showing all history');
     } else warn(`unknown flag ${flag} — ignored`);
   }
@@ -1099,7 +1100,12 @@ const dedupeBy = (xs, key) => {
 };
 
 function buildSignals(sessions, prompts, args) {
-  const inWindow = (ts) => args.sinceMs === null || (Number.isFinite(Date.parse(ts)) && Date.parse(ts) >= args.sinceMs);
+  const inWindow = (ts) => {
+    if (args.sinceMs === null && args.untilMs === null) return true;
+    const at = Date.parse(ts);
+    if (!Number.isFinite(at)) return false;
+    return (args.sinceMs === null || at >= args.sinceMs) && (args.untilMs === null || at < args.untilMs);
+  };
 
   // -- tools ------------------------------------------------------------------
   const byName = new Map();
@@ -1319,7 +1325,15 @@ function aggregate(args) {
     return false;
   });
 
-  const inWindow = (ts) => args.sinceMs === null || Date.parse(ts) >= args.sinceMs;
+  const inRange = (ts, since, until) => {
+    const at = Date.parse(ts);
+    if (!Number.isFinite(at)) return false;
+    return (since === null || at >= since) && (until === null || at < until);
+  };
+  const inWindow = (ts) => args.sinceMs === null && args.untilMs === null
+    ? true : inRange(ts, args.sinceMs, args.untilMs);
+  const allTurns = turns;
+  const allPrompts = prompts;
   turns = turns.filter((t) => inWindow(t.ts));
   prompts = prompts.filter((p) => inWindow(p.ts));
   workflows = workflows.filter((w) => inWindow(w.startedAt)).sort((a, b) => b.startedAt.localeCompare(a.startedAt));
@@ -1378,6 +1392,42 @@ function aggregate(args) {
   const repo = args.repo ? parseRepo(args.repo) : { loopRuns: [], learnings: [], savings: null };
   const agents = [...rows.values()].sort((a, b) => b.tokens - a.tokens);
   const signals = buildSignals(events, prompts, args);
+
+  // The window before this one, measured the same way from the same parse. This is the only thing
+  // in the report that can say "better" or "worse" — everything else is a level, and a level tells
+  // you nothing about whether the last change helped. Absent when no `--since` was given (there is
+  // no "before" for all of history) or when that earlier window holds no session at all: a delta
+  // against an empty window is a fabrication, and it is reported as `null`, never as -100%.
+  let previous = null;
+  if (args.windowMs) {
+    const prevArgs = { ...args, sinceMs: args.sinceMs - args.windowMs, untilMs: args.sinceMs };
+    const prevPrompts = allPrompts.filter((p) => inRange(p.ts, prevArgs.sinceMs, prevArgs.untilMs));
+    const prevSignals = buildSignals(events, prevPrompts, prevArgs);
+    if (prevSignals.hygiene.sessions > 0) {
+      const prevTurns = allTurns.filter((t) => inRange(t.ts, prevArgs.sinceMs, prevArgs.untilMs));
+      let cost = 0;
+      let tokens = 0;
+      for (const t of prevTurns) {
+        cost += costOf(priceFor(baseModel(t.model), t.ts), t.usage) || 0;
+        tokens += t.usage.tokens;
+      }
+      previous = {
+        from: new Date(prevArgs.sinceMs).toISOString(),
+        to: new Date(prevArgs.untilMs).toISOString(),
+        sessions: prevSignals.hygiene.sessions,
+        humanPrompts: prevSignals.hygiene.humanPrompts,
+        continuations: prevSignals.hygiene.continuations.count,
+        interrupts: prevSignals.hygiene.interrupts,
+        compactions: prevSignals.hygiene.compactions.count,
+        modelSwitches: prevSignals.hygiene.modelSwitches.count,
+        toolErrors: prevSignals.tools.totalErrors,
+        denials: prevSignals.tools.denials.count,
+        skillsInvoked: Object.keys(prevSignals.hygiene.skillCalls).length,
+        tokens,
+        costUsd: cost,
+      };
+    }
+  }
   const inventoryRepo = args.repo || process.cwd();
   const skillsInventory = buildInventory(inventoryRepo, signals.hygiene);
   const reviews = parseReviews(inventoryRepo, skillsInventory);
@@ -1401,6 +1451,7 @@ function aggregate(args) {
     hygiene: signals.hygiene,
     skills: skillsInventory,
     reviews,
+    previous,
     lineup: buildLineup(args, agents),
     warnings: warnings.length,
   };
@@ -1487,7 +1538,7 @@ function aggregateAll(args) {
 // What the model pass in /session-review actually reads. Everything else — the agent×model table,
 // the timeline, the workflow history, the savings ledger — is accounting a `for` loop already did,
 // and paying a context window to re-read it is the expensive way to learn nothing.
-const BRIEF_KEYS = ['project', 'generatedAt', 'window', 'hygiene', 'tools', 'guards', 'skills', 'reviews', 'cards', 'rulesSilent', 'prompts', 'warnings'];
+const BRIEF_KEYS = ['project', 'generatedAt', 'window', 'previous', 'hygiene', 'tools', 'guards', 'skills', 'reviews', 'cards', 'rulesSilent', 'prompts', 'warnings'];
 function briefOf(d) {
   const out = {};
   for (const k of BRIEF_KEYS) if (d[k] !== undefined) out[k] = d[k];

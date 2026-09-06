@@ -69,7 +69,7 @@ gated loops, and `SKILL.md`'s `allowed-tools`. Read
 Pi is a different story, but not the one an earlier version of this README told: **4 of the 5 loop
 commands do port to Pi**, as Pi's own prompt templates — gated on the same third-party
 [`pi-subagents`](https://github.com/nicobailon/pi-subagents) extension the 7 agents already require.
-`/session-review` and `/dashboard` are the exceptions and do not port at all. Read the
+`/session-review` and `/dashboard-harness` are the exceptions and do not port at all. Read the
 [Pi section](#compatibility-across-harnesses) before reaching for this:
 
 ```bash
@@ -202,11 +202,11 @@ different rates. Read this before assuming a layer "just works" on a harness you
 |---|---|---|---|---|
 | `AGENTS.md` + executable rubric | ✅ native | ✅ native | ✅ native | ✅ native — Pi reads `AGENTS.md` directly |
 | Skill (`SKILL.md` + templates) | ✅ native | ✅ native | ✅ native | ✅ native |
-| The 5 loop commands + `/dashboard` | ✅ native (Task tool) | ✅ native (Task tool) | ✅ native (Task tool) | ⚠️ **4 of 6** as prompt templates, via a third-party extension — `/session-review` and `/dashboard` do not port, see below |
+| The 5 loop commands + `/dashboard-harness` | ✅ native (Task tool) | ✅ native (Task tool) | ✅ native (Task tool) | ⚠️ **4 of 6** as prompt templates, via a third-party extension — `/session-review` and `/dashboard-harness` do not port, see below |
 | The 7 agents | ✅ native | ✅ native | ✅ native | ✅ via the same third-party extension |
 | Manual-only guardrail (`disable-model-invocation`) | ✅ enforced | ❌ **no equivalent — dropped** | ❌ **no equivalent — dropped** | ✅ **preserved by construction — see below** |
 | Deterministic loop gate (`loop-gate.js`) | ✅ native | ⚠️ **degraded to a hand-check** | ⚠️ **degraded to a hand-check** | ⚠️ **degraded to a hand-check** |
-| Hooks + dashboard (`/dashboard`, `loop-stats.js`) | ✅ native | 📖 documented, not automated | 📖 documented, not automated | 📖 documented, not automated |
+| Hooks + dashboard (`/dashboard-harness`, `loop-stats.js`) | ✅ native | 📖 documented, not automated | 📖 documented, not automated | 📖 documented, not automated |
 
 **Loops on Pi, in full — read this before you install:** Pi's core ships with no sub-agent support at
 all — per [pi.dev](https://pi.dev)'s own docs, *"Pi ships with powerful defaults but skips features like
@@ -233,7 +233,7 @@ installed project and reading back which commands it actually registered — not
 first draft of this port passed its own test suite while Pi silently discarded three of the five
 templates it had written.
 
-**`/session-review` and `/dashboard` do not port to Pi, and will not.** Both shell out to
+**`/session-review` and `/dashboard-harness` do not port to Pi, and will not.** Both shell out to
 `node "${CLAUDE_PLUGIN_ROOT}/scripts/loop-stats.js"` — a variable that exists only inside the Claude Code
 plugin runtime, pointing at a script `--target pi` does not install — and both read *the transcripts
 Claude Code writes*, not Pi's sessions, which live elsewhere in a different format. Ported, each would be
@@ -319,9 +319,9 @@ writing and maintaining three more integrations against APIs this repo doesn't o
 | "Improve the *process* that builds the product" | 5 · Workflow improvement | `/iterate <task>` | high | score ≥ 90 ∧ optimizer out of proposals (max 5) |
 | "Improve how *I* drive the agent — fully local" | 6 · Operator | `/session-review [--since 30d]` | med-low | single pass; re-run weekly |
 
-Plus one thing that is not a loop: **`/dashboard`**, the free observer the six are watched through.
+Plus one thing that is not a loop: **`/dashboard-harness`**, the free observer the six are watched through.
 It reads your local transcripts and reports how the driving went. See
-[Watch them run](#watch-them-run--dashboard).
+[Watch them run](#watch-them-run--dashboard-harness).
 
 **Honesty rule for this table:** a loop only gets a row once it has at least one real, recorded run — a findings
 JSON (or, for the process loop, a settled prediction) in the operating repo's `docs/harness-dev/loop-runs/`.
@@ -434,7 +434,7 @@ Loops are not free, and the wrong one is worse than none.
 | `/review-loop` (critic fan-out × ≤ 5) | high · token-hungry | every commit. Only a large app or corpus, and rarely |
 | `/iterate` (builder + scorer + optimizer × ≤ 5) | high | bug fixes, one-file changes — a feature that converges in round 1 teaches the process nothing |
 | `/session-review` (free stats + 1 pass over top-N) | med-low | daily runs — a growth edge needs enough sessions to be an edge and not a bad afternoon |
-| `/dashboard` · `bin/loop-stats` | free (local script, zero tokens) | — run it as often as you like |
+| `/dashboard-harness` · `bin/loop-stats` | free (local script, zero tokens) | — run it as often as you like |
 
 ### How loops activate
 
@@ -463,15 +463,15 @@ so a ported copy of these three loses the veto and becomes auto-dispatchable. Pi
 field either, but keeps the veto anyway — invocation there is always a typed `/name`, never a tool call
 the model can make on its own. See [Compatibility across harnesses](#compatibility-across-harnesses).
 
-### Watch them run — `/dashboard`
+### Watch them run — `/dashboard-harness`
 
-`/dashboard` is the observer the six loops are watched through. It reads the transcripts Claude Code
+`/dashboard-harness` is the observer the six loops are watched through. It reads the transcripts Claude Code
 already wrote on this machine and reports what they say — not just what they cost. It iterates on
 nothing, costs zero tokens, edits nothing, and never leaves your machine.
 
 ```bash
-/dashboard                       # inside Claude Code — this project, last 30 days
-/dashboard --since 7d --open     # …and open the HTML report in a browser
+/dashboard-harness                       # inside Claude Code — this project, last 30 days
+/dashboard-harness --since 7d --open     # …and open the HTML report in a browser
 bin/loop-stats --project ~/code/my-app --since 30d --html   # or from any shell
 ```
 

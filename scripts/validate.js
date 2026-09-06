@@ -724,8 +724,8 @@ check('loop-stats reads the skill inventory, the review lifecycle, and fires car
 //   ${CLAUDE_PLUGIN_ROOT} without the :-.claude fallback ... "must use the ${CLAUDE_PLUGIN_ROOT:-.claude} form"
 //   disable-model-invocation removed ...................... "must be manual-only"
 //   a Read of a .jsonl added to the body .................. "must not read transcripts itself"
-check('dashboard runs the script and never parses transcripts itself', () => {
-  const rel = 'commands/dashboard.md';
+check('dashboard-harness runs the script and never parses transcripts itself', () => {
+  const rel = 'commands/dashboard-harness.md';
   mustExist(rel);
   hasFrontmatterField(rel, 'description');
   hasFrontmatterField(rel, 'argument-hint');

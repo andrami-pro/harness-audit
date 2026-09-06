@@ -17,7 +17,7 @@ None of it was read. The one part of this plugin that does audit the operator �
 Loop 6 — writes a report nothing ever reads back, so the cards it proposes have no lifecycle: a
 promoted rule and an ignored one look identical a month later.
 
-This PRD turns the dashboard into the auditor it was described as, and gives it a way in: `/dashboard`
+This PRD turns the dashboard into the auditor it was described as, and gives it a way in: `/dashboard-harness`
 and `bin/loop-stats`, because today the only invocation is `node scripts/loop-stats.js` typed from
 this repository's checkout, which is the one directory the operator is not standing in.
 
@@ -69,7 +69,7 @@ cards are resolved against the installed skills. `DISPATCH` and `HABIT` cards le
 grep, so they read `n/a` rather than `pending` — counting them pending would fill the open list with
 cards that can never close.
 
-**Entry points.** `/dashboard` (manual-only, for the same consent reason as `/session-review`: half of
+**Entry points.** `/dashboard-harness` (manual-only, for the same consent reason as `/session-review`: half of
 what it renders is about the human) and `bin/loop-stats`. `--html` with no argument writes to
 `${XDG_CACHE_HOME:-~/.cache}/harness-audit/dashboard/<slug>.html` — outside `~/.claude`, and outside
 the repo, where a `git add -A` would publish a month of the operator's prompting.
@@ -104,9 +104,9 @@ own recorded negative controls in the comment above it.
 | R3 ✅ | Tools, guards and hygiene are read from the pinned signals fixture, and a guard merely *named* — in a prompt, or inside a failed grep of the logs — is not a fire | `loop-stats mines tools, guards and hygiene from the signals fixture` |
 | R4 ✅ | The shape filter and the ±60s dedup run in the script, and both counts are printed | same check (`droppedAgentShaped`, `dedupedRecords`) |
 | R5 ✅ | The installed-skill inventory, the review lifecycle, and the rule engine — and the rules below their thresholds stay silent | `loop-stats reads the skill inventory, the review lifecycle, and fires cards only on evidence` |
-| R6 ✅ | `/dashboard` runs the script with the `${CLAUDE_PLUGIN_ROOT:-.claude}` fallback, is manual-only, and never reads a transcript itself | `dashboard runs the script and never parses transcripts itself` |
+| R6 ✅ | `/dashboard-harness` runs the script with the `${CLAUDE_PLUGIN_ROOT:-.claude}` fallback, is manual-only, and never reads a transcript itself | `dashboard runs the script and never parses transcripts itself` |
 | R7 ✅ | Six commands, each with a description and an argument-hint | `exactly 6 commands — 5 loops and 1 observer` |
-| R8 ✅ | `/dashboard` is withheld from the Pi port for the same reason `/session-review` is | `install.sh --target pi installs templates Pi can actually load` (4 of 6) |
+| R8 ✅ | `/dashboard-harness` is withheld from the Pi port for the same reason `/session-review` is | `install.sh --target pi installs templates Pi can actually load` (4 of 6) |
 | R9 ✅ | `--all` aggregates every project under the telemetry root and reports the ones it could not read | `loop-stats aggregates every project under --all, and --brief withholds the accounting` |
 | R10 ✅ | `--brief` emits exactly the fields the model pass needs, and no more | same check |
 | R11 ✅ | `/session-review` consumes the new fields and keeps the `▸ **TYPE**` card format the parser reads back | `loop-stats aggregates every project under --all, and --brief withholds the accounting` (the command's half) |
@@ -130,7 +130,7 @@ own recorded negative controls in the comment above it.
 | The correction heuristic has false positives (`no olvides…` matches) | Labelled `proxy: true` everywhere it surfaces, requires the turn to follow an agent turn, and **fires no card on its own** — only the explicit denial reasons do |
 | Turns a loop wrote to its own subagent inflate every prompt-derived number | Shape filter plus dedup, both counted and printed; `prompts.total` keeps its old meaning so the pinned fixture and the README stay true |
 | A guard's name appears in a prompt, or inside a grep of the logs | The matcher is anchored at the start of an `is_error` result; the fixture pins both non-fires |
-| The HTML quotes prompts verbatim | Default path is the user's cache, never the repo; `/dashboard` never passes a repo path to `--html` |
+| The HTML quotes prompts verbatim | Default path is the user's cache, never the repo; `/dashboard-harness` never passes a repo path to `--html` |
 | A rule engine that fires on everything | The silent-rule list is asserted, not just the fired one; three rules sit below their thresholds in the fixture and none may fire |
 
 ## 8. Verification

@@ -137,7 +137,7 @@ the quote slot is a fabrication with good manners.
 ```
 
 **Keep this line format exactly.** `loop-stats` parses these `▸ **TYPE**` lines back on every
-`/dashboard` run — that is how a card gets a lifecycle instead of disappearing into a markdown file.
+`/dashboard-harness` run — that is how a card gets a lifecycle instead of disappearing into a markdown file.
 Restyling them is not a formatting choice; it is deleting the lifecycle.
 
 One line per card, more than one card per type when the evidence supports it, **zero cards of a type
@@ -170,7 +170,7 @@ were dropped, and what you deliberately did **not** conclude.
 Then report to the human in three lines: the cards, the file path, and the single card you would act on
 first.
 
-The report is also an input: `/dashboard` reads its card lines back and reports each one as promoted,
+The report is also an input: `/dashboard-harness` reads its card lines back and reports each one as promoted,
 pending or n/a until you settle it.
 
 ## Cadence

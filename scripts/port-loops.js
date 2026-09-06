@@ -202,7 +202,7 @@ const yamlQuote = (v) => JSON.stringify(String(v));
 // and its data source is the transcripts Claude Code writes (its own description says so), not Pi's
 // sessions, which live elsewhere in a different format. Ported, it would be a template that looks like a
 // working loop and dies on its first command. That is precisely the failure mode this port refuses.
-const PI_UNPORTABLE_COMMANDS = new Set(['session-review', 'dashboard']);
+const PI_UNPORTABLE_COMMANDS = new Set(['session-review', 'dashboard-harness']);
 
 // Task-tool-specific body text, replaced with the pi-subagents `subagent` tool's own vocabulary — every
 // pair below is a literal substring verified against commands/*.md, 2026-07-13. A pair that matches
