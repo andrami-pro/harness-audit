@@ -46,15 +46,15 @@
 # in this repo dispatch subagents, so a Pi port only works through the
 # third-party pi-subagents extension (github.com/nicobailon/pi-subagents,
 # `pi install npm:pi-subagents`). --target pi checks for it before writing
-# anything: found → ports 4 of the 5 commands/*.md to .pi/prompts/ (Pi's own
+# anything: found → ports 4 of the 6 commands/*.md to .pi/prompts/ (Pi's own
 # prompt-template format, a native discovery location, invoked the same way,
 # by typing /orchestrate etc.) and all 7 agents/*.md to .pi/agents/ in the
 # pi-subagents schema; missing → fails with the install command, unless
 # --skip-subagent-check is passed, in which case it writes the same files
 # with a loud warning that they are inert without the extension — nothing
 # here dispatches a subagent without it, commands included.
-# session-review is the 5th command and does NOT port: it shells out to
-# ${CLAUDE_PLUGIN_ROOT}/scripts/loop-stats.js and reads Claude Code's own
+# session-review and dashboard do NOT port: both shell out to
+# ${CLAUDE_PLUGIN_ROOT}/scripts/loop-stats.js and read Claude Code's own
 # transcripts. See PI_UNPORTABLE_COMMANDS in scripts/port-loops.js.
 #
 # Project-level targets install into the CURRENT working directory's project.

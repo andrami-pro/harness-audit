@@ -291,7 +291,7 @@ applies to, not six different theories:
 | 3 | Multi-agent review | a draft / diff | the critic panel's checklist | four orthogonal critics, none of which authored the artifact | a findings JSON per round |
 | 4 | Verification | an app / corpus | `harness-rubric.md`, score /100 | critics + scorer, `develop-phase` per feature | a findings JSON with score + blocker trend |
 | 5 | Workflow improvement | the process itself | the process's own predictions | the *next* round, which settles the previous round's prediction | `process.md` (spec) + `process-log.md` (predictions) |
-| 6 | Operator | the human driving | recurrence in the operator's own transcripts, counted locally | the human, who promotes or rejects each card — the loop only proposes | a `session-review` report per run in `loop-runs/` |
+| 6 | Operator | the human driving | recurrence in the operator's own transcripts, counted locally | the human, who promotes or rejects each card — the loop only proposes | a `session-review` report per run in `loop-runs/`, read back by `/dashboard`, which reports each card as promoted, pending or n/a |
 
 Read against §5.2, the loop-readiness grades are not a separate scale — they are what these loops build,
 in order:

@@ -267,7 +267,7 @@ against the web. That is its entire job. Install
 frontmatter, or do not trust that seat on this target.
 
 **The `model:` line is still a Claude Code alias on Pi, the same trap as OpenCode/Kilo Code below.**
-None of the 5 commands carry a `model:` field — they run in whatever model expanded them, by design —
+None of this repo's commands carry a `model:` field — they run in whatever model expanded them, by design —
 but all 7 ported agents do, and pi-subagents cannot resolve `sonnet`/`fable`/`opus` any better than
 OpenCode or Kilo Code can. Re-run `--lineup` to stamp real provider/model ids, or edit the files by hand.
 
@@ -318,6 +318,10 @@ writing and maintaining three more integrations against APIs this repo doesn't o
 | "Deep audit of the whole app — rare, token-hungry" | 4 · Verification | `/review-loop [max-iter]` · plus the `develop-phase` workflow the audit generates per repo | high | score ≥ 90 ∧ 0 blockers (max 5) |
 | "Improve the *process* that builds the product" | 5 · Workflow improvement | `/iterate <task>` | high | score ≥ 90 ∧ optimizer out of proposals (max 5) |
 | "Improve how *I* drive the agent — fully local" | 6 · Operator | `/session-review [--since 30d]` | med-low | single pass; re-run weekly |
+
+Plus one thing that is not a loop: **`/dashboard`**, the free observer the six are watched through.
+It reads your local transcripts and reports how the driving went. See
+[Watch them run](#watch-them-run--dashboard).
 
 **Honesty rule for this table:** a loop only gets a row once it has at least one real, recorded run — a findings
 JSON (or, for the process loop, a settled prediction) in the operating repo's `docs/harness-dev/loop-runs/`.
@@ -430,7 +434,7 @@ Loops are not free, and the wrong one is worse than none.
 | `/review-loop` (critic fan-out × ≤ 5) | high · token-hungry | every commit. Only a large app or corpus, and rarely |
 | `/iterate` (builder + scorer + optimizer × ≤ 5) | high | bug fixes, one-file changes — a feature that converges in round 1 teaches the process nothing |
 | `/session-review` (free stats + 1 pass over top-N) | med-low | daily runs — a growth edge needs enough sessions to be an edge and not a bad afternoon |
-| `loop-stats.js` | free (local script, zero tokens) | — run it as often as you like |
+| `/dashboard` · `bin/loop-stats` | free (local script, zero tokens) | — run it as often as you like |
 
 ### How loops activate
 
@@ -459,23 +463,46 @@ so a ported copy of these three loses the veto and becomes auto-dispatchable. Pi
 field either, but keeps the veto anyway — invocation there is always a typed `/name`, never a tool call
 the model can make on its own. See [Compatibility across harnesses](#compatibility-across-harnesses).
 
-### Watch them run
+### Watch them run — `/dashboard`
 
-`scripts/loop-stats.js` is the dashboard for everything above — tokens per agent, activations,
-durations, learnings, and the workflow/loop-run history — read straight out of the local Claude Code
-transcripts and `docs/harness-dev/loop-runs/`. It is an observer, not a loop: it iterates on nothing,
-costs zero tokens, and never leaves your machine.
+`/dashboard` is the observer the six loops are watched through. It reads the transcripts Claude Code
+already wrote on this machine and reports what they say — not just what they cost. It iterates on
+nothing, costs zero tokens, edits nothing, and never leaves your machine.
 
 ```bash
-node scripts/loop-stats.js                       # this project, all history, ANSI report to stdout
-node scripts/loop-stats.js --project <slug>       # a different project's telemetry (default: cwd)
+/dashboard                       # inside Claude Code — this project, last 30 days
+/dashboard --since 7d --open     # …and open the HTML report in a browser
+bin/loop-stats --project ~/code/my-app --since 30d --html   # or from any shell
+```
+
+What it audits, on top of the accounting that was always there:
+
+| Block | What it answers |
+|---|---|
+| **Cards** | The recommendations. Rule-based, zero tokens; each carries its evidence, the field it came from, and what it does not prove |
+| **Session-review lifecycle** | What Loop 6 last proposed, and whether the repo now contains it — a promoted rule is shown with the `AGENTS.md` line that proves it |
+| **Session hygiene** | Bare continuations, interrupts, compactions, `/model` switches typed by hand — every proxy labelled as one |
+| **Tools & failures** | Which tools ran, which failure kept coming back, and every call you refused with the reason you typed |
+| **Guards & hooks** | Which guards actually fired, and which hooks merely ran |
+| **Skills & commands** | Which of your installed skills were ever invoked, and which sat on the shelf |
+
+Two properties make this a report rather than a horoscope. **A rule that finds no evidence prints
+nothing** — the count of rules that stayed silent is printed instead of a reassuring card. And **no
+card edits anything**: same contract `/session-review` has with `AGENTS.md`, for the same reason.
+
+```bash
+node scripts/loop-stats.js                        # the same report, straight from a checkout
+node scripts/loop-stats.js --project <path|slug>  # another project — a path works, symlinks and all
 node scripts/loop-stats.js --root <dir>           # telemetry root (default: ~/.claude/projects)
-node scripts/loop-stats.js --repo <path>          # read loop-runs/ + LEARNINGS.md from another repo
+node scripts/loop-stats.js --repo <path>          # read loop-runs/, LEARNINGS.md, AGENTS.md elsewhere
 node scripts/loop-stats.js --since 7d             # window the report to the last N days
 node scripts/loop-stats.js --top 20               # how many recurring prompts to surface (default 3)
-node scripts/loop-stats.js --html out.html        # retro-terminal (CRT) report you can share
+node scripts/loop-stats.js --html [out]           # CRT report; no path = ~/.cache/harness-audit/
 node scripts/loop-stats.js --json                 # the same aggregate, machine-readable
 ```
+
+The HTML report defaults to your cache, not the repository: it quotes your prompts and your denial
+reasons verbatim, and a file like that landing in `docs/` is one `git add -A` away from being public.
 
 **Reading the `est.$` column (D17):** it is list price × **measured** tokens for that run — never a
 multiplier, never a heuristic. A model absent from the price table renders `n/a` instead of a guess —

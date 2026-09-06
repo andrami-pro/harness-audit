@@ -452,7 +452,7 @@ offers, not auto-fired mid-session.
 ```
 
 Retrospective visibility for all three levels — which loop fired, when, on what — comes free from
-`node scripts/loop-stats.js`; the announcement rule above gives it live, at dispatch time.
+`/dashboard` (or `bin/loop-stats`); the announcement rule above gives it live, at dispatch time.
 
 **Critical zones by stack** (adapt to the stack detected in Step 1 — trigger B above):
 

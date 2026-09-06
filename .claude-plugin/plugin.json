@@ -1,7 +1,7 @@
 {
   "name": "harness-audit",
-  "description": "Audit any repo's agent harness against four pillars and emit an executable rubric a loop can converge against, then ships the six loops that converge against it (stateless verification, skill learning, multi-agent review, deep verification, workflow improvement, operator session review) plus a zero-token telemetry dashboard. Ships write-time security guards (destructive-command gate, secret scan, no-verify block) and a loop-hygiene guard (repeat-tool-guard: an advisory reminder after consecutive identical tool calls).",
-  "version": "2.6.0",
+  "description": "Audit any repo's agent harness against four pillars and emit an executable rubric a loop can converge against, then ships the six loops that converge against it (stateless verification, skill learning, multi-agent review, deep verification, workflow improvement, operator session review) plus /dashboard, a zero-token auditor of tool failures, guards, skills installed against skills used, session hygiene and the /session-review lifecycle, read from the local transcripts and never leaving the machine. Ships write-time security guards (destructive-command gate, secret scan, no-verify block) and a loop-hygiene guard (repeat-tool-guard: an advisory reminder after consecutive identical tool calls).",
+  "version": "2.7.0",
   "author": {
     "name": "Andrés Ramírez · andrami",
     "url": "https://andrami.pro"
