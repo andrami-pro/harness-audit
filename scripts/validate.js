@@ -600,7 +600,7 @@ check('loop-stats mines tools, guards and hygiene from the signals fixture', () 
   // guards: one real fire, and one guard named in prose that must stay at zero.
   const guards = Object.fromEntries(d.guards.pluginGuards.map((g) => [g.name, g.fires]));
   if (guards['block-no-verify'] !== 1) throw new Error(`block-no-verify fires = ${guards['block-no-verify']}, expected 1`);
-  if (guards['destructive-guard'] !== 0) throw new Error('a guard named in a prompt was counted as a fire');
+  if (guards['destructive-guard'] !== 0) throw new Error('a guard merely named — in a prompt, or inside a failed grep of the logs — was counted as a fire');
   if (d.guards.otherHooks.length !== 1) throw new Error(`otherHooks = ${d.guards.otherHooks.length}, expected 1 (two attachments, one hook)`);
   if (d.guards.otherHooks[0].runs !== 2 || d.guards.otherHooks[0].nonZeroExit !== 1) {
     throw new Error(`hook runs/nonZero = ${d.guards.otherHooks[0].runs}/${d.guards.otherHooks[0].nonZeroExit}, expected 2/1`);
