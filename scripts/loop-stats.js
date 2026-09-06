@@ -635,7 +635,7 @@ const RULES = [
     type: 'SKILL CANDIDATE',
     severity: 'warn',
     when: (d) => d.skills && d.skills.installedNotUsed.project.length >= 5 && d.skills.shelfRatio.project >= 0.6,
-    headline: (d) => `${d.skills.installedNotUsed.project.length} of the project's ${Math.round(d.skills.installedNotUsed.project.length / d.skills.shelfRatio.project)} installed skills were never invoked here`,
+    headline: (d) => `${d.skills.installedNotUsed.project.length} of the ${d.skills.installedNotUsed.projectTotal} skills installed in this project were never invoked here`,
     evidence: (d) => d.skills.installedNotUsed.project.slice(0, 12).join(', '),
     recommendation: 'Prune them, or name the invocation in AGENTS.md so the use becomes observable.',
     doesNotProve: 'that a skill is useless — a description that auto-triggered without the Skill tool leaves no trace in the transcript',
@@ -648,8 +648,8 @@ const RULES = [
     when: (d) => d.skills && d.skills.usedNotInstalled.length > 0,
     headline: (d) => `${d.skills.usedNotInstalled.length} name(s) were invoked that no SKILL.md or command file backs`,
     evidence: (d) => d.skills.usedNotInstalled.join(', '),
-    recommendation: 'Check whether each is a workflow (which is fine) or a skill that was removed while the habit of calling it stayed.',
-    doesNotProve: 'that anything is broken — built-in commands and workflows land here too',
+    recommendation: 'Check whether each is a workflow or a skill bundled with the client (both fine) or one that was removed while the habit of calling it stayed.',
+    doesNotProve: 'that anything is missing — skills the client ships, and workflows, have no SKILL.md under this project or home directory either',
     source: 'skills.usedNotInstalled',
   },
   {
@@ -920,9 +920,12 @@ function buildInventory(repo, hygiene) {
   const bySource = {};
   for (const sk of skills) bySource[sk.source] = (bySource[sk.source] || 0) + 1;
 
-  const unusedIn = (sources) => skills.filter((sk) => sources.includes(sk.source) && !usedCounts.has(bareName(sk.name)))
-    .map((sk) => sk.name).sort();
-  const countIn = (sources) => skills.filter((sk) => sources.includes(sk.source)).length;
+  // A skill installed in both .claude/skills and .agents/skills is one skill on the shelf.
+  const unusedIn = (sources) => [...new Set(skills
+    .filter((sk) => sources.includes(sk.source) && !usedCounts.has(bareName(sk.name)))
+    .map((sk) => bareName(sk.name)))].sort();
+  const countIn = (sources) => new Set(skills.filter((sk) => sources.includes(sk.source))
+    .map((sk) => bareName(sk.name))).size;
   const projectSources = ['project', 'project-agents', 'project-command'];
   const userSources = ['user', 'user-agents', 'user-command'];
   const projectUnused = unusedIn(projectSources);
@@ -942,7 +945,10 @@ function buildInventory(repo, hygiene) {
     // (/model, /compact), so it is left in commands.typed rather than reported as a missing skill.
     usedNotInstalled: used.filter((u) => !u.sources.length && u.viaSkillTool > 0)
       .map((u) => u.name).sort(),
-    installedNotUsed: { project: projectUnused, user: userUnused.slice(0, 20), userCount: userUnused.length },
+    installedNotUsed: {
+      project: projectUnused, user: userUnused.slice(0, 20), userCount: userUnused.length,
+      projectTotal: projectCount, userTotal: userCount,
+    },
     shelfRatio: {
       project: projectCount ? projectUnused.length / projectCount : 0,
       user: userCount ? userUnused.length / userCount : 0,
@@ -1051,6 +1057,11 @@ function parseReviews(repo, inventory) {
   }
   return { latest, history };
 }
+
+const dedupeBy = (xs, key) => {
+  const seen = new Set();
+  return xs.filter((x) => { const k = key(x); if (seen.has(k)) return false; seen.add(k); return true; });
+};
 
 function buildSignals(sessions, prompts, args) {
   const inWindow = (ts) => args.sinceMs === null || (Number.isFinite(Date.parse(ts)) && Date.parse(ts) >= args.sinceMs);
@@ -1182,7 +1193,12 @@ function buildSignals(sessions, prompts, args) {
       errorClusters: [...clusters.values()].filter((c) => c.count > 1)
         .sort((a, b) => b.count - a.count).slice(0, 10)
         .map((c) => ({ ...c, sessions: c.sessions.size })),
-      denials: { count: denials.length, reasons: denials.filter((d) => d.reason).slice(0, 10) },
+      denials: {
+        count: denials.length,
+        // The same reason recorded twice (a resend, a retried call) is one correction. Same rule as
+        // the prompt dedup: event count, not record count.
+        reasons: dedupeBy(denials.filter((d) => d.reason), (d) => d.reason.toLowerCase()).slice(0, 10),
+      },
       staleEdits,
       // Retried transport errors, not failed work: Claude Code retries these itself and the run
       // usually completes. Counted because a burst of them explains a slow session.
