@@ -2176,7 +2176,7 @@ const STR = {
     cPromoted: (n) => `${n} card${n === 1 ? '' : 's'} de review promovida${n === 1 ? '' : 's'} al contrato`,
     cAb: (subj, delta, max) => `A/B de skill-loop sobre ${subj}: ${delta} ${max ? `de ${max}` : ''} con el skill vs sin él`,
     cPred: (v, f) => `${v} predicción${v === 1 ? '' : 'es'} del optimizador verificada${v === 1 ? '' : 's'}, ${f} falsada${f === 1 ? '' : 's'}`,
-    cLearn: (n) => `${n} lección${n === 1 ? '' : 'es'} escrita${n === 1 ? '' : 's'} en un LEARNINGS.md`,
+    cLearn: (n) => `${n} ${n === 1 ? 'lección escrita' : 'lecciones escritas'} en un LEARNINGS.md`,
     cGreen: (t) => `rondas hasta verde en corridas aprobadas: ${t}`,
     cNudges: (n) => `más ${n} aviso${n === 1 ? '' : 's'} del guard de repetición (consultivo, no cuenta)`,
     caughtNot: 'Qué no prueba esto: qué habría salido sin el arnés. Nadie corrió ese brazo. Cada línea es un evento; el contrafactual no lo es.',
@@ -2888,7 +2888,7 @@ function renderHtml(d, lang = 'en') {
   .bar i { flex:1; background:var(--line); min-width:4px; }
   .bar i.on { background:var(--green); }
   .bar.gold i.on { background:var(--gold); }
-  .three { display:grid; grid-template-columns:1fr 1.3fr 1.3fr; gap:1rem; margin-top:1.25rem; align-items:start; }
+  .three { display:grid; grid-template-columns:.9fr 1.2fr 1.6fr; gap:1rem; margin-top:1.25rem; align-items:start; }
   @media (max-width:820px) { .three { grid-template-columns:1fr; } }
   .col { border:2px solid var(--line); background:var(--panel2); padding:.9rem 1rem 1rem; }
   .col.keep { border-color:var(--green-deep); } .col.improve { border-color:var(--amber-dim, #8a6d1c); }

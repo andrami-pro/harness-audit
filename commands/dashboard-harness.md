@@ -1,6 +1,6 @@
 ---
 description: "The observer, not a loop. Renders the zero-token dashboard for this project out of the transcripts Claude Code already wrote on this machine: rule-based cards with their evidence and their limits, the lifecycle of what the last /session-review proposed, session hygiene, tool failures and the calls you refused, which guards fired, and which of your installed skills were ever invoked. One self-contained HTML file plus a terminal summary. It iterates on nothing, costs zero tokens, edits nothing, and nothing leaves the machine."
-argument-hint: "[--since 30d] [--all] [--open] [--project <path|slug>]"
+argument-hint: "[--since 30d] [--lang en|es|fr] [--all] [--open] [--project <path|slug>]"
 allowed-tools: Bash(node:*), Bash(mkdir:*)
 disable-model-invocation: true
 ---
@@ -24,7 +24,7 @@ you work has not saved you a step.
 node "${CLAUDE_PLUGIN_ROOT:-.claude}/scripts/loop-stats.js" --repo "$PWD" --since 30d --html --open $ARGUMENTS
 ```
 
-Pass `$ARGUMENTS` straight through — every flag it may carry (`--since`, `--all`, `--open`,
+Pass `$ARGUMENTS` straight through — every flag it may carry (`--since`, `--lang`, `--all`, `--open`,
 `--project`, `--top`) is the script's, and a later `--since` overrides the default above.
 `--project` defaults to the current directory and resolves a path as readily as a slug.
 
