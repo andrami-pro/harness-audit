@@ -1,7 +1,7 @@
 ---
 id: PRD-003
 title: The dashboard becomes an auditor, and gets a way in
-status: in-progress
+status: done
 created: 2026-09-06
 updated: 2026-09-06
 ---
@@ -94,7 +94,8 @@ The cap moves from five to six, and its comment names the sixth as an observer r
 
 ## 5. Requirements and acceptance criteria
 
-Each requirement is the check that proves it. Requirements marked ✅ are already green.
+Each requirement is the check that proves it. All are green as of 2026-09-06; each check carries its
+own recorded negative controls in the comment above it.
 
 | # | Requirement | Check in `scripts/validate.js` |
 |---|---|---|
@@ -103,12 +104,12 @@ Each requirement is the check that proves it. Requirements marked ✅ are alread
 | R3 ✅ | Tools, guards and hygiene are read from the pinned signals fixture, and a guard merely *named* — in a prompt, or inside a failed grep of the logs — is not a fire | `loop-stats mines tools, guards and hygiene from the signals fixture` |
 | R4 ✅ | The shape filter and the ±60s dedup run in the script, and both counts are printed | same check (`droppedAgentShaped`, `dedupedRecords`) |
 | R5 ✅ | The installed-skill inventory, the review lifecycle, and the rule engine — and the rules below their thresholds stay silent | `loop-stats reads the skill inventory, the review lifecycle, and fires cards only on evidence` |
-| R6 | `/dashboard` runs the script with the `${CLAUDE_PLUGIN_ROOT:-.claude}` fallback, is manual-only, and never reads a transcript itself | `dashboard runs the script and never parses transcripts itself` |
-| R7 | Six commands, each with a description and an argument-hint | `exactly 6 commands` (the cap, raised with its rationale) |
-| R8 | `/dashboard` is withheld from the Pi port for the same reason `/session-review` is | `install.sh --target pi installs templates Pi can actually load` (3 of 6) |
-| R9 | `--all` aggregates every project under the telemetry root and reports the ones it could not read | `loop-stats aggregates every project under --all` |
-| R10 | `--brief` emits exactly the fields the model pass needs, and no more | same check |
-| R11 | `/session-review` consumes the new fields and keeps the `▸ **TYPE**` card format the parser reads back | `every loop command produces the v2 schema the dashboard reads` |
+| R6 ✅ | `/dashboard` runs the script with the `${CLAUDE_PLUGIN_ROOT:-.claude}` fallback, is manual-only, and never reads a transcript itself | `dashboard runs the script and never parses transcripts itself` |
+| R7 ✅ | Six commands, each with a description and an argument-hint | `exactly 6 commands — 5 loops and 1 observer` |
+| R8 ✅ | `/dashboard` is withheld from the Pi port for the same reason `/session-review` is | `install.sh --target pi installs templates Pi can actually load` (3 of 6) |
+| R9 ✅ | `--all` aggregates every project under the telemetry root and reports the ones it could not read | `loop-stats aggregates every project under --all, and --brief withholds the accounting` |
+| R10 ✅ | `--brief` emits exactly the fields the model pass needs, and no more | same check |
+| R11 ✅ | `/session-review` consumes the new fields and keeps the `▸ **TYPE**` card format the parser reads back | `loop-stats aggregates every project under --all, and --brief withholds the accounting` (the command's half) |
 
 ## 6. Out of scope
 
@@ -142,7 +143,19 @@ bin/loop-stats --project <a real path> --since 30d --html --open
 sh install.sh --target pi --skip-graphify --skip-subagent-check   # 4 templates, not 6
 ```
 
-## 9. Open questions
+## 9. First real run — 2026-09-06
+
+`--all` over 34 projects on this machine took 10 s and priced $10 784 across 135 sessions. The
+per-project run on `andrami-pro` (30 d, 22 sessions, 209 human prompts, 58 agent-shaped turns dropped)
+fired 12 cards and left one rule silent — `denials-as-rules`, because the nine refused calls carry only
+two distinct typed reasons and the threshold is three.
+
+The lifecycle read what it was built for: the 2026-07-12 report's five cards resolve as 2 promoted
+(`AGENTS.md:46` and `:93`), 1 pending (`/commit`, still not installed after 56 days) and 2 n/a. The
+promoted `/humanizer` rule shows up independently in the cross-project view as the most-invoked skill
+on the machine — 34 calls across 8 projects — which is the rule being kept rather than merely written.
+
+## 10. Open questions
 
 - Do the thresholds hold on a second project? They were read off one corpus, and a rule that fires on
   every project is as useless as one that never does. The honest answer arrives with the second
