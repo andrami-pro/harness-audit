@@ -106,7 +106,7 @@ own recorded negative controls in the comment above it.
 | R5 ✅ | The installed-skill inventory, the review lifecycle, and the rule engine — and the rules below their thresholds stay silent | `loop-stats reads the skill inventory, the review lifecycle, and fires cards only on evidence` |
 | R6 ✅ | `/dashboard` runs the script with the `${CLAUDE_PLUGIN_ROOT:-.claude}` fallback, is manual-only, and never reads a transcript itself | `dashboard runs the script and never parses transcripts itself` |
 | R7 ✅ | Six commands, each with a description and an argument-hint | `exactly 6 commands — 5 loops and 1 observer` |
-| R8 ✅ | `/dashboard` is withheld from the Pi port for the same reason `/session-review` is | `install.sh --target pi installs templates Pi can actually load` (3 of 6) |
+| R8 ✅ | `/dashboard` is withheld from the Pi port for the same reason `/session-review` is | `install.sh --target pi installs templates Pi can actually load` (4 of 6) |
 | R9 ✅ | `--all` aggregates every project under the telemetry root and reports the ones it could not read | `loop-stats aggregates every project under --all, and --brief withholds the accounting` |
 | R10 ✅ | `--brief` emits exactly the fields the model pass needs, and no more | same check |
 | R11 ✅ | `/session-review` consumes the new fields and keeps the `▸ **TYPE**` card format the parser reads back | `loop-stats aggregates every project under --all, and --brief withholds the accounting` (the command's half) |
