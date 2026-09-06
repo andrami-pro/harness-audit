@@ -556,14 +556,14 @@ check('loop-stats round-trips its aggregate through --json-out / --from-json', (
 // shapes are internal and undocumented: a Claude Code release that renames `compactMetadata` or
 // stops writing hook attachments must break CI here rather than quietly zero a column.
 //
-// Two of its records exist only to be NOT counted, which is the half of the fixture that matters:
-// a prompt that merely mentions destructive-guard by name (a mention is not a fire — this repo
-// discusses its own guards in the very sessions it measures), and a `Round 1.` turn a loop wrote to
-// its own subagent (byte-identical to a keystroke; only its shape gives it away).
+// Three of its records exist only to be NOT counted, which is the half of the fixture that matters:
+// a prompt that mentions destructive-guard by name, a failed grep whose OUTPUT quotes a guard's
+// blocked message (this repo greps its own transcripts, so a matcher that is not anchored at the
+// start of the result invents fires out of its own logs), and a `Round 1.` turn a loop wrote to its
+// own subagent — byte-identical to a keystroke, and only its shape gives it away.
 //
 // Negative controls (2026-09-06, each applied by hand, observed, reverted — all exit 1):
 //   GUARD_FIRE unanchored (/harness-audit .../ without ^) ... destructive-guard fires = 1, expected 0
-//   is_error requirement dropped from the guard matcher .... destructive-guard fires = 1, expected 0
 //   looksAgentAuthored disabled ............................ droppedAgentShaped = 0, expected 1
 //   dedup window 60s → 0s .................................. dedupedRecords = 0, expected 1
 //   Task-only spawn lookup (the pre-P0 code) ............... reviewer row absent — agent lands as "subagent"
@@ -577,8 +577,8 @@ check('loop-stats mines tools, guards and hygiene from the signals fixture', () 
 
   // tools: five Bash calls, four of which failed — three the same way, one blocked by a guard.
   const bash = d.tools.byName.find((r) => r.name === 'Bash');
-  if (!bash || bash.calls !== 5 || bash.errors !== 4) throw new Error(`Bash = ${JSON.stringify(bash)}, expected 5 calls / 4 errors`);
-  if (d.tools.totalCalls !== 9) throw new Error(`totalCalls = ${d.tools.totalCalls}, expected 9`);
+  if (!bash || bash.calls !== 6 || bash.errors !== 5) throw new Error(`Bash = ${JSON.stringify(bash)}, expected 6 calls / 5 errors`);
+  if (d.tools.totalCalls !== 10) throw new Error(`totalCalls = ${d.tools.totalCalls}, expected 10`);
   if (d.tools.errorClusters.length !== 1) throw new Error(`errorClusters = ${d.tools.errorClusters.length}, expected 1`);
   const [cluster] = d.tools.errorClusters;
   if (cluster.count !== 3 || cluster.tool !== 'Bash') throw new Error(`cluster = ${cluster.count}×${cluster.tool}, expected 3×Bash`);
