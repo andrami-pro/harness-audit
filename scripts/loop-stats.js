@@ -644,6 +644,29 @@ function parseRepo(repo) {
 // nobody can argue with, and these are meant to be argued with.
 const RULES = [
   {
+    id: 'harness-caught',
+    priority: 0,
+    type: 'HARNESS',
+    severity: 'info',
+    when: (d) => !!(d.caught && d.caught.total > 0),
+    headline: (d) => `the harness said no ${d.caught.total} time${d.caught.total === 1 ? '' : 's'} on the record`,
+    evidence: (d) => {
+      const c = d.caught;
+      const bits = [];
+      if (c.rejected.length) bits.push(`${c.rejected.length} workflow run${c.rejected.length === 1 ? '' : 's'} RECHAZADO by the reviewer (${c.rejected.map((r) => `${r.name} ${r.date}${r.rounds ? ` ×${r.rounds}` : ''}`).slice(0, 3).join(', ')})`);
+      if (c.rejectedLoops.length) bits.push(`${c.rejectedLoops.length} loop run${c.rejectedLoops.length === 1 ? '' : 's'} stopped by a seat`);
+      if (c.guardFires.length) bits.push(c.guardFires.map((g) => `${g.name} blocked ×${g.fires}`).join(', '));
+      if (c.promoted.length) bits.push(`${c.promoted.length} review card${c.promoted.length === 1 ? '' : 's'} promoted into the contract`);
+      if (c.ab.length) bits.push(c.ab.map((a) => `A/B ${a.subject} ${a.deltaScore >= 0 ? '+' : ''}${a.deltaScore}${a.scoreMax ? `/${a.scoreMax}` : ''}`).join(', '));
+      if (c.predictions.verified || c.predictions.falsified) bits.push(`${c.predictions.verified} prediction${c.predictions.verified === 1 ? '' : 's'} verified, ${c.predictions.falsified} falsified`);
+      if (c.learnings) bits.push(`${c.learnings} learning${c.learnings === 1 ? '' : 's'} written`);
+      return bits.join(' · ');
+    },
+    recommendation: 'nothing to do - this is the receipt. When the list is short, the loops that produce it (/review-loop, /session-review, /skill-loop) are the ones not running',
+    doesNotProve: 'what would have shipped without the harness - nobody ran that arm; each line is an event, the counterfactual is not',
+    source: 'caught',
+  },
+  {
     id: 'continue-token',
     priority: 3,
     type: 'HABIT',
@@ -1091,7 +1114,7 @@ function buildInventory(repo, hygiene) {
 // REVIEWS — what Loop 6 proposed, and whether the human promoted it
 // ─────────────────────────────────────────────────────────────────────────────
 
-const CARD_TYPES = ['SKILL CANDIDATE', 'AGENTS.md RULE', 'DISPATCH', 'HABIT', 'LIFECYCLE'];
+const CARD_TYPES = ['SKILL CANDIDATE', 'AGENTS.md RULE', 'DISPATCH', 'HABIT', 'LIFECYCLE', 'HARNESS'];
 
 // The report format is a contract, not a style: these are the lines read back here. session-review.md
 // says so at the point where it writes them.
@@ -1551,6 +1574,7 @@ function aggregate(args) {
   const inventoryRepo = args.repo || process.cwd();
   const skillsInventory = buildInventory(inventoryRepo, signals.hygiene);
   const reviews = parseReviews(inventoryRepo, skillsInventory);
+  const caught = buildCaught({ workflows, loopRuns: repo.loopRuns, learnings: repo.learnings, savings: repo.savings, guards: signals.guards, reviews, hygiene: signals.hygiene });
 
   const data = {
     project: args.project,
@@ -1571,6 +1595,7 @@ function aggregate(args) {
     hygiene: signals.hygiene,
     skills: skillsInventory,
     reviews,
+    caught,
     previous,
     lineup: buildLineup(args, agents),
     warnings: warnings.length,
@@ -1583,6 +1608,42 @@ function aggregate(args) {
   data.rulesSilent = cards.silent;
   data.warnings = warnings.length;
   return data;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CAUGHT — every event where a harness component said no, or changed something, on the record
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// This is the only place the report answers "did the harness help?", and it answers with a list of
+// events, never with a saving: a rejected run is a reviewer that returned a diff before it merged; a
+// guard fire is a command that did not run; a promoted card is a rule that reached the contract; an
+// A/B row is a measured gap. What none of them prove is what would have shipped without the harness —
+// nobody ran that arm — and the block says so where it is rendered.
+function buildCaught(src) {
+  const rejected = src.workflows.filter((w) => w.verdict === 'RECHAZADO')
+    .map((w) => ({ runId: w.runId, name: w.name, date: String(w.startedAt).slice(0, 10), rounds: w.rounds }));
+  const rejectedLoops = src.loopRuns.filter((r) => r.verdict === 'RECHAZADO' || (r.stoppedBy && /blocker|scorer|reviewer/i.test(r.stoppedBy)))
+    .map((r) => ({ run: r.run, loop: r.loop, date: r.date, stoppedBy: r.stoppedBy }));
+  const guardFires = (src.guards && src.guards.pluginGuards ? src.guards.pluginGuards : [])
+    .filter((g) => g.fires > 0 && !g.advisory).map((g) => ({ name: g.name, fires: g.fires }));
+  const nudges = (src.guards && src.guards.pluginGuards ? src.guards.pluginGuards : [])
+    .filter((g) => g.fires > 0 && g.advisory).reduce((n, g) => n + g.fires, 0);
+  const promoted = src.reviews && src.reviews.latest
+    ? src.reviews.latest.cards.filter((c) => c.state === 'promoted').map((c) => ({ type: c.type, text: c.text, evidence: c.evidence }))
+    : [];
+  const ab = src.savings && src.savings.ab ? src.savings.ab.filter((a) => a.deltaScore !== null && a.deltaScore !== undefined)
+    .map((a) => ({ subject: a.subject, deltaScore: a.deltaScore, scoreMax: a.scoreMax })) : [];
+  const verified = src.savings && src.savings.predictions && !src.savings.predictions.unreadable ? src.savings.predictions.verified : 0;
+  const falsified = src.savings && src.savings.predictions && !src.savings.predictions.unreadable ? src.savings.predictions.falsified : 0;
+  const learnings = src.learnings.length;
+  const roundsToGreen = src.savings && src.savings.roundsToGreen ? src.savings.roundsToGreen.trend : [];
+  const total = rejected.length + rejectedLoops.length + guardFires.reduce((n, g) => n + g.fires, 0)
+    + promoted.length + ab.length + verified + falsified + learnings;
+  return {
+    total,
+    rejected, rejectedLoops, guardFires, nudges, promoted, ab, predictions: { verified, falsified }, learnings, roundsToGreen,
+    doesNotProve: 'what would have shipped without the harness - nobody ran that arm. Each line is an event on the record; the counterfactual is not.',
+  };
 }
 
 // Every project this machine has telemetry for. A slug that cannot be read is a row in
@@ -1658,7 +1719,7 @@ function aggregateAll(args) {
 // What the model pass in /session-review actually reads. Everything else — the agent×model table,
 // the timeline, the workflow history, the savings ledger — is accounting a `for` loop already did,
 // and paying a context window to re-read it is the expensive way to learn nothing.
-const BRIEF_KEYS = ['project', 'generatedAt', 'window', 'previous', 'hygiene', 'tools', 'guards', 'skills', 'reviews', 'cards', 'rulesSilent', 'prompts', 'warnings'];
+const BRIEF_KEYS = ['project', 'generatedAt', 'window', 'previous', 'caught', 'hygiene', 'tools', 'guards', 'skills', 'reviews', 'cards', 'rulesSilent', 'prompts', 'warnings'];
 function briefOf(d) {
   const out = {};
   for (const k of BRIEF_KEYS) if (d[k] !== undefined) out[k] = d[k];

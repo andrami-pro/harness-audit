@@ -673,6 +673,17 @@ check('loop-stats reads the skill inventory, the review lifecycle, and fires car
   // advice: the unused project skill is an uninstall candidate with the 'unused' reason and its own
   // word count; the used one is kept; a typed built-in (/model) is neither. Outcomes: grilling was
   // followed by a bare «continua», which is counted, and by nothing that looks like a correction.
+  // caught: the receipt is a list of events, each one traceable. The repo fixture holds one promoted
+  // review card, one A/B row, one verified and one falsified prediction; the signals transcript holds
+  // one guard fire (block-no-verify) and no rejected workflow. 1+1+1+1+1 = 5, plus the fixture's
+  // LEARNINGS.md entries. The advisory repeat-tool-guard never counts as a catch.
+  const cg = d.caught;
+  if (!cg) throw new Error('caught missing');
+  if (cg.guardFires.length !== 1 || cg.guardFires[0].name !== 'block-no-verify' || cg.guardFires[0].fires !== 1) throw new Error(`caught.guardFires = ${JSON.stringify(cg.guardFires)}`);
+  if (cg.promoted.length !== 1) throw new Error(`caught.promoted = ${cg.promoted.length}, expected 1`);
+  if (cg.ab.length !== 1 || cg.predictions.verified !== 1 || cg.predictions.falsified !== 1) throw new Error(`caught savings drifted: ${JSON.stringify({ ab: cg.ab.length, p: cg.predictions })}`);
+  if (cg.total !== 5 + cg.learnings) throw new Error(`caught.total = ${cg.total}, expected ${5 + cg.learnings}`);
+  if (!d.cards.some((c) => c.rule === 'harness-caught')) throw new Error('harness-caught card did not fire on a fixture with 5 events');
   const adv = d.skills.advice;
   if (!adv || JSON.stringify(adv.keep) !== '["grilling"]') throw new Error(`advice.keep = ${JSON.stringify(adv && adv.keep)}`);
   if (adv.uninstall.length !== 1 || adv.uninstall[0].name !== 'unused-one') throw new Error(`advice.uninstall = ${JSON.stringify(adv.uninstall)}`);
@@ -700,7 +711,7 @@ check('loop-stats reads the skill inventory, the review lifecycle, and fires car
 
   // cards: exactly the three the evidence supports, and not one of the three below threshold.
   const fired = d.cards.map((c) => c.rule).sort();
-  const expected = ['repeated-crash', 'review-pending', 'review-stale'];
+  const expected = ['harness-caught', 'repeated-crash', 'review-pending', 'review-stale'];
   if (JSON.stringify(fired) !== JSON.stringify(expected)) throw new Error(`cards = ${JSON.stringify(fired)}, expected ${JSON.stringify(expected)}`);
   for (const belowThreshold of ['continue-token', 'denials-as-rules', 'manual-model-switch', 'skill-shelfware']) {
     if (!d.rulesSilent.includes(belowThreshold)) throw new Error(`${belowThreshold} fired below its threshold`);
