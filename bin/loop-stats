@@ -1,0 +1,4 @@
+#!/bin/sh
+# Zero-token dashboard over the local Claude Code transcripts. Shortcut of:
+#   node <repo>/scripts/loop-stats.js
+exec node "$(CDPATH= cd -- "$(dirname -- "$0")/../scripts" && pwd)/loop-stats.js" "$@"

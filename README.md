@@ -69,7 +69,7 @@ gated loops, and `SKILL.md`'s `allowed-tools`. Read
 Pi is a different story, but not the one an earlier version of this README told: **4 of the 5 loop
 commands do port to Pi**, as Pi's own prompt templates — gated on the same third-party
 [`pi-subagents`](https://github.com/nicobailon/pi-subagents) extension the 7 agents already require.
-`/session-review` is the exception and does not port at all. Read the
+`/session-review` and `/dashboard` are the exceptions and do not port at all. Read the
 [Pi section](#compatibility-across-harnesses) before reaching for this:
 
 ```bash
@@ -202,11 +202,11 @@ different rates. Read this before assuming a layer "just works" on a harness you
 |---|---|---|---|---|
 | `AGENTS.md` + executable rubric | ✅ native | ✅ native | ✅ native | ✅ native — Pi reads `AGENTS.md` directly |
 | Skill (`SKILL.md` + templates) | ✅ native | ✅ native | ✅ native | ✅ native |
-| The 5 loop commands | ✅ native (Task tool) | ✅ native (Task tool) | ✅ native (Task tool) | ⚠️ **4 of 5** as prompt templates, via a third-party extension — `/session-review` does not port, see below |
+| The 5 loop commands + `/dashboard` | ✅ native (Task tool) | ✅ native (Task tool) | ✅ native (Task tool) | ⚠️ **4 of 6** as prompt templates, via a third-party extension — `/session-review` and `/dashboard` do not port, see below |
 | The 7 agents | ✅ native | ✅ native | ✅ native | ✅ via the same third-party extension |
 | Manual-only guardrail (`disable-model-invocation`) | ✅ enforced | ❌ **no equivalent — dropped** | ❌ **no equivalent — dropped** | ✅ **preserved by construction — see below** |
 | Deterministic loop gate (`loop-gate.js`) | ✅ native | ⚠️ **degraded to a hand-check** | ⚠️ **degraded to a hand-check** | ⚠️ **degraded to a hand-check** |
-| Hooks + dashboard (`loop-stats.js`) | ✅ native | 📖 documented, not automated | 📖 documented, not automated | 📖 documented, not automated |
+| Hooks + dashboard (`/dashboard`, `loop-stats.js`) | ✅ native | 📖 documented, not automated | 📖 documented, not automated | 📖 documented, not automated |
 
 **Loops on Pi, in full — read this before you install:** Pi's core ships with no sub-agent support at
 all — per [pi.dev](https://pi.dev)'s own docs, *"Pi ships with powerful defaults but skips features like
@@ -223,7 +223,7 @@ by itself either. Its body is instructions telling whichever session expands it 
 — Task on Claude Code. With pi-subagents installed, Pi's parent session has the equivalent tool,
 `subagent`, and a prompt template whose body says "dispatch via `subagent`" works exactly like
 pi-subagents' own bundled `/review-loop` template (`prompts/review-loop.md` in that package) — the
-reference this port's Pi transform follows. `--target pi` ports 4 of this repo's 5 commands to
+reference this port's Pi transform follows. `--target pi` ports 4 of this repo's 6 commands to
 `.pi/prompts/` on that basis — rounds, stop conditions, findings aggregation and all. `.pi/prompts/` is
 a native discovery location: nothing has to be registered anywhere, and no `.pi/settings.json` is
 written. Type `/orchestrate`, `/skill-loop`, `/review-loop`, `/iterate` exactly as in Claude Code.
@@ -233,12 +233,12 @@ installed project and reading back which commands it actually registered — not
 first draft of this port passed its own test suite while Pi silently discarded three of the five
 templates it had written.
 
-**`/session-review` does not port to Pi, and will not.** Its first step shells out to
+**`/session-review` and `/dashboard` do not port to Pi, and will not.** Both shell out to
 `node "${CLAUDE_PLUGIN_ROOT}/scripts/loop-stats.js"` — a variable that exists only inside the Claude Code
-plugin runtime, pointing at a script `--target pi` does not install — and its data source is *the
-transcripts Claude Code writes*, not Pi's sessions, which live elsewhere in a different format. Ported, it
-would be a template that looks like a working loop and dies on its first command. `--target pi` withholds
-it and says why. Run Loop 6 from Claude Code; it reads your local transcripts either way.
+plugin runtime, pointing at a script `--target pi` does not install — and both read *the transcripts
+Claude Code writes*, not Pi's sessions, which live elsewhere in a different format. Ported, each would be
+a template that looks like it works and dies on its first command. `--target pi` withholds them and says
+why. Run them from Claude Code; they read your local transcripts either way.
 
 **Pi loads project `.pi/` resources only after you TRUST the project.** Interactive Pi asks on first start
 (or use `/trust`); the non-interactive modes (`-p`, `--mode json`, `--mode rpc`) never ask and skip project

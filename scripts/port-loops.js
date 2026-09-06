@@ -195,13 +195,14 @@ const PI_COMMAND_DROPPED_FIELDS = ['allowed-tools', 'disable-model-invocation'];
 // has the same inline `: ` — are unaffected and are left unquoted.
 const yamlQuote = (v) => JSON.stringify(String(v));
 
-// session-review does NOT port to Pi, and this is the honest half of the port rather than a gap in it.
+// session-review and dashboard do NOT port to Pi, and this is the honest half of the port rather
+// than a gap in it.
 // Its step 1 shells out to `node "${CLAUDE_PLUGIN_ROOT}/scripts/loop-stats.js"` — a variable that only
 // exists inside the Claude Code plugin runtime, pointing at a script `--target pi` does not install —
 // and its data source is the transcripts Claude Code writes (its own description says so), not Pi's
 // sessions, which live elsewhere in a different format. Ported, it would be a template that looks like a
 // working loop and dies on its first command. That is precisely the failure mode this port refuses.
-const PI_UNPORTABLE_COMMANDS = new Set(['session-review']);
+const PI_UNPORTABLE_COMMANDS = new Set(['session-review', 'dashboard']);
 
 // Task-tool-specific body text, replaced with the pi-subagents `subagent` tool's own vocabulary — every
 // pair below is a literal substring verified against commands/*.md, 2026-07-13. A pair that matches

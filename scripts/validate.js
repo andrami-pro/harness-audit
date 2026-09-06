@@ -142,21 +142,24 @@ check('every frontmatter survives a STRICT YAML parser (GitHub, Pi), not just a 
   return `${files.length} frontmatter block(s) strict-YAML safe`;
 });
 
-// Pins the command count the README's loop catalog promises (5: skill-loop, orchestrate, review-loop,
-// iterate, session-review — Loop 1 is a pattern, not a command, by design). A 6th command shipped without
-// updating the README catalog would drift silently; so would a command that lost its argument-hint, which
-// is the piece `/command` autocomplete and the SlashCommand tool both read to know how to call it.
+// Pins the command count the README's catalog promises: 5 loops that have a command (skill-loop,
+// orchestrate, review-loop, iterate, session-review — Loop 1 is a pattern, not a command, by design)
+// plus 1 observer (dashboard, which iterates on nothing and costs no tokens). A 7th command shipped
+// without updating the README catalog would drift silently; so would a command that lost its
+// argument-hint, which is the piece `/command` autocomplete and the SlashCommand tool both read.
 //
-// The cap is the anti-proliferation gate: five commands for the five loops that have one (Loop 1 is a
-// pattern, not a command), and a sixth file has to argue for itself in the PRD before it argues for
-// itself here. F10 raised the cap from 4 to 5 for session-review.
+// The cap is the anti-proliferation gate, and it is a gate precisely because raising it is not free:
+// a new file has to argue for itself in a PRD before it argues for itself here. F10 raised it from 4
+// to 5 for session-review; PRD-003 §4 raises it from 5 to 6 for dashboard, on the grounds that the
+// observer is not a loop and that folding it into session-review would put a free report behind a
+// model pass that is deliberately run once a fortnight.
 //
-// Negative control (2026-07-12, both reverted): argument-hint stripped from commands/iterate.md — exit 1,
-// "commands/iterate.md frontmatter missing argument-hint"; a 6th command copied in — exit 1,
-// "commands/*.md = 6, expected exactly 5".
-check('exactly 5 loop commands, each with description + argument-hint', () => {
+// Negative controls (2026-07-12, both reverted): argument-hint stripped from commands/iterate.md —
+// exit 1, "commands/iterate.md frontmatter missing argument-hint"; an extra command copied in —
+// exit 1, "commands/*.md = 7, expected exactly 6" (2026-09-06, reverted).
+check('exactly 6 commands — 5 loops and 1 observer — each with description + argument-hint', () => {
   const files = globMd('commands');
-  if (files.length !== 5) throw new Error(`commands/*.md = ${files.length}, expected exactly 5`);
+  if (files.length !== 6) throw new Error(`commands/*.md = ${files.length}, expected exactly 6`);
   for (const rel of files) {
     hasFrontmatterField(rel, 'description');
     hasFrontmatterField(rel, 'argument-hint');
@@ -707,6 +710,48 @@ check('loop-stats reads the skill inventory, the review lifecycle, and fires car
   if (clean.cards.some((c) => c.rule === 'repeated-crash')) throw new Error('a crash card fired on a transcript with no failures');
 
   return `${d.skills.installed} skills · ${rv.latest.cards.length} review cards (${rv.latest.promoted} promoted) · ${d.cards.length} cards · ${d.rulesSilent.length} silent`;
+});
+
+// /dashboard's whole claim is that it costs nothing: the script counts, the command prints. A version
+// of it that opened a .jsonl "for more context" would be a token-hungry command wearing a free one's
+// description, and the failure would be invisible — the report would still render.
+//
+// It also has to survive the two installs. Under the plugin, ${CLAUDE_PLUGIN_ROOT} resolves; under
+// `install.sh --target claude`, which copies scripts/ next to the commands, only the :-.claude
+// fallback does. A command that hardcodes either one is broken in the other.
+//
+// Negative controls (2026-09-06, each applied, observed, reverted — all exit 1):
+//   ${CLAUDE_PLUGIN_ROOT} without the :-.claude fallback ... "must use the ${CLAUDE_PLUGIN_ROOT:-.claude} form"
+//   disable-model-invocation removed ...................... "must be manual-only"
+//   a Read of a .jsonl added to the body .................. "must not read transcripts itself"
+check('dashboard runs the script and never parses transcripts itself', () => {
+  const rel = 'commands/dashboard.md';
+  mustExist(rel);
+  hasFrontmatterField(rel, 'description');
+  hasFrontmatterField(rel, 'argument-hint');
+  const body = read(rel);
+
+  if (!/\$\{CLAUDE_PLUGIN_ROOT:-\.claude\}\/scripts\/loop-stats\.js/.test(body)) {
+    throw new Error('dashboard must use the ${CLAUDE_PLUGIN_ROOT:-.claude} form — the bare variable is undefined under install.sh --target claude, and a bare relative path resolves against the user\'s cwd');
+  }
+  if (!/^disable-model-invocation:\s*true\s*$/m.test(body.split('---')[1] || '')) {
+    throw new Error('dashboard must be manual-only: half of what it renders is about the human');
+  }
+  if (!/allowed-tools:.*Bash\(node:\*\)/.test(body)) throw new Error('dashboard must be allowed to run the script');
+  // The command may name .jsonl when it explains why it does NOT read one; what it may not do is
+  // instruct a read of one.
+  if (/\b(Read|Grep|Glob)\b[^\n]{0,80}\.jsonl/.test(body)) {
+    throw new Error('dashboard must not read transcripts itself — the script counts, the command prints');
+  }
+  if (!/do not (parse|read) a `?\.jsonl/i.test(body)) {
+    throw new Error('dashboard must say, in the body, that it does not parse transcripts — the rule is load-bearing and invisible when broken');
+  }
+
+  // PRD-003 is what the raised command cap points at; a cap raised without its argument is just a
+  // bigger cap.
+  const prd = read('docs/prds/PRD-003-operator-dashboard.md');
+  if (!/Why a sixth command/.test(prd)) throw new Error('PRD-003 must carry the argument for the sixth command');
+  return 'manual-only · plugin-root fallback · counts nothing itself';
 });
 
 // D25a — the HARD guardrail is the one piece of F11 that must never have a confirmable escape
@@ -1361,7 +1406,10 @@ check('README discloses every guardrail the port destroys', () => {
   }
   // A loop the port WITHHOLDS is a disclosure too — and the one most easily mistaken for a bug.
   for (const name of port.PI_UNPORTABLE_COMMANDS) {
-    if (!new RegExp(`\`?/${name}\`? does not port to Pi`, 'i').test(compat)) {
+    // One sentence may cover both withheld commands ("/session-review and /dashboard do not port to
+    // Pi"), which is how a reader wants to read it. The name still has to appear immediately before
+    // the claim, so a user searching for their command lands on the disclosure either way.
+    if (!new RegExp(`\`?/${name}\`?[^.\n]{0,40}\\bdoe?s? not port to Pi`, 'i').test(compat)) {
       throw new Error(`README never states that /${name} does not port to Pi — a user who types it and gets nothing has no way to know that is by design`);
     }
   }

@@ -6,8 +6,11 @@
 // notice. Every unreadable line is skipped with a warning instead of aborting, and the shapes this
 // parser depends on are pinned in scripts/fixtures/telemetry/ so validate.js sees the break.
 //
-//   node scripts/loop-stats.js [--project <slug>] [--root <dir>] [--repo <path>]
-//                              [--since 7d] [--top 3] [--html <out>] [--json]
+//   node scripts/loop-stats.js [--project <path|slug>] [--root <dir>] [--repo <path>]
+//                              [--since 7d] [--top 3] [--html [out]] [--open] [--json]
+//                              [--json-out <file>] [--from-json <file>]
+//
+// Or, from anywhere: bin/loop-stats (same flags), or /dashboard inside Claude Code.
 
 'use strict';
 
@@ -68,14 +71,19 @@ function parseArgs(argv) {
   const a = {
     root: path.join(os.homedir(), '.claude', 'projects'),
     project: null, repo: null, sinceMs: null, html: null, json: false, top: 3, lineup: null,
-    jsonOut: null, fromJson: null,
+    jsonOut: null, fromJson: null, open: false,
   };
   for (let i = 0; i < argv.length; i++) {
     const flag = argv[i];
     if (flag === '--project') a.project = argv[++i];
     else if (flag === '--root') a.root = argv[++i];
     else if (flag === '--repo') a.repo = argv[++i];
-    else if (flag === '--html') a.html = argv[++i];
+    else if (flag === '--html') {
+      // `--html` with no path is the common case: the report goes to the cache, never into the repo.
+      const next = argv[i + 1];
+      a.html = (next === undefined || next.startsWith('--')) ? DEFAULT_HTML : argv[++i];
+    }
+    else if (flag === '--open') { a.open = true; if (!a.html) a.html = DEFAULT_HTML; }
     else if (flag === '--json') a.json = true;
     else if (flag === '--json-out') a.jsonOut = argv[++i];
     else if (flag === '--from-json') a.fromJson = argv[++i];
@@ -96,6 +104,31 @@ function parseArgs(argv) {
   a.projectCandidates = slugCandidates(a.project || process.cwd());
   a.project = a.projectCandidates[0];
   return a;
+}
+
+// The report quotes prompts and denial reasons verbatim, so its default home is the user's cache —
+// never the repo, where a `git add -A` would publish a month of their prompting.
+const DEFAULT_HTML = '\u0000default';
+function resolveHtmlPath(args) {
+  if (args.html !== DEFAULT_HTML) return args.html;
+  const cache = process.env.XDG_CACHE_HOME || path.join(os.homedir(), '.cache');
+  const dir = path.join(cache, 'harness-audit', 'dashboard');
+  fs.mkdirSync(dir, { recursive: true });
+  return path.join(dir, `${args.project}.html`);
+}
+
+// Best-effort, never fatal, never a dependency: a headless box or a locked-down desktop just gets
+// the path printed and opens it itself.
+function openFile(file) {
+  const { spawn } = require('node:child_process');
+  const cmd = process.platform === 'darwin' ? ['open', [file]]
+    : process.platform === 'win32' ? ['cmd', ['/c', 'start', '', file]]
+      : (process.env.DISPLAY || process.env.WAYLAND_DISPLAY) ? ['xdg-open', [file]] : null;
+  if (!cmd) return false;
+  try {
+    spawn(cmd[0], cmd[1], { detached: true, stdio: 'ignore' }).unref();
+    return true;
+  } catch { return false; }
 }
 
 function readJsonl(file) {
@@ -1992,8 +2025,10 @@ function main() {
     catch (e) { process.stderr.write(`loop-stats: cannot write ${args.jsonOut}: ${e.code}\n`); process.exit(1); }
   }
   if (args.html) {
-    try { fs.writeFileSync(args.html, renderHtml(data)); process.stderr.write(`loop-stats: wrote ${args.html}\n`); }
-    catch (e) { process.stderr.write(`loop-stats: cannot write ${args.html}: ${e.code}\n`); process.exit(1); }
+    const out = resolveHtmlPath(args);
+    try { fs.writeFileSync(out, renderHtml(data)); process.stderr.write(`loop-stats: wrote ${out}\n`); }
+    catch (e) { process.stderr.write(`loop-stats: cannot write ${out}: ${e.code}\n`); process.exit(1); }
+    if (args.open && !openFile(out)) process.stderr.write(`loop-stats: open it yourself: ${out}\n`);
   }
   process.stdout.write(args.json ? `${JSON.stringify(data, null, 2)}\n` : `${renderAnsi(data)}\n`);
 }
