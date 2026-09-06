@@ -497,8 +497,9 @@ node scripts/loop-stats.js --root <dir>           # telemetry root (default: ~/.
 node scripts/loop-stats.js --repo <path>          # read loop-runs/, LEARNINGS.md, AGENTS.md elsewhere
 node scripts/loop-stats.js --since 7d             # window the report to the last N days
 node scripts/loop-stats.js --top 20               # how many recurring prompts to surface (default 3)
-node scripts/loop-stats.js --html [out]           # CRT report; no path = ~/.cache/harness-audit/
-node scripts/loop-stats.js --json                 # the same aggregate, machine-readable
+node scripts/loop-stats.js --html [out] --open    # CRT report; no path = ~/.cache/harness-audit/
+node scripts/loop-stats.js --all                  # every project on this machine, cost and cards
+node scripts/loop-stats.js --json [--brief]       # the aggregate; --brief drops the accounting
 ```
 
 The HTML report defaults to your cache, not the repository: it quotes your prompts and your denial
