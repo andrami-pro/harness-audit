@@ -754,6 +754,75 @@ check('dashboard runs the script and never parses transcripts itself', () => {
   return 'manual-only · plugin-root fallback · counts nothing itself';
 });
 
+// --all walks every project on the machine, and the property that matters is what it does with the
+// one it cannot read: a corrupt slug is a row in failedProjects, never an abort. The telemetry
+// fixture root carries a deliberately broken project for exactly this, so the assertion is not
+// hypothetical.
+//
+// --brief is the other half of the same bargain: /session-review pays for a context window, so the
+// script hands it the judgment fields and withholds the accounting. A field nobody reads is vapour,
+// and a key set that drifts silently is how the brief stops being brief.
+//
+// Negative controls (2026-09-06, each applied by hand, observed, reverted — all exit 1):
+//   aggregate() called outside the try/catch in aggregateAll ... the whole run aborts on demo-broken
+//   'agents' added to BRIEF_KEYS ............................... brief carries the accounting again
+//   --repo forwarded into each project of --all ................ every project reports one repo's cards
+check('loop-stats aggregates every project under --all, and --brief withholds the accounting', () => {
+  const script = path.join(ROOT, 'scripts/loop-stats.js');
+  const root = path.join(ROOT, 'scripts/fixtures/telemetry');
+  const emptyHome = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-all-'));
+  const run = (args) => JSON.parse(execFileSync('node', [script, ...args], {
+    encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, HOME: emptyHome },
+  }));
+
+  const all = run(['--root', root, '--all', '--json']);
+  if (all.mode !== 'all') throw new Error('--all must mark its own aggregate');
+  const names = all.projects.map((p) => p.project).sort();
+  if (JSON.stringify(names) !== JSON.stringify(['demo', 'demo-broken', 'demo-signals'])) {
+    throw new Error(`--all projects = ${JSON.stringify(names)}`);
+  }
+  // The broken project is READ, not skipped: its two unreadable lines are warnings on its own row.
+  if (all.failedProjects.length !== 0) throw new Error(`failedProjects = ${JSON.stringify(all.failedProjects)}, expected none`);
+  const broken = all.projects.find((p) => p.project === 'demo-broken');
+  if (broken.warnings !== 2) throw new Error(`demo-broken warnings = ${broken.warnings}, expected 2 — a project that degraded must say so on its own row`);
+  if (all.totals.projects !== 3) throw new Error(`totals.projects = ${all.totals.projects}`);
+  const grilling = all.skills.find((sk) => sk.name === 'grilling');
+  if (!grilling || grilling.count !== 1 || grilling.projects !== 1) throw new Error(`cross-project skills = ${JSON.stringify(all.skills)}`);
+  // Cross-project prompts are deliberately absent: eight identical words mean different things in
+  // two repositories, and a "top prompt" pooled across them is a category error.
+  if (all.prompts !== undefined) throw new Error('--all must not pool recurring prompts across projects');
+
+  // --brief: exactly the judgment fields, and none of the accounting.
+  const mod = require(script);
+  const brief = run(['--root', root, '--project', 'demo-signals', '--repo', path.join(ROOT, 'scripts/fixtures/repo'), '--json', '--brief']);
+  const keys = Object.keys(brief).sort();
+  const want = mod.BRIEF_KEYS.slice().sort();
+  if (JSON.stringify(keys) !== JSON.stringify(want)) throw new Error(`brief keys = ${JSON.stringify(keys)}, expected ${JSON.stringify(want)}`);
+  for (const accounting of ['agents', 'totals', 'timeline', 'workflows', 'savings', 'lineup', 'loopRuns']) {
+    if (brief[accounting] !== undefined) throw new Error(`--brief carries ${accounting}, which a judgment pass never reads`);
+  }
+  // …but it must still carry the fields §1 of the command promises.
+  for (const promised of [brief.tools.denials, brief.tools.errorClusters, brief.cards, brief.reviews,
+    brief.skills.installedNotUsed, brief.prompts.top]) {
+    if (promised === undefined) throw new Error('--brief dropped a field /session-review section 1 promises');
+  }
+  if (brief.hygiene.droppedAgentShaped === undefined || brief.hygiene.dedupedRecords === undefined) {
+    throw new Error('--brief must carry the two counts section 2 tells the model to report');
+  }
+
+  // The card line format is a parser contract, and the command has to keep writing it.
+  const cmd = read('commands/session-review.md');
+  if (!/--brief/.test(cmd)) throw new Error('/session-review must ask for --brief — without it the loop pays for the accounting too');
+  if (!/▸ LIFECYCLE/.test(cmd)) throw new Error('/session-review must emit the LIFECYCLE card the dashboard reads back');
+  if (!/loop-stats.{0,40}pars/is.test(cmd)) throw new Error('/session-review must say that its card lines are parsed back, or the next author will restyle them');
+  const parsed = mod.parseReviewCards('▸ **HABIT**             10 turns are only «continua» ×10\n▸ not a card\n');
+  if (parsed.length !== 1 || parsed[0].type !== 'HABIT' || parsed[0].count !== 10) {
+    throw new Error(`the card parser drifted from the format the command writes: ${JSON.stringify(parsed)}`);
+  }
+
+  return `${all.projects.length} projects · ${all.failedProjects.length} unreadable · brief = ${keys.length} keys`;
+});
+
 // D25a — the HARD guardrail is the one piece of F11 that must never have a confirmable escape
 // hatch: a lineup that puts the reviewer in the implementer's model family has to be rejected by
 // construction, not by a prompt someone can click through. So each fixture below pins an id shape

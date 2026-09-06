@@ -71,7 +71,7 @@ function parseArgs(argv) {
   const a = {
     root: path.join(os.homedir(), '.claude', 'projects'),
     project: null, repo: null, sinceMs: null, html: null, json: false, top: 3, lineup: null,
-    jsonOut: null, fromJson: null, open: false,
+    jsonOut: null, fromJson: null, open: false, all: false, brief: false,
   };
   for (let i = 0; i < argv.length; i++) {
     const flag = argv[i];
@@ -85,6 +85,8 @@ function parseArgs(argv) {
     }
     else if (flag === '--open') { a.open = true; if (!a.html) a.html = DEFAULT_HTML; }
     else if (flag === '--json') a.json = true;
+    else if (flag === '--all') a.all = true;
+    else if (flag === '--brief') a.brief = true;
     else if (flag === '--json-out') a.jsonOut = argv[++i];
     else if (flag === '--from-json') a.fromJson = argv[++i];
     else if (flag === '--lineup') a.lineup = argv[++i];
@@ -114,7 +116,7 @@ function resolveHtmlPath(args) {
   const cache = process.env.XDG_CACHE_HOME || path.join(os.homedir(), '.cache');
   const dir = path.join(cache, 'harness-audit', 'dashboard');
   fs.mkdirSync(dir, { recursive: true });
-  return path.join(dir, `${args.project}.html`);
+  return path.join(dir, `${args.all ? 'all' : args.project}.html`);
 }
 
 // Best-effort, never fatal, never a dependency: a headless box or a locked-down desktop just gets
@@ -1412,6 +1414,108 @@ function aggregate(args) {
   return data;
 }
 
+// Every project this machine has telemetry for. A slug that cannot be read is a row in
+// `failedProjects`, never an abort: one corrupt project must not cost you the other thirty-five.
+function aggregateAll(args) {
+  const slugs = ls(args.root).filter((d) => !d.startsWith('.') && !d.startsWith('-tmp-'))
+    .filter((d) => { try { return fs.statSync(path.join(args.root, d)).isDirectory(); } catch { return false; } })
+    .sort();
+
+  const projects = [];
+  const failed = [];
+  const skillTotals = new Map();
+  const hygiene = { continuations: 0, interrupts: 0, modelSwitches: 0, compactions: 0, humanPrompts: 0 };
+  const totals = { projects: 0, sessions: 0, runs: 0, tokens: 0, costUsd: 0 };
+
+  for (const slug of slugs) {
+    process.stderr.write(`loop-stats: reading ${slug}\n`);
+    const before = warnings.length;
+    let d;
+    try {
+      // No --repo across projects: a repo path belongs to one project, and guessing which is how a
+      // dashboard starts reporting another project's contract as this one's.
+      d = aggregate({ ...args, project: slug, projectCandidates: [slug], repo: null });
+    } catch (e) { failed.push({ project: slug, error: e.message.split('\n')[0] }); continue; }
+
+    for (const [name, n] of Object.entries(d.hygiene.skillCalls)) {
+      const r = skillTotals.get(name) || { name, count: 0, projects: 0 };
+      r.count += n;
+      r.projects++;
+      skillTotals.set(name, r);
+    }
+    hygiene.continuations += d.hygiene.continuations.count;
+    hygiene.interrupts += d.hygiene.interrupts;
+    hygiene.modelSwitches += d.hygiene.modelSwitches.count;
+    hygiene.compactions += d.hygiene.compactions.count;
+    hygiene.humanPrompts += d.hygiene.humanPrompts;
+    totals.sessions += d.hygiene.sessions;
+    totals.runs += d.totals.runs;
+    totals.tokens += d.totals.tokens;
+    totals.costUsd += d.totals.costUsd;
+
+    projects.push({
+      project: slug,
+      sessions: d.hygiene.sessions,
+      runs: d.totals.runs,
+      tokens: d.totals.tokens,
+      costUsd: d.totals.costUsd,
+      unpricedModels: d.unpricedModels,
+      lastActivity: d.timeline.length ? d.timeline[d.timeline.length - 1].date : null,
+      cards: d.cards.length,
+      warnings: warnings.length - before,
+    });
+  }
+  totals.projects = projects.length;
+  projects.sort((a, b) => b.costUsd - a.costUsd);
+
+  return {
+    mode: 'all',
+    root: args.root,
+    generatedAt: new Date().toISOString(),
+    window: args.sinceMs ? new Date(args.sinceMs).toISOString() : 'all',
+    projects,
+    totals,
+    // Cross-project, because a skill is installed once and used everywhere. Recurring PROMPTS are
+    // deliberately not aggregated here: the same eight words mean different things in two repos.
+    skills: [...skillTotals.values()].sort((a, b) => b.count - a.count),
+    hygiene,
+    failedProjects: failed,
+    warnings: warnings.length,
+  };
+}
+
+// What the model pass in /session-review actually reads. Everything else — the agent×model table,
+// the timeline, the workflow history, the savings ledger — is accounting a `for` loop already did,
+// and paying a context window to re-read it is the expensive way to learn nothing.
+const BRIEF_KEYS = ['project', 'generatedAt', 'window', 'hygiene', 'tools', 'guards', 'skills', 'reviews', 'cards', 'rulesSilent', 'prompts', 'warnings'];
+function briefOf(d) {
+  const out = {};
+  for (const k of BRIEF_KEYS) if (d[k] !== undefined) out[k] = d[k];
+  // Trimmed further where the full field is a wall: the model needs the shelf list, not the roster.
+  if (out.skills) {
+    out.skills = {
+      installed: d.skills.installed,
+      used: d.skills.used,
+      usedNotInstalled: d.skills.usedNotInstalled,
+      installedNotUsed: { project: d.skills.installedNotUsed.project, userCount: d.skills.installedNotUsed.userCount },
+      roles: d.skills.roles,
+      note: d.skills.note,
+    };
+  }
+  if (out.tools) {
+    out.tools = {
+      totalCalls: d.tools.totalCalls,
+      totalErrors: d.tools.totalErrors,
+      errorClusters: d.tools.errorClusters,
+      denials: d.tools.denials,
+      subagents: d.tools.subagents,
+      planMode: d.tools.planMode,
+    };
+  }
+  if (out.guards) out.guards = { pluginGuards: d.guards.pluginGuards, note: d.guards.note };
+  return out;
+}
+
 // D25/F11 — configured vs. observed, free from telemetry that already carries message.model per
 // agent. This block is entirely optional: no model-lineup.json anywhere (global or project) means
 // no LINEUP block, not an error — most projects running loop-stats have never set one up.
@@ -1594,6 +1698,32 @@ function renderSignals(d) {
     out.push(row(`   hook ${clip(hk.command, 30).padEnd(30)} ×${hk.runs}${hk.nonZeroExit ? ` · ${hk.nonZeroExit} exit≠0` : ''}`));
   }
   return out;
+}
+
+function renderAll(d) {
+  // Wider than the per-project box: this one is a table of names, and a slug clipped to 26 columns
+  // stops naming anything.
+  const WA = 74;
+  const row = (t) => `│${clip(t, WA).padEnd(WA)}│`;
+  const out = [];
+  const head = '─ LOOP-STATS ▓ ALL PROJECTS ';
+  out.push(`┌${head}${'─'.repeat(Math.max(0, WA - head.length - 12))} ${d.generatedAt.slice(0, 10)} ─┐`);
+  out.push(row(` ${plural(d.totals.projects, 'project')} · ${plural(d.totals.sessions, 'session')} · ${human(d.totals.tokens)} tokens · $${d.totals.costUsd.toFixed(0)}`));
+  out.push(row(` PROJECT${' '.repeat(34)} SESS   TOKENS    est.$  CARDS`));
+  for (const p of d.projects.slice(0, 12)) {
+    const name = clip(p.project.replace(/^-home-[^-]+-/, ''), 40).padEnd(40);
+    out.push(row(` ${name} ${String(p.sessions).padStart(4)} ${human(p.tokens).padStart(8)} ${p.costUsd.toFixed(0).padStart(8)} ${String(p.cards).padStart(6)}`));
+  }
+  if (d.projects.length > 12) out.push(row(` +${d.projects.length - 12} more`));
+  out.push(row(' SKILLS    used across projects'));
+  for (const sk of d.skills.slice(0, 5)) {
+    out.push(row(`   ${clip(sk.name, 28).padEnd(28)} ×${sk.count} in ${plural(sk.projects, 'project')}`));
+  }
+  if (!d.skills.length) out.push(row('   none invoked through the Skill tool in this window'));
+  out.push(row(` HYGIENE   ${plural(d.hygiene.continuations, 'continuation')} · ${plural(d.hygiene.interrupts, 'interrupt')} · ${d.hygiene.modelSwitches} /model`));
+  for (const f of d.failedProjects) out.push(row(` UNREAD    ${clip(f.project, 22)} — ${clip(f.error, 22)}`));
+  out.push(`└─ per-project detail: --project <path|slug> ${'─'.repeat(Math.max(0, WA - 44))}┘`);
+  return out.join('\n');
 }
 
 function renderAnsi(d) {
@@ -2009,6 +2139,78 @@ function renderHtml(d) {
 </main>`;
 }
 
+// The cross-project view shares the CRT shell but not the report: no cards, because a card belongs to
+// a project's own contract, and no recurring prompts, because the same eight words mean different
+// things in two repos.
+function renderAllHtml(d) {
+  const rows = d.projects.map((p) => `<tr>
+      <td class="k">${esc(p.project.replace(/^-home-[^-]+-/, ''))}</td>
+      <td>${p.sessions}</td><td>${p.runs}</td><td>${human(p.tokens)}</td>
+      <td class="${p.unpricedModels.length ? 'dim' : ''}">${p.costUsd.toFixed(2)}${p.unpricedModels.length ? '*' : ''}</td>
+      <td>${p.cards}</td><td class="k dim">${esc(p.lastActivity || '—')}</td></tr>`).join('');
+  const skillRows = d.skills.map((sk) => `<tr><td class="k">${esc(sk.name)}</td>
+      <td>${sk.count}</td><td>${sk.projects}</td></tr>`).join('');
+  const failRows = d.failedProjects.map((f) => `<tr><td class="k">${esc(f.project)}</td>
+      <td class="k dim wrap">${esc(f.error)}</td></tr>`).join('');
+  const unpriced = [...new Set(d.projects.flatMap((p) => p.unpricedModels))];
+
+  return `<title>loop-stats · all projects</title>
+<style>
+  :root { --p:#33ff66; --dim:#1f8f45; --bg:#050805; }
+  * { box-sizing:border-box; }
+  body { margin:0; padding:2rem 1rem; background:var(--bg); color:var(--p);
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"DejaVu Sans Mono",monospace;
+    font-size:14px; line-height:1.5; text-shadow:0 0 6px rgba(51,255,102,.45); font-variant-numeric:tabular-nums; }
+  body::before { content:""; position:fixed; inset:0; pointer-events:none; z-index:2;
+    background:repeating-linear-gradient(180deg,rgba(0,0,0,0) 0 2px,rgba(0,0,0,.28) 2px 4px); }
+  main { max-width:960px; margin:0 auto; border:1px solid var(--dim); padding:1.5rem;
+    box-shadow:0 0 40px rgba(51,255,102,.12) inset; }
+  h1 { font-size:1.1rem; margin:0 0 .25rem; letter-spacing:.18em; }
+  h2 { font-size:.8rem; margin:2rem 0 .5rem; letter-spacing:.22em; color:var(--dim); text-transform:uppercase; }
+  .sub { color:var(--dim); margin:0 0 1rem; font-size:.78rem; }
+  .scroll { overflow-x:auto; }
+  table { width:100%; border-collapse:collapse; white-space:nowrap; }
+  th,td { text-align:right; padding:.3rem .6rem; border-bottom:1px solid rgba(31,143,69,.35); }
+  th:first-child,td:first-child,td.k { text-align:left; }
+  th { color:var(--dim); font-weight:400; font-size:.72rem; letter-spacing:.12em; }
+  td.wrap { white-space:normal; }
+  .dim { color:var(--dim); }
+  footer { margin-top:2rem; padding-top:.75rem; border-top:1px solid var(--dim); color:var(--dim); font-size:.72rem; }
+</style>
+<main>
+  <h1>LOOP-STATS ▓ ALL PROJECTS</h1>
+  <p class="sub">${esc(d.generatedAt.slice(0, 16).replace('T', ' '))} · window: ${esc(d.window)} ·
+    ${d.totals.projects} projects · ${d.totals.sessions} sessions · ${human(d.totals.tokens)} tokens ·
+    $${d.totals.costUsd.toFixed(2)}${d.warnings ? ` · ${d.warnings} parse warnings` : ''}</p>
+
+  <h2>Projects</h2>
+  <div class="scroll"><table>
+    <thead><tr><th class="k">project</th><th>sessions</th><th>runs</th><th>tokens</th><th>est.$</th><th>cards</th><th class="k">last day</th></tr></thead>
+    <tbody>${rows}</tbody></table></div>
+  ${unpriced.length ? `<p class="sub">* excludes unpriced models: ${esc(unpriced.join(', '))}</p>` : ''}
+  <p class="sub">Cards are counted, not shown: each one is about a project's own contract and skills.
+  Open a single project to read them — <code>--project &lt;path|slug&gt;</code>.</p>
+
+  <h2>Skills invoked across projects</h2>
+  ${skillRows ? `<div class="scroll"><table>
+    <thead><tr><th class="k">skill</th><th>calls</th><th>projects</th></tr></thead>
+    <tbody>${skillRows}</tbody></table></div>`
+    : '<p class="sub">No skill was invoked through the Skill tool in this window. A skill that auto-triggered on its description alone leaves no trace here.</p>'}
+
+  <h2>Hygiene, summed</h2>
+  <p class="sub">${d.hygiene.humanPrompts} human prompts · ${d.hygiene.continuations} bare continuations ·
+  ${d.hygiene.interrupts} interrupts · ${d.hygiene.modelSwitches} /model switches · ${d.hygiene.compactions} compactions.<br>
+  Recurring prompts are deliberately absent from this view: the same eight words mean different things in two repositories.</p>
+
+  ${failRows ? `<h2>Projects that could not be read</h2><div class="scroll"><table>
+    <thead><tr><th class="k">project</th><th class="k">error</th></tr></thead>
+    <tbody>${failRows}</tbody></table></div>` : ''}
+
+  <footer>Read from the local Claude Code transcripts. One unreadable project is a row above, never a
+  missing report — and est.$ is list price × measured tokens, never a multiplier.</footer>
+</main>`;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 function main() {
@@ -2017,7 +2219,8 @@ function main() {
   try {
     // --from-json re-renders a saved aggregate without touching the transcripts (a 1 GB root takes
     // seconds to walk; a saved JSON takes none). The file is trusted as far as its shape parses.
-    data = args.fromJson ? JSON.parse(fs.readFileSync(args.fromJson, 'utf8')) : aggregate(args);
+    data = args.fromJson ? JSON.parse(fs.readFileSync(args.fromJson, 'utf8'))
+      : args.all ? aggregateAll(args) : aggregate(args);
   } catch (e) { process.stderr.write(`loop-stats: ${e.message}\n`); process.exit(1); }
 
   if (args.jsonOut) {
@@ -2026,13 +2229,23 @@ function main() {
   }
   if (args.html) {
     const out = resolveHtmlPath(args);
-    try { fs.writeFileSync(out, renderHtml(data)); process.stderr.write(`loop-stats: wrote ${out}\n`); }
+    try {
+      fs.writeFileSync(out, data.mode === 'all' ? renderAllHtml(data) : renderHtml(data));
+      process.stderr.write(`loop-stats: wrote ${out}\n`);
+    }
     catch (e) { process.stderr.write(`loop-stats: cannot write ${out}: ${e.code}\n`); process.exit(1); }
     if (args.open && !openFile(out)) process.stderr.write(`loop-stats: open it yourself: ${out}\n`);
   }
-  process.stdout.write(args.json ? `${JSON.stringify(data, null, 2)}\n` : `${renderAnsi(data)}\n`);
+  const isAll = data.mode === 'all';
+  const payload = args.brief && !isAll ? briefOf(data) : data;
+  process.stdout.write(args.json
+    ? `${JSON.stringify(payload, null, 2)}\n`
+    : `${isAll ? renderAll(data) : renderAnsi(data)}\n`);
 }
 
 if (require.main === module) main();
 
-module.exports = { slugCandidates, promptText, parseArgs, aggregate, renderAnsi, renderHtml };
+module.exports = {
+  slugCandidates, promptText, parseArgs, aggregate, aggregateAll, briefOf, BRIEF_KEYS,
+  evaluateCards, parseReviewCards, RULES, renderAnsi, renderHtml,
+};
