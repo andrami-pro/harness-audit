@@ -812,7 +812,9 @@ check('loop-stats aggregates every project under --all, and --brief withholds th
 
   // The card line format is a parser contract, and the command has to keep writing it.
   const cmd = read('commands/session-review.md');
-  if (!/--brief/.test(cmd)) throw new Error('/session-review must ask for --brief — without it the loop pays for the accounting too');
+  // The flag has to be on the invocation, not merely explained in the prose next to it.
+  const invocation = (cmd.match(/^.*loop-stats\.js.*$/m) || [''])[0];
+  if (!/--brief/.test(invocation)) throw new Error('/session-review must pass --brief on the command line — without it the loop pays for the accounting too');
   if (!/▸ LIFECYCLE/.test(cmd)) throw new Error('/session-review must emit the LIFECYCLE card the dashboard reads back');
   if (!/loop-stats.{0,40}pars/is.test(cmd)) throw new Error('/session-review must say that its card lines are parsed back, or the next author will restyle them');
   const parsed = mod.parseReviewCards('▸ **HABIT**             10 turns are only «continua» ×10\n▸ not a card\n');
