@@ -670,6 +670,16 @@ check('loop-stats reads the skill inventory, the review lifecycle, and fires car
   if (!grilling || grilling.viaSkillTool !== 1 || grilling.viaSlash !== 1) {
     throw new Error(`grilling = ${JSON.stringify(grilling)}, expected 1 via the Skill tool and 1 typed`);
   }
+  // advice: the unused project skill is an uninstall candidate with the 'unused' reason and its own
+  // word count; the used one is kept; a typed built-in (/model) is neither. Outcomes: grilling was
+  // followed by a bare «continua», which is counted, and by nothing that looks like a correction.
+  const adv = d.skills.advice;
+  if (!adv || JSON.stringify(adv.keep) !== '["grilling"]') throw new Error(`advice.keep = ${JSON.stringify(adv && adv.keep)}`);
+  if (adv.uninstall.length !== 1 || adv.uninstall[0].name !== 'unused-one') throw new Error(`advice.uninstall = ${JSON.stringify(adv.uninstall)}`);
+  if (adv.uninstall[0].reasons[0].code !== 'unused' || adv.uninstall[0].words !== 17) throw new Error(`uninstall reason drifted: ${JSON.stringify(adv.uninstall[0].reasons)}`);
+  if (adv.improve.length !== 0) throw new Error(`advice.improve fired on one use: ${JSON.stringify(adv.improve)}`);
+  const oc = d.hygiene.skillOutcomes.grilling;
+  if (!oc || oc.uses !== 1 || oc.continued !== 1 || oc.corrected !== 0) throw new Error(`skillOutcomes.grilling = ${JSON.stringify(oc)}`);
   if (JSON.stringify(d.skills.installedNotUsed.project) !== JSON.stringify(['unused-one'])) {
     throw new Error(`installedNotUsed.project = ${JSON.stringify(d.skills.installedNotUsed.project)}`);
   }

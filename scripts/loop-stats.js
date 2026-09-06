@@ -884,6 +884,30 @@ function pluginGuardNames() {
 
 // Every place a skill can be installed for this machine. Read-only, and tolerant of every one of
 // them being absent: most projects have two of these five.
+// What the skill's own files say: how much context it costs, when it was last touched, whether it
+// has ever been through a learning loop. Every field is read from disk; none is inferred.
+function skillFacts(file) {
+  const md = fs.existsSync(file) && fs.statSync(file).isDirectory() ? path.join(file, 'SKILL.md') : file;
+  let words = 0;
+  let ageDays = null;
+  let description = '';
+  try {
+    const text = fs.readFileSync(md, 'utf8');
+    words = text.split(/\s+/).filter(Boolean).length;
+    ageDays = Math.floor((Date.now() - fs.statSync(md).mtimeMs) / 864e5);
+    const fm = /^---\n([\s\S]*?)\n---/.exec(text);
+    const dm = fm && /^description:\s*["']?([\s\S]*?)["']?\s*$/m.exec(fm[1]);
+    if (dm) description = dm[1].replace(/\s+/g, ' ').slice(0, 160);
+  } catch { /* a command file or an unreadable skill: the facts stay empty, never guessed */ }
+  let learnings = null;
+  const lp = path.join(path.dirname(md), 'LEARNINGS.md');
+  if (fs.existsSync(lp)) {
+    try { learnings = (fs.readFileSync(lp, 'utf8').match(/^##\s+\d{4}-\d{2}-\d{2}/gm) || []).length; }
+    catch { learnings = 0; }
+  }
+  return { words, ageDays, description, learnings };
+}
+
 function inventorySkills(repo) {
   const home = os.homedir();
   const out = [];
@@ -892,7 +916,7 @@ function inventorySkills(repo) {
     const key = `${source}:${name}`;
     if (seen.has(key)) return;
     seen.add(key);
-    out.push({ name, source, path: file, enabled });
+    out.push({ name, source, path: file, enabled, ...skillFacts(file) });
   };
   const scanSkills = (dir, source) => {
     for (const e of ls(dir)) {
@@ -962,12 +986,23 @@ function buildInventory(repo, hygiene) {
     installedByName.get(bare).push(sk);
   }
 
-  const used = [...usedCounts.entries()].map(([name, r]) => ({
-    name,
-    viaSkillTool: r.viaSkillTool,
-    viaSlash: r.viaSlash,
-    sources: (installedByName.get(name) || []).map((sk) => sk.source),
-  })).sort((a, b) => (b.viaSkillTool + b.viaSlash) - (a.viaSkillTool + a.viaSlash));
+  const outcomesByBare = new Map();
+  for (const [raw, o] of Object.entries(hygiene.skillOutcomes || {})) outcomesByBare.set(bareName(raw), o);
+  const used = [...usedCounts.entries()].map(([name, r]) => {
+    const files = installedByName.get(name) || [];
+    const primary = files[0] || {};
+    return {
+      name,
+      viaSkillTool: r.viaSkillTool,
+      viaSlash: r.viaSlash,
+      sources: files.map((sk) => sk.source),
+      words: primary.words || 0,
+      ageDays: primary.ageDays === undefined ? null : primary.ageDays,
+      learnings: primary.learnings === undefined ? null : primary.learnings,
+      description: primary.description || '',
+      outcomes: outcomesByBare.get(name) || null,
+    };
+  }).sort((a, b) => (b.viaSkillTool + b.viaSlash) - (a.viaSkillTool + a.viaSlash));
 
   const bySource = {};
   for (const sk of skills) bySource[sk.source] = (bySource[sk.source] || 0) + 1;
@@ -985,9 +1020,52 @@ function buildInventory(repo, hygiene) {
   const projectCount = countIn(projectSources);
   const userCount = countIn(userSources);
 
+  // -- advice: three lists, every entry carrying the reasons it is there --------------------------
+  // "uninstall" is a candidate, not a verdict: the reasons are facts (unused in the window, a copy
+  // in two roots, a disabled plugin, a large file never loaded to any effect), and the human decides.
+  const rootOf = (src) => (src.startsWith('project') ? 'project' : src.startsWith('user') ? 'user' : 'plugin');
+  const uninstall = [];
+  for (const [bare, files] of installedByName) {
+    if (usedCounts.has(bare)) continue;
+    const scopes = [...new Set(files.map((f) => rootOf(f.source)))];
+    if (!scopes.includes('project') && !scopes.includes('user')) continue;
+    const primary = files.slice().sort((a, b) => (b.words || 0) - (a.words || 0))[0];
+    const reasons = [];
+    reasons.push({ code: 'unused', words: primary.words || 0, scope: scopes.join('+') });
+    if (files.length > 1) reasons.push({ code: 'duplicate', sources: files.map((f) => f.source) });
+    if (files.some((f) => !f.enabled)) reasons.push({ code: 'disabled' });
+    if (primary.ageDays !== null && primary.ageDays !== undefined && primary.ageDays >= 90) reasons.push({ code: 'stale', ageDays: primary.ageDays });
+    uninstall.push({ name: bare, sources: files.map((f) => f.source), words: primary.words || 0, ageDays: primary.ageDays, reasons });
+  }
+  // Project-scope first (it loads every session), then by the context it costs.
+  uninstall.sort((a, b) => (Number(b.sources.some((x) => x.startsWith('project'))) - Number(a.sources.some((x) => x.startsWith('project')))) || b.words - a.words);
+
+  // "improve" fires only on skills that were actually reached for: a correction rate is a rate over
+  // uses, and a skill never used has no rate. Each reason names the count behind it.
+  const improve = [];
+  for (const u of used) {
+    const uses = u.viaSkillTool + u.viaSlash;
+    if (uses < 2 || u.viaSkillTool === 0) continue;
+    const reasons = [];
+    const o = u.outcomes;
+    if (o && o.uses >= 2) {
+      const rough = o.corrected + o.interrupted + o.denied;
+      if (rough / o.uses >= 1 / 3) reasons.push({ code: 'followed-by-correction', rough, uses: o.uses, corrected: o.corrected, interrupted: o.interrupted, denied: o.denied });
+    }
+    if (uses >= 3 && u.learnings === null && u.sources.some((x) => !x.startsWith('plugin'))) reasons.push({ code: 'never-looped', uses });
+    if (uses >= 3 && u.ageDays !== null && u.ageDays >= 90) reasons.push({ code: 'old-for-its-use', uses, ageDays: u.ageDays });
+    if (u.words >= 2500 && uses >= 2) reasons.push({ code: 'heavy', words: u.words });
+    if (reasons.length) improve.push({ name: u.name, uses, sources: u.sources, editable: u.sources.length > 0, words: u.words, ageDays: u.ageDays, learnings: u.learnings, reasons });
+  }
+  improve.sort((a, b) => b.uses - a.uses);
+  const flagged = new Set(improve.map((x) => x.name));
+  const keep = used.filter((u) => u.sources.length && u.viaSkillTool + u.viaSlash >= 2 && !flagged.has(u.name)).slice(0, 5).map((u) => u.name);
+
   return {
     repo,
     roles,
+    advice: { keep, improve, uninstall: uninstall.slice(0, 20), uninstallTotal: uninstall.length,
+      note: 'uninstall = installed in this project or your home, never invoked in the window; improve = invoked at least twice and followed by a correction, interrupt or refusal in a third of its uses (proxy), or used often without a LEARNINGS.md, or untouched for 90 days. Facts from disk and transcripts; the decision is yours.' },
     installed: skills.length,
     enabled: skills.filter((sk) => sk.enabled).length,
     bySource,
@@ -1128,6 +1206,7 @@ function buildSignals(sessions, prompts, args) {
   const subagents = new Map();
   let exitPlanMode = 0;
   const skillCalls = new Map();
+  const skillUses = [];
   for (const ev of sessions) {
     for (const u of ev.toolUses) {
       if (!inWindow(u.ts)) continue;
@@ -1137,6 +1216,7 @@ function buildSignals(sessions, prompts, args) {
       if (u.name === 'ExitPlanMode') exitPlanMode++;
       if (u.name === 'Skill' && u.input && u.input.skill) {
         skillCalls.set(String(u.input.skill), (skillCalls.get(String(u.input.skill)) || 0) + 1);
+        skillUses.push({ sessionId: ev.sessionId, ts: u.ts, skill: String(u.input.skill) });
       }
       if ((u.name === 'Agent' || u.name === 'Task') && u.input && u.input.subagent_type) {
         const t = String(u.input.subagent_type);
@@ -1224,6 +1304,26 @@ function buildSignals(sessions, prompts, args) {
 
   const continuations = human.filter((p) => CONTINUATION.test(p.text.trim()));
   const corrections = human.filter((p) => p.isFollowUp && CORRECTION.test(p.text.trim()));
+
+  // What the human did next, per skill invocation: the first human prompt after the call in the same
+  // session, and whether an interrupt or a refusal landed before it. This is the only per-skill
+  // outcome a transcript can carry, and it is a proxy — a correction after a skill ran is not proof
+  // the skill was what went wrong. It is enough to say "look at this one", never "this one is bad".
+  const skillOutcomes = new Map();
+  for (const use of skillUses) {
+    const at = Date.parse(use.ts);
+    const next = human.filter((p) => p.sessionId === use.sessionId && Date.parse(p.ts) > at)
+      .sort((a, b) => Date.parse(a.ts) - Date.parse(b.ts))[0] || null;
+    const until = next ? Date.parse(next.ts) : Infinity;
+    const between = (arr) => arr.filter((x) => x.sessionId === use.sessionId && Date.parse(x.ts) > at && Date.parse(x.ts) <= until).length;
+    const o = skillOutcomes.get(use.skill) || { uses: 0, corrected: 0, interrupted: 0, denied: 0, continued: 0 };
+    o.uses++;
+    if (next && CORRECTION.test(next.text.trim())) o.corrected++;
+    if (next && CONTINUATION.test(next.text.trim())) o.continued++;
+    if (between(sessions.flatMap((ev) => ev.interrupts.map((i) => ({ ...i, sessionId: ev.sessionId }))))) o.interrupted++;
+    if (between(denials)) o.denied++;
+    skillOutcomes.set(use.skill, o);
+  }
   const interrupts = sessions.reduce((n, ev) => n + ev.interrupts.filter((i) => inWindow(i.ts)).length, 0);
   const compactions = sessions.flatMap((ev) => ev.compactions.filter((c) => inWindow(c.ts)));
   const slashCommands = new Map();
@@ -1296,6 +1396,7 @@ function buildSignals(sessions, prompts, args) {
       modelSwitches: { count: slashCommands.get('/model') || 0, targets: sortMap(modelTargets) },
       slashCommands: sortMap(slashCommands),
       skillCalls: sortMap(skillCalls),
+      skillOutcomes: Object.fromEntries([...skillOutcomes.entries()].sort((a, b) => b[1].uses - a[1].uses)),
       planMode: { sessions: planSessions, of: activeSessions.length },
       caveats: [
         'continuations and corrections are user-role turns matched by shape; a loop re-prompting its own session writes the same shape, which is why the dropped count is printed',
@@ -1569,6 +1670,7 @@ function briefOf(d) {
       usedNotInstalled: d.skills.usedNotInstalled,
       installedNotUsed: { project: d.skills.installedNotUsed.project, userCount: d.skills.installedNotUsed.userCount },
       roles: d.skills.roles,
+      advice: d.skills.advice,
       note: d.skills.note,
     };
   }
