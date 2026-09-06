@@ -645,6 +645,7 @@ function parseRepo(repo) {
 const RULES = [
   {
     id: 'continue-token',
+    priority: 3,
     type: 'HABIT',
     severity: 'warn',
     when: (d) => d.hygiene.continuations.count >= 5
@@ -657,6 +658,7 @@ const RULES = [
   },
   {
     id: 'manual-model-switch',
+    priority: 5,
     type: 'DISPATCH',
     severity: 'warn',
     when: (d) => d.hygiene.modelSwitches.count >= 5,
@@ -668,6 +670,7 @@ const RULES = [
   },
   {
     id: 'skill-shelfware',
+    priority: 4,
     type: 'SKILL CANDIDATE',
     severity: 'warn',
     when: (d) => d.skills && d.skills.installedNotUsed.project.length >= 5 && d.skills.shelfRatio.project >= 0.6,
@@ -679,6 +682,7 @@ const RULES = [
   },
   {
     id: 'skill-used-not-installed',
+    priority: 11,
     type: 'SKILL CANDIDATE',
     severity: 'info',
     when: (d) => d.skills && d.skills.usedNotInstalled.length > 0,
@@ -690,6 +694,7 @@ const RULES = [
   },
   {
     id: 'repeated-crash',
+    priority: 2,
     type: 'HABIT',
     severity: 'warn',
     when: (d) => d.tools.errorClusters.some((c) => c.count >= 3),
@@ -701,6 +706,7 @@ const RULES = [
   },
   {
     id: 'denials-as-rules',
+    priority: 6,
     type: 'AGENTS.md RULE',
     severity: 'info',
     when: (d) => d.tools.denials.reasons.length >= 3,
@@ -712,6 +718,7 @@ const RULES = [
   },
   {
     id: 'interrupt-rate',
+    priority: 8,
     type: 'HABIT',
     severity: 'info',
     when: (d) => d.hygiene.interrupts >= 10 && d.hygiene.humanPrompts > 0
@@ -724,6 +731,7 @@ const RULES = [
   },
   {
     id: 'compaction-pressure',
+    priority: 9,
     type: 'HABIT',
     severity: 'info',
     when: (d) => d.hygiene.compactions.auto >= 3,
@@ -735,6 +743,7 @@ const RULES = [
   },
   {
     id: 'hand-dispatched-role',
+    priority: 7,
     type: 'DISPATCH',
     severity: 'info',
     when: (d) => d.skills && Object.entries(d.tools.subagents.byType)
@@ -753,6 +762,7 @@ const RULES = [
   },
   {
     id: 'main-thread-heavy',
+    priority: 10,
     type: 'HABIT',
     severity: 'info',
     when: (d) => d.totals.costUsd >= 50 && mainShare(d) >= 0.7,
@@ -764,6 +774,7 @@ const RULES = [
   },
   {
     id: 'unpriced-model',
+    priority: 13,
     type: 'DASHBOARD',
     severity: 'info',
     when: (d) => d.unpricedModels.length > 0,
@@ -778,18 +789,20 @@ const RULES = [
   },
   {
     id: 'review-pending',
+    priority: 1,
     type: 'LIFECYCLE',
     severity: 'warn',
     when: (d) => !!(d.reviews && d.reviews.latest && d.reviews.latest.pending > 0),
     headline: (d) => `${plural(d.reviews.latest.pending, 'card')} from the last /session-review ${d.reviews.latest.pending === 1 ? 'is' : 'are'} still open after ${d.reviews.latest.ageDays} days`,
     evidence: (d) => d.reviews.latest.cards.filter((c) => c.state === 'pending')
-      .map((c) => `«${clip(c.text, 70)}» — ${c.evidence}`).join(' · '),
+      .map((c) => `${clip(c.text, 90)} — ${c.evidence}`).join(' · '),
     recommendation: 'Promote it, or reject it in the report so it stops surfacing here.',
     doesNotProve: 'that you rejected it — a rejected card is a valid outcome, and nothing on disk records that decision',
     source: 'reviews.latest.cards',
   },
   {
     id: 'review-stale',
+    priority: 12,
     type: 'LIFECYCLE',
     severity: 'info',
     when: (d) => (d.reviews === null && d.hygiene.sessions >= 10)
@@ -834,8 +847,11 @@ function evaluateCards(d) {
       silent.push(rule.id);
     }
   }
+  // Severity first, then a fixed priority: the first card is the one the report puts on stage as
+  // "the one thing", so its order is a decision written here, not an accident of the alphabet.
   const order = { warn: 0, info: 1 };
-  fired.sort((a, b) => (order[a.severity] - order[b.severity]) || a.rule.localeCompare(b.rule));
+  const prioOf = (id) => (RULES.find((r) => r.id === id) || {}).priority || 99;
+  fired.sort((a, b) => (order[a.severity] - order[b.severity]) || (prioOf(a.rule) - prioOf(b.rule)));
   return { fired, silent };
 }
 
@@ -1412,6 +1428,9 @@ function aggregate(args) {
         tokens += t.usage.tokens;
       }
       previous = {
+        // A window with a handful of prompts cannot anchor a rate: 0 of 7 against 16 of 209 is
+        // not "up from zero", it is noise. The floor is blunt on purpose and stated where it is used.
+        comparable: prevSignals.hygiene.humanPrompts >= 30 && prevSignals.hygiene.sessions >= 5,
         from: new Date(prevArgs.sinceMs).toISOString(),
         to: new Date(prevArgs.untilMs).toISOString(),
         sessions: prevSignals.hygiene.sessions,
@@ -1867,327 +1886,472 @@ function renderAnsi(d) {
 
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
+// ─────────────────────────────────────────────────────────────────────────────
+// RENDER-HTML — one self-contained file: no CDN, no webfont, no script, no fetch.
+//
+// The report is a recap, read top to bottom: one idea per scene, the number first, the sentence
+// second, the evidence third, and the thing to do about it before the next scene. The pixel-art
+// identity lives in the chrome — numerals, icons, borders, block bars — and the reading text is set
+// in the system's own sans at a size a person can read after a long day. A webfont would be a
+// network call from a report whose whole promise is that nothing leaves the machine, so there is
+// none: the pixel numerals below are drawn, not typed.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// A 5×7 pixel glyph set for the numerals and the few symbols a number needs. '#' is a lit pixel.
+const PIXEL_GLYPHS = {
+  '0': ['.###.', '#...#', '#..##', '#.#.#', '##..#', '#...#', '.###.'],
+  '1': ['..#..', '.##..', '..#..', '..#..', '..#..', '..#..', '.###.'],
+  '2': ['.###.', '#...#', '....#', '...#.', '..#..', '.#...', '#####'],
+  '3': ['#####', '...#.', '..#..', '...#.', '....#', '#...#', '.###.'],
+  '4': ['...#.', '..##.', '.#.#.', '#..#.', '#####', '...#.', '...#.'],
+  '5': ['#####', '#....', '####.', '....#', '....#', '#...#', '.###.'],
+  '6': ['..##.', '.#...', '#....', '####.', '#...#', '#...#', '.###.'],
+  '7': ['#####', '....#', '...#.', '..#..', '.#...', '.#...', '.#...'],
+  '8': ['.###.', '#...#', '#...#', '.###.', '#...#', '#...#', '.###.'],
+  '9': ['.###.', '#...#', '#...#', '.####', '....#', '...#.', '.##..'],
+  '.': ['.....', '.....', '.....', '.....', '.....', '.##..', '.##..'],
+  ',': ['.....', '.....', '.....', '.....', '.##..', '..#..', '.#...'],
+  '%': ['##..#', '##.#.', '...#.', '..#..', '.#...', '#.##.', '#..##'],
+  '$': ['..#..', '.####', '#.#..', '.###.', '..#.#', '####.', '..#..'],
+  'k': ['#....', '#....', '#..#.', '#.#..', '##...', '#.#..', '#..#.'],
+  'M': ['#...#', '##.##', '#.#.#', '#.#.#', '#...#', '#...#', '#...#'],
+  '-': ['.....', '.....', '.....', '#####', '.....', '.....', '.....'],
+  '+': ['.....', '..#..', '..#..', '#####', '..#..', '..#..', '.....'],
+  '/': ['....#', '...#.', '...#.', '..#..', '.#...', '.#...', '#....'],
+  ' ': ['.....', '.....', '.....', '.....', '.....', '.....', '.....'],
+};
+
+// Pixel numerals as inline SVG. `px` is the size of one pixel; the glyph is 5 wide with a 1-px gap.
+function pixelText(text, px = 6, color = 'currentColor') {
+  const chars = [...String(text)].map((c) => PIXEL_GLYPHS[c] || PIXEL_GLYPHS[' ']);
+  const w = chars.length * 6 - 1;
+  const rects = [];
+  chars.forEach((g, ci) => g.forEach((rowStr, y) => [...rowStr].forEach((bit, x) => {
+    if (bit === '#') rects.push(`<rect x="${ci * 6 + x}" y="${y}" width="1" height="1"/>`);
+  })));
+  return `<svg class="px" viewBox="0 0 ${w} 7" width="${w * px}" height="${7 * px}" shape-rendering="crispEdges" fill="${color}" aria-label="${esc(String(text))}" role="img">${rects.join('')}</svg>`;
+}
+
+// 9×9 pixel icons, same encoding. Decorative — every one sits next to the word it illustrates.
+const PIXEL_ICONS = {
+  check: ['.........', '.......#.', '......##.', '.....##..', '.#..##...', '.####....', '..##.....', '.........', '.........'],
+  box: ['#########', '#.......#', '#.......#', '#.......#', '#.......#', '#.......#', '#.......#', '#.......#', '#########'],
+  dash: ['.........', '.........', '.........', '.........', '..#####..', '.........', '.........', '.........', '.........'],
+  warn: ['....#....', '...###...', '...#.#...', '..##.##..', '..#.#.#..', '.##.#.##.', '.#.....#.', '#########', '.........'],
+  skull: ['..#####..', '.#######.', '##.###.##', '##.###.##', '#########', '.##.#.##.', '..#####..', '..#.#.#..', '..#####..'],
+  star: ['....#....', '....#....', '...###...', '#########', '.#######.', '..#####..', '..##.##..', '.##...##.', '.........'],
+  flag: ['#........', '#######..', '#......#.', '#......#.', '#######..', '#........', '#........', '#........', '#........'],
+  bolt: ['....##...', '...##....', '..##.....', '.######..', '....##...', '...##....', '..##.....', '.##......', '#........'],
+  loop: ['..#####..', '.#.....#.', '#.......#', '#.......#', '#.......#', '.#..#..#.', '....##...', '....###..', '....####.'],
+  cut: ['##.....##', '###...###', '.###.###.', '..#####..', '...###...', '..#####..', '.###.###.', '###...###', '##.....##'],
+  swap: ['..#......', '.##......', '#######..', '.##......', '..#......', '......#..', '......##.', '..#######', '......##.'],
+  shield: ['.#######.', '#########', '#..###..#', '#..###..#', '#########', '.#######.', '..#####..', '...###...', '....#....'],
+  lesson: ['.........', '#########', '#.......#', '#.#####.#', '#.......#', '#.#####.#', '#.......#', '#########', '.........'],
+};
+function pixelIcon(name, px = 3, color = 'currentColor') {
+  const g = PIXEL_ICONS[name] || PIXEL_ICONS.box;
+  const rects = [];
+  g.forEach((rowStr, y) => [...rowStr].forEach((bit, x) => { if (bit === '#') rects.push(`<rect x="${x}" y="${y}" width="1" height="1"/>`); }));
+  return `<svg class="ico" viewBox="0 0 9 9" width="${9 * px}" height="${9 * px}" shape-rendering="crispEdges" fill="${color}" aria-hidden="true">${rects.join('')}</svg>`;
+}
+
+// A number for a pixel headline: compact, and never more characters than a glance can take in.
+const heroNum = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e4 ? `${Math.round(n / 1e3)}k` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}k` : String(Math.round(n)));
+const withCommas = (n) => String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+
 function renderHtml(d) {
-  const agentRows = d.agents.map((a) => `<tr>
-      <td class="k">${esc(a.agentType)}<span class="dim">·${esc(a.model)}</span></td>
-      <td>${a.runs}</td><td>${human(a.in)}</td><td>${human(a.out)}</td>
-      <td>${human(a.cacheRead)}</td><td>${human(a.cacheWrite)}</td>
-      <td class="${a.priced ? '' : 'dim'}">${money(a.costUsd, a.priced)}</td></tr>`).join('');
-
-  const max = Math.max(1, ...d.timeline.map((t) => t.tokens));
-  const bars = d.timeline.slice(-30).map((t) => `<div class="bar" style="height:${Math.max(2, Math.round((t.tokens / max) * 100))}%">
-      <span>${esc(t.date.slice(5))} · ${human(t.tokens)}</span></div>`).join('');
-
-  const wfRows = d.workflows.slice(0, 12).map((w) => `<tr>
-      <td class="k">${esc(w.runId)}</td><td>${esc(w.name)}</td>
-      <td>${esc(w.startedAt.slice(0, 16).replace('T', ' '))}</td>
-      <td>${duration(w.durationMs)}</td><td>${w.rounds || '—'}</td>
-      <td>${human(w.tokens)}</td><td class="${w.verdict ? '' : 'dim'}">${esc(w.verdict || w.state || '—')}</td>
-      <td class="dim">${esc(clip(w.resultLine || '', 60))}</td></tr>`).join('');
-
-  const loopRows = d.loopRuns.slice(0, 10).map((r) => `<tr><td class="k">${esc(r.date || '?')}</td>
-      <td>${esc(r.loop)}</td><td>${r.rounds || '—'}</td><td>${esc(r.verdict || '—')}</td>
-      <td class="dim">${esc(r.stoppedBy || '')}</td></tr>`).join('');
-
-  const lineupRows = (d.lineup || []).map((r) => `<tr><td class="k">${esc(r.role)}</td>
-      <td>${esc(short(r.configured))}</td>
-      <td class="${r.drift ? '' : 'dim'}">${r.observedModel ? esc(short(r.observedModel)) : '—'}${r.drift ? ' ⚠' : ''}</td>
-      <td class="dim">${r.observedRuns}</td></tr>`).join('');
-
-  const s = d.savings;
-  const abRows = (s && s.ab.length ? s.ab : []).map((a) => `<tr><td class="k">${esc(a.subject)}</td>
-      <td>${a.rounds}</td><td>${signed(a.deltaScore)}${a.scoreMax ? `/${a.scoreMax}` : ''}</td>
-      <td class="${a.deltaTokens === null ? 'dim' : ''}">${a.deltaTokens === null ? 'n/a' : signed(a.deltaTokens, 0)}</td>
-      <td class="dim">${esc(a.tokensReason || 'per-arm tokens recorded (v2)')}</td></tr>`).join('');
-
-  const predRows = (s && s.predictions ? s.predictions.rows : []).map((r) => `<tr><td class="k">${esc(r.version)}</td>
-      <td>${esc(r.date)}</td><td class="dim">${esc(r.change)}</td>
-      <td class="dim">${esc(clip(r.prediction, 70))}</td><td>${esc(r.outcome)}</td></tr>`).join('');
-
-  const savingsBody = s ? `${abRows ? `<div class="scroll"><table>
-    <thead><tr><th>A/B run</th><th>rounds</th><th>Δ score</th><th>Δ tokens</th><th>note</th></tr></thead>
-    <tbody>${abRows}</tbody></table></div>` : '<p class="sub">No two-armed run in scope — /skill-loop is the only loop that produces one.</p>'}
-    <p class="sub">${!s.predictions
-    ? 'No process-log.md — /iterate has never run in this repo.'
-    : s.predictions.unreadable
-      ? `process-log.md is present but its ledger is unreadable (${esc(String(s.predictions.unreadable))}) — <b>no prediction counted</b>, and that is not the same as none falsified.`
-      : `Optimizer predictions (process-log.md ledger): <b>${s.predictions.verified} verified · ${s.predictions.falsified} falsified · ${s.predictions.pending} pending · ${s.predictions.unknown} unreadable</b>`}<br>
-    ${s.roundsToGreen ? `Rounds-to-green: ${s.roundsToGreen.trend.join(' · ')} — <b>proxy, explicitly not a saving</b>: nobody measured what those rounds would have cost without the loop.` : 'Rounds-to-green: no approved develop-phase run in scope.'}<br>
-    Δ score and Δ tokens compare the two arms of an A/B that both ran. Nothing here is a multiplier, and
-    an unmeasured quantity is printed n/a with its reason — never estimated.</p>` : '<p class="sub">No counterfactual in scope — pass --repo &lt;path&gt; to read loop-runs and process-log.md.</p>';
-
-  const learnRows = d.learnings.slice(0, 10).map((l) => `<tr><td class="k">${esc(l.date)}</td>
-      <td>${esc(l.skill)}</td><td class="dim">${esc(l.entry)}</td></tr>`).join('');
-
-  const topRows = d.prompts.top.map((t) => `<tr><td class="k">×${t.count}</td>
-      <td class="dim">«${esc(t.sample.replace(/\s+/g, ' ').slice(0, 90))}»</td></tr>`).join('');
-
-  const section = (title, body) => (body ? `<h2>${title}</h2>${body}` : '');
-  const sectionSub = (title, sub, body) => (body ? `<h2>${title}<span class="n">${sub}</span></h2>${body}` : '');
-  const tile = (label, value, small, detail, hot) => `<div class="tile${hot ? ' hot' : ''}">
-      <div class="l">${label}</div><div class="v">${value}${small ? `<small>${small}</small>` : ''}</div>
-      ${detail ? `<div class="d">${detail}</div>` : ''}</div>`;
-
   const h = d.hygiene;
   const t = d.tools;
   const g = d.guards;
-
-  const pill = (cls, label) => `<span class="pill ${cls}">${esc(label)}</span>`;
-  const cardsBody = !d.cards ? '' : `${d.cards.length ? `<div class="cards">${d.cards.map((c) => `
-    <div class="card${c.severity === 'warn' ? ' warn' : ''}">
-      <div class="top">${pill(c.type === 'LIFECYCLE' ? 'life' : 'type', c.type)}${pill(c.severity, c.severity)}<span class="rid">${esc(c.rule)}</span></div>
-      <h3>${esc(c.headline)}</h3>
-      <div class="ev">${esc(c.evidence)}</div>
-      <div class="rec">${esc(c.recommendation)}</div>
-      <div class="not">${esc(c.doesNotProve)}</div>
-      <span class="src">${esc(c.source)}</span>
-    </div>`).join('')}</div>` : '<p class="sub">No rule found evidence in this window. Nothing is printed rather than something reassuring.</p>'}
-    <p class="sub">${d.rulesSilent.length} rule(s) checked and silent: ${esc(d.rulesSilent.join(', '))}.
-    A rule with no evidence prints nothing — padding a report to fill the grid is how an instrument becomes a horoscope.
-    Every card proposes; none of them edits anything.</p>`;
-
-  const rv = d.reviews;
-  const stateClass = { promoted: 'ok', pending: 'pend', 'n/a': 'na' };
-  const reviewRows = !rv || !rv.latest ? '' : rv.latest.cards.map((c) => `<tr>
-      <td class="k">${pill('type', c.type)}</td>
-      <td class="k wrap">${esc(clip(c.text, 120))}</td>
-      <td>${c.count || '—'}</td>
-      <td class="k">${pill(stateClass[c.state] || 'na', c.state)}</td>
-      <td class="k dim wrap">${esc(clip(c.evidence, 80))}</td></tr>`).join('');
-  const reviewBody = !rv || !rv.latest ? `<p class="sub">No <code>*-session-review.md</code> in <code>docs/harness-dev/loop-runs/</code>${d.skills ? ` under ${esc(d.skills.repo)}` : ''} — Loop 6 has never run here, so nothing above has ever been promoted or rejected on the record.</p>`
-    : `<div class="life">
-      <div class="lifebox">
-        <div class="l">latest run</div>
-        <div class="big">${esc(rv.latest.date || 'undated')} <small>· ${rv.latest.ageDays} days ago</small></div>
-        <div class="trail">
-          <span class="step"><b>${rv.latest.cards.length}</b> proposed</span><span class="arrow">→</span>
-          <span class="step"><b>${rv.latest.promoted}</b> promoted</span><span class="arrow">→</span>
-          <span class="step"><b>${rv.latest.pending}</b> pending</span><span class="arrow">→</span>
-          <span class="step"><b>${rv.latest.cards.length - rv.latest.promoted - rv.latest.pending}</b> n/a</span>
-        </div>
-        <p class="sub" style="margin-top:.8rem">${rv.latest.unreadable
-    ? `The report is present but ${esc(rv.latest.unreadable)} — which is not the same fact as "no review yet".`
-    : 'Promotion is checked by grepping this repo\'s contract and skills for what each card quoted. A DISPATCH or HABIT card leaves no artefact to grep, so it reads n/a rather than pending.'}</p>
-        <p class="sub">${esc(rv.latest.file)}</p>
-      </div>
-      <div class="scroll"><table>
-        <thead><tr><th class="k">type</th><th class="k">card, verbatim</th><th>×</th><th class="k">state</th><th class="k">evidence</th></tr></thead>
-        <tbody>${reviewRows}</tbody></table></div>
-    </div>`;
-
   const sk = d.skills;
-  const usedRows = !sk ? '' : sk.used.slice(0, 20).map((u) => `<tr><td class="k">${esc(u.name)}</td>
-      <td>${u.viaSkillTool || '—'}</td><td>${u.viaSlash || '—'}</td>
-      <td class="k dim">${esc(u.sources.join(', ') || 'not installed here')}</td></tr>`).join('');
-  const skillsBody = !sk ? '' : `<div class="cols">
-    <div><div class="scroll"><table>
-      <thead><tr><th class="k">invoked</th><th>Skill tool</th><th>typed</th><th class="k">installed as</th></tr></thead>
-      <tbody>${usedRows}</tbody></table></div></div>
-    <div>
-      <p class="sub">${sk.installed} installed for this project and user${sk.enabled !== sk.installed ? ` (${sk.installed - sk.enabled} disabled)` : ''} ·
-      ${Object.entries(sk.bySource).map(([k, v]) => `${esc(k)} ${v}`).join(' · ') || 'none found'}</p>
-      ${sk.installedNotUsed.project.length ? `<p class="sub"><b>Project skills never invoked in this window (${sk.installedNotUsed.project.length}):</b><br>
-        <span class="chips">${sk.installedNotUsed.project.slice(0, 24).map((n) => `<span class="chip">${esc(n)}</span>`).join('')}</span></p>` : ''}
-      ${sk.installedNotUsed.userCount ? `<p class="sub">${sk.installedNotUsed.userCount} user-level skill(s) also went uninvoked.</p>` : ''}
-      ${sk.usedNotInstalled.length ? `<p class="sub">Invoked through the Skill tool but not installed here: ${esc(sk.usedNotInstalled.join(', '))}.</p>` : ''}
-      <p class="sub">${esc(sk.note)}</p>
+  const rv = d.reviews;
+  const prev = d.previous;
+  const cards = d.cards || [];
+  const days = d.window === 'all' ? null : Math.round((Date.parse(d.generatedAt) - Date.parse(d.window)) / 864e5);
+  const windowLabel = days ? `last ${days} days` : 'all history';
+  // A slug cannot be turned back into a path (every dash is ambiguous); the repo basename can.
+  const projectName = sk && sk.repo ? path.basename(sk.repo) : d.project;
+
+  // ── delta chips, only where a comparison is honest ──────────────────────
+  // Hygiene counts are compared as rates per 100 human prompts, because a busier month has more of
+  // everything; sessions and cost are compared raw. `lowerIsBetter` decides the colour, never the
+  // arithmetic. When the previous window is too thin the chip says so instead of a percentage.
+  const rate = (n, per) => (per ? (n / per) * 100 : 0);
+  const chip = (nowN, prevN, { asRate = true, lowerIsBetter = true, unit = '' } = {}) => {
+    if (!prev) return '';
+    if (!prev.comparable) return `<span class="chip mute" title="previous window: ${prev.sessions} sessions, ${prev.humanPrompts} prompts">too quiet before to compare</span>`;
+    const a = asRate ? rate(nowN, h.humanPrompts) : nowN;
+    const b = asRate ? rate(prevN, prev.humanPrompts) : prevN;
+    const diff = a - b;
+    if (Math.abs(diff) < (asRate ? 0.5 : 0.5)) return `<span class="chip mute">▪ same as before</span>`;
+    const better = lowerIsBetter ? diff < 0 : diff > 0;
+    const arrow = diff < 0 ? '▼' : '▲';
+    const val = asRate ? `${Math.abs(diff).toFixed(1)} per 100 prompts` : `${withCommas(Math.abs(diff))}${unit}`;
+    return `<span class="chip ${better ? 'good' : 'bad'}">${arrow} ${val} ${better ? 'better' : 'worse'}</span>`;
+  };
+
+  // ── shared bits ─────────────────────────────────────────────────────────
+  const pill = (cls, label) => `<span class="pill ${cls}">${esc(label)}</span>`;
+  const typeIcon = { HABIT: 'loop', DISPATCH: 'swap', 'SKILL CANDIDATE': 'star', 'AGENTS.md RULE': 'flag', LIFECYCLE: 'lesson', DASHBOARD: 'box' };
+  const blocks = (n, of, cls = '') => {
+    // A segmented bar: each block is one unit up to 20, then the bar is scaled. No decimals.
+    const total = Math.max(1, Math.min(20, of));
+    const lit = Math.round((Math.min(n, of) / Math.max(1, of)) * total);
+    return `<span class="bar ${cls}" aria-hidden="true">${'<i class="on"></i>'.repeat(lit)}${'<i></i>'.repeat(total - lit)}</span>`;
+  };
+  const scene = (num, title, kicker, body, cls = '') => `<section class="scene ${cls}" id="s${num}">
+    <header class="sh"><span class="num">${pixelText(String(num).padStart(2, '0'), 3)}</span><h2>${title}</h2>${kicker ? `<p class="kicker">${kicker}</p>` : ''}</header>
+    ${body}
+  </section>`;
+  const cardFull = (c) => `<article class="card ${c.severity}">
+      <div class="top">${pixelIcon(typeIcon[c.type] || 'box', 2)}${pill('type', c.type)}${pill(c.severity, c.severity)}<span class="rid">${esc(c.rule)}</span></div>
+      <h3>${esc(c.headline)}</h3>
+      <p class="ev">${esc(c.evidence)}</p>
+      <p class="rec"><b>What to do.</b> ${esc(c.recommendation)}</p>
+      <p class="not"><b>What this does not prove.</b> ${esc(c.doesNotProve)}</p>
+      <span class="src">${esc(c.source)}</span>
+    </article>`;
+  const cardRow = (c) => `<details class="crow ${c.severity}">
+      <summary>${pixelIcon(typeIcon[c.type] || 'box', 2)}<span class="ct">${esc(c.type)}</span><span class="ch">${esc(c.headline)}</span><span class="rid">${esc(c.rule)}</span></summary>
+      <div class="cbody"><p class="ev">${esc(c.evidence)}</p>
+      <p class="rec"><b>What to do.</b> ${esc(c.recommendation)}</p>
+      <p class="not"><b>What this does not prove.</b> ${esc(c.doesNotProve)}</p></div>
+    </details>`;
+
+  // ── 00 cover ────────────────────────────────────────────────────────────
+  const cover = `<header class="cover">
+    <p class="eyebrow">harness-audit · recap</p>
+    <h1><span class="pxtitle">${pixelText('LOOP-STATS', 4)}</span><span class="proj">${esc(projectName)}</span></h1>
+    <p class="lede">${windowLabel}${days ? `, ${esc(d.window.slice(0, 10))} → ${esc(d.generatedAt.slice(0, 10))}` : ''}. Read from the transcripts on this machine; nothing left it.</p>
+    <div class="heroes">
+      <div class="hero"><div class="hv">${pixelText(String(h ? h.sessions : d.totals.runs), 7)}</div><div class="hl">sessions</div>${prev && prev.comparable ? chip(h ? h.sessions : 0, prev.sessions, { asRate: false, lowerIsBetter: false }) : ''}</div>
+      <div class="hero"><div class="hv">${pixelText(String(h ? h.humanPrompts : d.prompts.total), 7)}</div><div class="hl">things you asked for</div></div>
+      <div class="hero"><div class="hv">${pixelText(`$${heroNum(d.totals.costUsd)}`, 7)}</div><div class="hl">est. spend${d.unpricedModels.length ? ' (floor — see the ledger)' : ''}</div>${prev && prev.comparable ? chip(d.totals.costUsd, prev.costUsd, { asRate: false, lowerIsBetter: true, unit: '$' }) : ''}</div>
     </div>
-  </div>`;
+    ${cards.length ? `<p class="lede">${cards.length} thing${cards.length === 1 ? '' : 's'} worth your attention below, ${d.rulesSilent.length} rule${d.rulesSilent.length === 1 ? '' : 's'} checked and quiet.</p>` : '<p class="lede">No rule found evidence in this window. Nothing is printed rather than something reassuring.</p>'}
+  </header>`;
 
-  const hygieneBody = !h ? '' : `<div class="tiles">
-    ${tile('continuations', h.continuations.count, `${h.continuations.afterAgentTurn}/${h.continuations.count || 0} after agent`, esc(h.continuations.pattern), h.continuations.count >= 5)}
-    ${tile('interrupts', h.interrupts, h.humanPrompts ? pct(h.interrupts / h.humanPrompts) : '', 'the human stopped a turn mid-flight', h.interrupts >= 10)}
-    ${tile('/model switches', h.modelSwitches.count, '', esc(Object.entries(h.modelSwitches.targets).map(([k, v]) => `${k} ×${v}`).join(' · ')) || 'no target recorded', h.modelSwitches.count >= 5)}
-    ${tile('compactions', h.compactions.count, `${h.compactions.auto} auto · ${h.compactions.manual} manual`, h.compactions.avgPreTokens ? `avg ${human(h.compactions.avgPreTokens)} tokens before the cut` : '', h.compactions.auto >= 3)}
-    ${tile('corrections <span class="proxy">proxy</span>', h.corrections.count, h.humanPrompts ? pct(h.corrections.count / h.humanPrompts) : '', esc(h.corrections.pattern))}
-    ${tile('plan mode', h.planMode.sessions, `of ${h.planMode.of} sessions`, `ExitPlanMode ×${t ? t.planMode.exitPlanMode : 0}`)}
+  // ── 01 the one thing ────────────────────────────────────────────────────
+  const first = cards[0];
+  const oneThing = first
+    ? scene(1, 'Start here', 'One thing. The card with the most evidence behind it, and what to do about it.', cardFull(first), 'stage')
+    : '';
+
+  // ── 02 how the driving went ─────────────────────────────────────────────
+  const tile = (icon, label, n, sub, chipHtml, hot) => `<div class="tile${hot ? ' hot' : ''}">
+      <div class="tl">${pixelIcon(icon, 2)}<span>${label}</span></div>
+      <div class="tv">${pixelText(String(n), 4)}</div>
+      <div class="ts">${sub}</div>${chipHtml}</div>`;
+  const driving = !h ? '' : scene(2, 'How the driving went', prev && prev.comparable
+    ? `Against the ${days} days before — rates per 100 prompts, so a busier month does not read as a worse one.`
+    : prev ? `The ${days} days before this window were too quiet to compare against (${prev.sessions} session${prev.sessions === 1 ? '' : 's'}, ${prev.humanPrompts} prompts). Next month there will be a baseline.` : 'Pass --since to get a comparison against the window before.',
+  `<div class="tiles">
+    ${tile('loop', 'bare «continua»', h.continuations.count, `${h.continuations.afterAgentTurn} of ${h.continuations.count} right after the agent stopped`, chip(h.continuations.count, prev ? prev.continuations : 0), h.continuations.count >= 5)}
+    ${tile('bolt', 'interrupted', h.interrupts, `${h.humanPrompts ? pct(h.interrupts / h.humanPrompts) : '0%'} of your turns stopped mid-flight`, chip(h.interrupts, prev ? prev.interrupts : 0), h.interrupts >= 10)}
+    ${tile('swap', '/model by hand', h.modelSwitches.count, esc(Object.entries(h.modelSwitches.targets).slice(0, 3).map(([k, v]) => `${k} ×${v}`).join(' · ')) || 'no target recorded', chip(h.modelSwitches.count, prev ? prev.modelSwitches : 0), h.modelSwitches.count >= 5)}
+    ${tile('cut', 'compactions', h.compactions.count, `${h.compactions.auto} automatic${h.compactions.avgPreTokens ? ` · avg ${human(h.compactions.avgPreTokens)} tokens before the cut` : ''}`, chip(h.compactions.count, prev ? prev.compactions : 0), h.compactions.auto >= 3)}
+  </div>
+  <p class="fine">${h.humanPrompts} human prompts over ${h.sessions} sessions. ${h.droppedAgentShaped} turns that looked human but were written by a loop to its own subagent were dropped; ${h.dedupedRecords} duplicate record${h.dedupedRecords === 1 ? '' : 's'} collapsed. ${h.corrections.count} turn${h.corrections.count === 1 ? '' : 's'} opened like a correction <span class="proxy">proxy</span> — the reasons you typed while refusing a call, in scene 07, are the only corrections here that are not a guess.</p>`);
+
+  // ── 03 what kept breaking ───────────────────────────────────────────────
+  const boss = t && t.errorClusters[0];
+  const breaking = !t ? '' : scene(3, 'What kept breaking', boss ? 'The failure that came back most. A failure that repeats is a preflight check nobody wrote.' : 'Nothing failed the same way twice in this window.',
+    boss ? `<div class="boss">
+      <div class="bl">${pixelIcon('skull', 5, 'var(--red)')}<div class="bv">${pixelText(`${boss.count}`, 8, 'var(--red)')}</div><div class="bt">times, across ${plural(boss.sessions, 'session')} · last on ${esc(String(boss.lastAt).slice(0, 10))}</div></div>
+      <blockquote class="quote">${esc(clip(boss.sample, 220))}</blockquote>
+      <p class="fine">Tool: <b>${esc(boss.tool || '?')}</b>. Clustered by the first eight words of the error, so this may be more than one root cause wearing the same message.</p>
     </div>
-    ${h.corrections.sample.length ? `<p class="sub">Correction-shaped, verbatim: ${h.corrections.sample.map((x) => `«${esc(clip(x, 70))}»`).join(' · ')}</p>` : ''}
-    <p class="sub">${h.humanPrompts} human prompts over ${h.sessions} sessions · ${h.droppedAgentShaped} agent-shaped turns dropped · ${h.dedupedRecords} duplicate records collapsed.<br>
-    ${h.caveats.map(esc).join('<br>')}</p>`;
+    ${t.errorClusters.length > 1 ? `<ul class="list">${t.errorClusters.slice(1, 5).map((c) => `<li><span class="n">×${c.count}</span> <span class="q">${esc(clip(c.sample, 110))}</span></li>`).join('')}</ul>` : ''}
+    <p class="fine">${withCommas(t.totalCalls)} tool calls in all · ${t.totalErrors} errors${t.staleEdits ? ` · ${t.staleEdits} edit${t.staleEdits === 1 ? '' : 's'} hit a file that had changed since it was read` : ''}${t.apiErrors ? ` · ${t.apiErrors} transport retr${t.apiErrors === 1 ? 'y' : 'ies'}, which are slow rather than failed` : ''}. ${chip(t.totalErrors, prev ? prev.toolErrors : 0)}</p>`
+      : `<p class="fine">${withCommas(t.totalCalls)} tool calls, ${t.totalErrors} errors, none of them repeated. ${chip(t.totalErrors, prev ? prev.toolErrors : 0)}</p>`);
 
-  const toolRows = !t ? '' : t.byName.slice(0, 12).map((r) => `<tr><td class="k">${esc(r.name)}</td>
-      <td>${r.calls}</td><td class="${r.errors ? '' : 'dim'}">${r.errors || '—'}</td>
-      <td class="dim">${r.errors ? pct(r.errorRate) : ''}</td></tr>`).join('');
-  const clusterRows = !t ? '' : t.errorClusters.map((c) => `<tr>
-      <td class="k wrap">${esc(clip(c.sample, 110))}</td><td>${c.count}</td><td>${c.sessions}</td>
-      <td class="k dim">${esc(String(c.lastAt).slice(5, 10))}</td></tr>`).join('');
-  const denialRows = !t ? '' : t.denials.reasons.map((r) => `<tr>
-      <td class="k wrap">«${esc(clip(r.reason, 120))}»</td><td class="k dim">${esc(r.tool || '—')}</td></tr>`).join('');
+  // ── 04 your top skills ──────────────────────────────────────────────────
+  // A typed /model or /compact is a built-in, not a skill you reached for: only names the Skill tool
+  // invoked, or that are installed as a skill or command, make the ranking.
+  const used = sk ? sk.used.filter((u) => (u.viaSkillTool > 0 || u.sources.length > 0) && u.viaSkillTool + u.viaSlash > 0) : [];
+  const medal = (i) => (i === 0 ? pixelIcon('star', 3, 'var(--gold)') : i === 1 ? pixelIcon('star', 3, 'var(--ink-dim)') : i === 2 ? pixelIcon('star', 3, 'var(--bronze)') : `<span class="rank">${i + 1}</span>`);
+  const topSkills = !sk ? '' : scene(4, 'Your top skills', used.length ? 'What you actually reached for — through the Skill tool or by typing its name.' : 'Nothing was invoked through the Skill tool or by name in this window.',
+    `${used.length ? `<ol class="ranked">${used.slice(0, 5).map((u, i) => `<li>${medal(i)}<span class="name">${esc(u.name)}</span>${blocks(u.viaSkillTool + u.viaSlash, used[0].viaSkillTool + used[0].viaSlash, 'gold')}<span class="cnt">×${u.viaSkillTool + u.viaSlash}</span><span class="where">${esc(u.sources.join(', ') || 'not installed here')}</span></li>`).join('')}</ol>` : ''}
+    ${sk.installedNotUsed.project.length ? `<div class="shelf">
+      <p class="shelf-h">${pixelIcon('box', 2)} <b>${sk.installedNotUsed.project.length} of ${sk.installedNotUsed.projectTotal}</b> project skills never came off the shelf</p>
+      <p class="chips">${sk.installedNotUsed.project.slice(0, 24).map((n) => `<span class="chipname">${esc(n)}</span>`).join('')}</p>
+      <p class="fine">Each SKILL.md costs context on every session whether it is used or not. A skill whose description auto-triggered without the Skill tool leaves no trace here — so this is what the Skill tool saw, not proof a skill is useless.</p>
+    </div>` : ''}
+    ${sk.usedNotInstalled.length ? `<p class="fine">Invoked but with no SKILL.md under this project or your home: ${esc(sk.usedNotInstalled.join(', '))} — a workflow, or a skill the client ships.</p>` : ''}
+    ${prev && prev.comparable ? `<p class="fine">${Object.keys(h.skillCalls).length} distinct skills this window ${chip(Object.keys(h.skillCalls).length, prev.skillsInvoked, { asRate: false, lowerIsBetter: false })}</p>` : ''}`);
 
-  const toolsBody = !t ? '' : `<div class="cols">
-    <div><div class="scroll"><table>
-      <thead><tr><th class="k">tool</th><th>calls</th><th>errors</th><th>rate</th></tr></thead>
-      <tbody>${toolRows}</tbody></table></div>
-      <p class="sub">Subagents spawned: ${esc(Object.entries(t.subagents.byType).map(([k, v]) => `${k} ×${v}`).join(' · ')) || 'none'}.
-      ${t.staleEdits ? `${t.staleEdits} edit(s) hit a file that changed since it was read. ` : ''}
-      ${t.apiErrors ? `${t.apiErrors} transport error(s) were retried by the client — slow, not failed.` : ''}</p></div>
-    <div>${clusterRows ? `<div class="scroll"><table>
-      <thead><tr><th class="k">repeated failure</th><th>×</th><th>sess.</th><th class="k">last</th></tr></thead>
-      <tbody>${clusterRows}</tbody></table></div>` : '<p class="sub">No failure repeated inside this window.</p>'}
-      ${denialRows ? `<div class="scroll"><table style="margin-top:1rem">
-      <thead><tr><th class="k">you refused the call, and said why</th><th class="k">tool</th></tr></thead>
-      <tbody>${denialRows}</tbody></table></div>
-      <p class="sub">${t.denials.count} call(s) refused. These reasons are the only explicit corrections in this file — everything else about your prompting is a proxy.</p>`
-    : '<p class="sub">No tool call refused with a typed reason in this window.</p>'}</div>
-  </div>`;
+  // ── 05 report card ──────────────────────────────────────────────────────
+  const stateIcon = { promoted: pixelIcon('check', 2, 'var(--green)'), pending: pixelIcon('box', 2, 'var(--amber)'), 'n/a': pixelIcon('dash', 2, 'var(--ink-dim)') };
+  const reportCard = scene(5, 'Report card', rv && rv.latest
+    ? `What your last <code>/session-review</code> proposed on ${esc(rv.latest.date || '?')}, ${rv.latest.ageDays} days ago, and where each card is now. Checked means the repo now contains it.`
+    : 'Loop 6 has never run in this repo, so nothing has ever been proposed, promoted or rejected on the record.',
+  rv && rv.latest ? `<div class="rc">
+      <div class="rc-score">
+        <div class="rv">${pixelText(`${rv.latest.promoted}/${rv.latest.cards.length}`, 6, 'var(--gold)')}</div>
+        <div class="rl">promoted</div>
+        <div class="trail"><span><b>${rv.latest.cards.length}</b> proposed</span><span class="arr">→</span><span><b>${rv.latest.promoted}</b> promoted</span><span class="arr">→</span><span class="pend"><b>${rv.latest.pending}</b> pending</span><span class="arr">→</span><span><b>${rv.latest.cards.length - rv.latest.promoted - rv.latest.pending}</b> n/a</span></div>
+      </div>
+      <ul class="checklist">${rv.latest.cards.map((c) => `<li class="${c.state.replace('/', '')}">${stateIcon[c.state] || stateIcon['n/a']}<div><span class="ct">${esc(c.type)}</span><span class="txt">${esc(clip(c.text, 140))}</span><span class="evd">${esc(c.evidence)}</span></div></li>`).join('')}</ul>
+    </div>
+    <p class="fine">${rv.latest.unreadable ? `The report is present but ${esc(rv.latest.unreadable)} — not the same fact as "no review yet".` : 'Promotion is checked by grepping this repo\'s contract and skills for what each card quoted. A DISPATCH or HABIT card leaves nothing on disk to grep, so it reads n/a rather than pending.'} Next lesson: <code>/session-review</code> — it now starts from the cards in this report.</p>`
+    : `<p class="fine">Run <code>/session-review</code> once. From then on this scene shows what it proposed and whether you kept it.</p>`);
 
-  const guardRows = !g || !g.pluginGuards ? '' : g.pluginGuards.map((x) => `<tr>
-      <td class="k">${esc(x.name)}${x.advisory ? ' <span class="dim">(advisory)</span>' : ''}</td>
-      <td class="${x.fires ? '' : 'dim'}">${x.fires}</td></tr>`).join('');
-  const hookRows = !g ? '' : g.otherHooks.map((hk) => `<tr><td class="k">${esc(hk.hookName)}</td>
-      <td class="k dim">${esc(clip(hk.command, 46))}</td><td>${hk.runs}</td>
-      <td class="${hk.nonZeroExit ? '' : 'dim'}">${hk.nonZeroExit}</td><td class="dim">${hk.contextInjections}</td></tr>`).join('');
-  const guardsBody = !g ? '' : `<div class="cols">
-    <div>${guardRows ? `<div class="scroll"><table>
-      <thead><tr><th class="k">guard installed by this plugin</th><th>fires</th></tr></thead>
-      <tbody>${guardRows}</tbody></table></div>` : '<p class="sub">hooks.json is not readable from here, so no guard list is shown — an empty list would read as "none installed".</p>'}
-      <p class="sub">${esc(g.note)} Zero fires does not mean nothing dangerous happened; these guards are conservative by design.</p></div>
-    <div>${hookRows ? `<div class="scroll"><table>
-      <thead><tr><th class="k">other PreToolUse hook</th><th class="k">command</th><th>runs</th><th>exit≠0</th><th>injected</th></tr></thead>
-      <tbody>${hookRows}</tbody></table></div>` : '<p class="sub">No other PreToolUse hook ran in this window.</p>'}</div>
-  </div>`;
+  // ── 06 the rest of the cards ────────────────────────────────────────────
+  const rest = cards.slice(1);
+  const moreCards = rest.length ? scene(6, 'The rest of the cards', `${rest.length} more, in order. Open one for its evidence and its limits. None of them edits anything — you promote.`,
+    `<div class="crows">${rest.map(cardRow).join('')}</div>
+    <p class="fine">${d.rulesSilent.length} rule${d.rulesSilent.length === 1 ? '' : 's'} checked and quiet: ${esc(d.rulesSilent.join(', '))}. A rule with no evidence prints nothing — padding a report to fill the grid is how an instrument becomes a horoscope.</p>`) : '';
 
+  // ── 07 guards & refusals ────────────────────────────────────────────────
+  const fires = g && g.pluginGuards ? g.pluginGuards.reduce((n, x) => n + x.fires, 0) : 0;
+  const guards = !g ? '' : scene(7, 'Guards, and the calls you refused', 'What blocked a call by rule, and what you blocked by hand — with the reason you typed.',
+    `<div class="two">
+      <div>
+        <p class="gh">${pixelIcon('shield', 3, fires ? 'var(--amber)' : 'var(--green)')} <b>${g.pluginGuards ? g.pluginGuards.length : 0}</b> guards installed · <b>${fires}</b> fire${fires === 1 ? '' : 's'} in ${plural(h ? h.sessions : 0, 'session')}</p>
+        ${g.pluginGuards ? `<ul class="list plain">${g.pluginGuards.map((x) => `<li><span class="n">${x.fires}</span> ${esc(x.name)}${x.advisory ? ' <span class="mute">(advisory)</span>' : ''}</li>`).join('')}</ul>` : '<p class="fine">hooks.json is not readable from here, so no guard list is shown — an empty list would read as "none installed".</p>'}
+        <p class="fine">A fire is a result beginning <code>harness-audit &lt;guard&gt;: blocked</code>. Zero fires does not mean nothing dangerous happened; the guards are conservative by design.${g.otherHooks.length ? ` Other hooks ran ${g.otherHooks.reduce((n, x) => n + x.runs, 0)} times: ${esc(g.otherHooks.slice(0, 3).map((x) => `${x.command} ×${x.runs}`).join(', '))}.` : ''}</p>
+      </div>
+      <div>
+        <p class="gh">${pixelIcon('flag', 3, 'var(--gold)')} <b>${t ? t.denials.count : 0}</b> call${t && t.denials.count === 1 ? '' : 's'} you refused${t && t.denials.reasons.length ? `, <b>${t.denials.reasons.length}</b> with a reason` : ''} ${chip(t ? t.denials.count : 0, prev ? prev.denials : 0)}</p>
+        ${t && t.denials.reasons.length ? `<ul class="list quotes">${t.denials.reasons.slice(0, 5).map((r) => `<li><span class="q">«${esc(clip(r.reason, 140))}»</span><span class="mute"> — ${esc(r.tool || 'tool')}</span></li>`).join('')}</ul>
+        <p class="fine">These are the only corrections in this report that are not a proxy: you typed them. Each one is a candidate line for AGENTS.md, and you are the one who promotes it.</p>` : '<p class="fine">No refusal carried a typed reason this window.</p>'}
+      </div>
+    </div>`);
+
+  // ── 08 the ledger (the old report, folded) ──────────────────────────────
+  const agentRows = d.agents.map((a) => `<tr>
+      <td class="k">${esc(a.agentType)}<span class="mute"> · ${esc(a.model)}</span></td>
+      <td>${a.runs}</td><td>${human(a.in)}</td><td>${human(a.out)}</td>
+      <td>${human(a.cacheRead)}</td><td>${human(a.cacheWrite)}</td>
+      <td class="${a.priced ? '' : 'mute'}">${money(a.costUsd, a.priced)}</td></tr>`).join('');
+  const max = Math.max(1, ...d.timeline.map((x) => x.tokens));
+  const bars = d.timeline.slice(-30).map((x) => `<div class="tbar" style="height:${Math.max(2, Math.round((x.tokens / max) * 100))}%"><span>${esc(x.date.slice(5))} · ${human(x.tokens)}</span></div>`).join('');
+  const wfRows = d.workflows.slice(0, 12).map((w) => `<tr>
+      <td class="k">${esc(w.runId)}</td><td class="k">${esc(w.name)}</td>
+      <td class="k">${esc(w.startedAt.slice(0, 16).replace('T', ' '))}</td>
+      <td>${duration(w.durationMs)}</td><td>${w.rounds || '—'}</td>
+      <td>${human(w.tokens)}</td><td class="k ${w.verdict ? '' : 'mute'}">${esc(w.verdict || w.state || '—')}</td></tr>`).join('');
+  const loopRows = d.loopRuns.slice(0, 10).map((r) => `<tr><td class="k">${esc(r.date || '?')}</td>
+      <td class="k">${esc(r.loop)}</td><td>${r.rounds || '—'}</td><td class="k">${esc(r.verdict || '—')}</td>
+      <td class="k mute">${esc(r.stoppedBy || '')}</td></tr>`).join('');
+  const lineupRows = (d.lineup || []).map((r) => `<tr><td class="k">${esc(r.role)}</td>
+      <td class="k">${esc(short(r.configured))}</td>
+      <td class="k ${r.drift ? '' : 'mute'}">${r.observedModel ? esc(short(r.observedModel)) : '—'}${r.drift ? ' ⚠' : ''}</td>
+      <td class="mute">${r.observedRuns}</td></tr>`).join('');
+  const sv = d.savings;
+  const abRows = (sv && sv.ab.length ? sv.ab : []).map((a) => `<tr><td class="k">${esc(a.subject)}</td>
+      <td>${a.rounds}</td><td>${signed(a.deltaScore)}${a.scoreMax ? `/${a.scoreMax}` : ''}</td>
+      <td class="${a.deltaTokens === null ? 'mute' : ''}">${a.deltaTokens === null ? 'n/a' : signed(a.deltaTokens, 0)}</td>
+      <td class="k mute">${esc(a.tokensReason || 'per-arm tokens recorded (v2)')}</td></tr>`).join('');
+  const predRows = (sv && sv.predictions ? sv.predictions.rows : []).map((r) => `<tr><td class="k">${esc(r.version)}</td>
+      <td class="k">${esc(r.date)}</td><td class="k mute">${esc(r.change)}</td>
+      <td class="k mute">${esc(clip(r.prediction, 70))}</td><td class="k">${esc(r.outcome)}</td></tr>`).join('');
+  const learnRows = d.learnings.slice(0, 10).map((l) => `<tr><td class="k">${esc(l.date)}</td>
+      <td class="k">${esc(l.skill)}</td><td class="k mute">${esc(l.entry)}</td></tr>`).join('');
+  const topRows = d.prompts.top.map((x) => `<tr><td class="k">×${x.count}</td>
+      <td class="k mute">«${esc(x.sample.replace(/\s+/g, ' ').slice(0, 90))}»</td></tr>`).join('');
+  const table = (head, body) => (body ? `<div class="scroll"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>` : '');
+  const savingsText = sv ? `<p class="fine">${!sv.predictions
+    ? 'No process-log.md — /iterate has never run in this repo.'
+    : sv.predictions.unreadable
+      ? `process-log.md is present but its ledger is unreadable (${esc(String(sv.predictions.unreadable))}) — <b>no prediction counted</b>, and that is not the same as none falsified.`
+      : `Optimizer predictions: <b>${sv.predictions.verified} verified · ${sv.predictions.falsified} falsified · ${sv.predictions.pending} pending · ${sv.predictions.unknown} unreadable</b>.`}
+    ${sv.roundsToGreen ? ` Rounds-to-green ${sv.roundsToGreen.trend.join(' · ')} — a proxy, explicitly not a saving.` : ' No approved develop-phase run in scope.'}
+    Nothing here is a multiplier; an unmeasured quantity is printed n/a with its reason.</p>` : '<p class="fine">No counterfactual in scope — pass --repo to read loop-runs and process-log.md.</p>';
+
+  const ledger = `<details class="ledger" id="s8">
+    <summary><span class="num">${pixelText('08', 3)}</span><h2>The ledger</h2><p class="kicker">Tokens, cost, workflows, savings — the accounting that used to be the whole report. Open it when you need a number.</p></summary>
+    <div class="lbody">
+      <h4>Tokens by agent × model</h4>
+      ${table('<th class="k">agent</th><th>runs</th><th>in</th><th>out</th><th>cache-r</th><th>cache-w</th><th>est.$</th>', `${agentRows}<tr class="total"><td class="k">TOTAL</td><td>${d.totals.runs}</td><td>${human(d.totals.in)}</td><td>${human(d.totals.out)}</td><td>${human(d.totals.cacheRead)}</td><td>${human(d.totals.cacheWrite)}</td><td>${d.totals.costUsd.toFixed(2)}</td></tr>`)}
+      ${d.unpricedModels.length ? `<p class="fine">est.$ excludes unpriced models: ${esc(d.unpricedModels.join(', '))} — a floor, not a total.</p>` : ''}
+      ${d.introPricedModels.length ? `<p class="fine">priced at introductory rate: ${esc(d.introPricedModels.join(', '))}</p>` : ''}
+      ${lineupRows ? `<h4>Model line-up — configured vs. observed</h4>${table('<th class="k">role</th><th class="k">configured</th><th class="k">observed</th><th>runs</th>', lineupRows)}<p class="fine">⚠ = drift: the role ran on a different model family than model-lineup.json configures.</p>` : ''}
+      <h4>Tokens per day</h4>
+      <div class="tchart">${bars}</div>
+      ${wfRows ? `<h4>Workflow activations</h4>${table('<th class="k">run</th><th class="k">workflow</th><th class="k">started</th><th>duration</th><th>rounds</th><th>tokens</th><th class="k">verdict</th>', wfRows)}` : ''}
+      ${loopRows ? `<h4>Loop runs (findings JSON)</h4>${table('<th class="k">date</th><th class="k">loop</th><th>rounds</th><th class="k">verdict</th><th class="k">stopped by</th>', loopRows)}` : ''}
+      <h4>Savings — measured counterfactuals only</h4>
+      ${abRows ? table('<th class="k">A/B run</th><th>rounds</th><th>Δ score</th><th>Δ tokens</th><th class="k">note</th>', abRows) : '<p class="fine">No two-armed run in scope — /skill-loop is the only loop that produces one.</p>'}
+      ${savingsText}
+      ${predRows ? `<h4>Optimizer predictions</h4>${table('<th class="k">v</th><th class="k">date</th><th class="k">change</th><th class="k">prediction</th><th class="k">outcome</th>', predRows)}` : ''}
+      ${learnRows ? `<h4>Learnings</h4>${table('<th class="k">date</th><th class="k">skill</th><th class="k">entry</th>', learnRows)}` : ''}
+      <h4>Prompts</h4>
+      <p class="fine">${d.prompts.total} user turns · ${d.prompts.avgWords.toFixed(1)} words avg · ${d.prompts.sessionsPerDay.toFixed(1)} sessions/day · ${Math.round(d.prompts.followUpRate * 100)}% follow-ups <span class="proxy">proxy</span>. These are turns, not keystrokes: a loop that re-prompts its session writes one too.</p>
+      ${table('<th class="k">×</th><th class="k">recurring prompt</th>', topRows)}
+      ${t ? `<h4>Every tool</h4>${table('<th class="k">tool</th><th>calls</th><th>errors</th>', t.byName.map((r) => `<tr><td class="k">${esc(r.name)}</td><td>${r.calls}</td><td class="${r.errors ? '' : 'mute'}">${r.errors || '—'}</td></tr>`).join(''))}` : ''}
+    </div>
+  </details>`;
 
   return `<title>loop-stats · ${esc(d.project)}</title>
 <style>
-  :root { --p:#33ff66; --dim:#1f8f45; --bg:#050805; --warn:#f5c542; --warn-dim:#8a6d1c; }
+  :root {
+    --bg:#060b08; --panel:#0b1510; --panel2:#0f1c15; --line:#1e3d2a; --line2:#2b5a3c;
+    --ink:#e7f3ea; --ink-dim:#93ad9c; --mute:#5f7a69;
+    --green:#3dff7a; --green-deep:#1f8f45; --gold:#ffd23f; --bronze:#d08a4a; --amber:#f5c542; --red:#ff5c5c;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,"Noto Sans",sans-serif;
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,"DejaVu Sans Mono",monospace;
+  }
   * { box-sizing:border-box; }
-  body { margin:0; padding:2rem 1rem; background:var(--bg); color:var(--p);
-    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"DejaVu Sans Mono",monospace;
-    font-size:14px; line-height:1.5; text-shadow:0 0 6px rgba(51,255,102,.45); }
-  body::before { content:""; position:fixed; inset:0; pointer-events:none; z-index:2;
-    background:repeating-linear-gradient(180deg,rgba(0,0,0,0) 0 2px,rgba(0,0,0,.28) 2px 4px); }
-  body::after { content:""; position:fixed; inset:0; pointer-events:none; z-index:1;
-    background:radial-gradient(ellipse at center,rgba(51,255,102,.07),transparent 70%); }
-  main { max-width:960px; margin:0 auto; border:1px solid var(--dim); padding:1.5rem;
-    box-shadow:0 0 40px rgba(51,255,102,.12) inset; }
-  h1 { font-size:1.1rem; margin:0 0 .25rem; letter-spacing:.18em; }
-  h2 { font-size:.8rem; margin:2rem 0 .5rem; letter-spacing:.22em; color:var(--dim); text-transform:uppercase; }
-  .sub { color:var(--dim); margin:0 0 1rem; font-size:.78rem; }
+  html { background:var(--bg); }
+  body { margin:0; padding:2.5rem 1rem 4rem; background:var(--bg); color:var(--ink);
+    font-family:var(--sans); font-size:16px; line-height:1.6; font-variant-numeric:tabular-nums; }
+  body::before { content:""; position:fixed; inset:0; pointer-events:none; z-index:2; opacity:.35;
+    background:repeating-linear-gradient(180deg,rgba(0,0,0,0) 0 3px,rgba(0,0,0,.25) 3px 4px); }
+  main { max-width:880px; margin:0 auto; display:flex; flex-direction:column; gap:1.25rem; }
+  code { font-family:var(--mono); font-size:.92em; color:var(--green); background:rgba(61,255,122,.07); padding:0 .3em; }
+  b { font-weight:600; color:var(--ink); }
+  p { margin:0; max-width:64ch; }
+  .fine { color:var(--ink-dim); font-size:.9rem; margin-top:1rem; max-width:70ch; }
+  .mute { color:var(--mute); }
+  .px, .ico { display:inline-block; vertical-align:middle; image-rendering:pixelated; }
+  .px { filter:drop-shadow(0 0 6px rgba(61,255,122,.35)); }
+
+  /* cover */
+  .cover { border:3px solid var(--line2); background:var(--panel); padding:2rem 2rem 1.75rem; box-shadow:8px 8px 0 #000; }
+  .eyebrow { font-family:var(--mono); font-size:.72rem; letter-spacing:.22em; text-transform:uppercase; color:var(--green-deep); }
+  h1 { margin:.5rem 0 .75rem; display:flex; flex-direction:column; gap:.4rem; font-weight:600; }
+  h1 .pxtitle { color:var(--green); }
+  h1 .proj { font-size:1.35rem; color:var(--ink); letter-spacing:.02em; font-weight:500; }
+  .lede { color:var(--ink-dim); font-size:1rem; max-width:62ch; }
+  .heroes { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:1rem; margin:1.5rem 0 1.25rem; }
+  .hero { border:2px solid var(--line); padding:1rem 1rem .9rem; background:var(--panel2); }
+  .hero .hv { color:var(--green); margin-bottom:.4rem; }
+  .hero .hl { font-size:.85rem; color:var(--ink-dim); text-transform:uppercase; letter-spacing:.1em; font-family:var(--mono); }
+
+  /* scenes */
+  .scene { border:2px solid var(--line); background:var(--panel); padding:1.5rem 1.75rem 1.75rem; box-shadow:6px 6px 0 #000; }
+  .scene.stage { border-color:var(--gold); box-shadow:6px 6px 0 #000, 0 0 0 4px rgba(255,210,63,.08); }
+  .sh { display:grid; grid-template-columns:auto 1fr; gap:.25rem 1rem; align-items:center; margin-bottom:1.25rem; }
+  .sh .num { color:var(--green-deep); grid-row:1 / span 2; align-self:start; margin-top:.3rem; }
+  h2 { margin:0; font-size:1.45rem; font-weight:650; letter-spacing:-.01em; text-wrap:balance; line-height:1.2; }
+  .kicker { color:var(--ink-dim); font-size:.95rem; max-width:64ch; }
+
+  /* cards */
+  .card { border:2px solid var(--line2); background:var(--panel2); padding:1.25rem 1.4rem 2rem; position:relative; display:flex; flex-direction:column; gap:.7rem; }
+  .card.warn { border-color:var(--amber); }
+  .card .top { display:flex; align-items:center; gap:.6rem; flex-wrap:wrap; }
+  .card h3 { margin:.2rem 0 0; font-size:1.35rem; line-height:1.3; font-weight:650; text-wrap:balance; max-width:32ch; }
+  .card .ev { border-left:4px solid var(--line2); padding:.25rem 0 .25rem .9rem; color:var(--ink); font-family:var(--mono); font-size:.86rem; line-height:1.55; max-width:none; word-break:break-word; }
+  .card .rec { font-size:1rem; }
+  .card .not { color:var(--ink-dim); font-size:.9rem; padding-top:.6rem; border-top:1px dashed var(--line); }
+  .card .src { position:absolute; right:1rem; bottom:.6rem; font-family:var(--mono); font-size:.68rem; color:var(--mute); }
+  .card .rid, .crow .rid { margin-left:auto; font-family:var(--mono); font-size:.72rem; color:var(--mute); }
+  .pill { display:inline-block; padding:.1rem .5rem; border:2px solid currentColor; font-family:var(--mono); font-size:.68rem; letter-spacing:.12em; text-transform:uppercase; line-height:1.5; }
+  .pill.type { color:var(--green); } .pill.info { color:var(--ink-dim); } .pill.warn { color:var(--amber); }
+  .crows { display:flex; flex-direction:column; gap:.5rem; }
+  .crow { border:2px solid var(--line); background:var(--panel2); }
+  .crow.warn { border-left:6px solid var(--amber); }
+  .crow summary { list-style:none; cursor:pointer; display:flex; align-items:center; gap:.7rem; padding:.75rem 1rem; }
+  .crow summary::-webkit-details-marker { display:none; }
+  .crow summary::after { content:"+"; font-family:var(--mono); color:var(--green-deep); margin-left:.5rem; }
+  .crow[open] summary::after { content:"−"; }
+  .crow .ct { font-family:var(--mono); font-size:.68rem; letter-spacing:.12em; text-transform:uppercase; color:var(--green-deep); white-space:nowrap; }
+  .crow .ch { flex:1; font-weight:500; }
+  .crow .cbody { padding:0 1rem 1rem 3.4rem; display:flex; flex-direction:column; gap:.6rem; }
+  .crow .ev { font-family:var(--mono); font-size:.84rem; color:var(--ink-dim); border-left:4px solid var(--line2); padding-left:.8rem; max-width:none; word-break:break-word; }
+  .crow .not { color:var(--ink-dim); font-size:.9rem; }
+
+  /* tiles */
+  .tiles { display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:.9rem; }
+  .tile { border:2px solid var(--line); background:var(--panel2); padding:.9rem 1rem 1rem; display:flex; flex-direction:column; gap:.4rem; }
+  .tile.hot { border-color:var(--amber); }
+  .tile .tl { display:flex; align-items:center; gap:.5rem; font-family:var(--mono); font-size:.72rem; letter-spacing:.12em; text-transform:uppercase; color:var(--ink-dim); }
+  .tile .tv { color:var(--green); } .tile.hot .tv { color:var(--amber); }
+  .tile .ts { font-size:.88rem; color:var(--ink-dim); }
+  .chip { display:inline-block; margin-top:.25rem; padding:.1rem .5rem; font-family:var(--mono); font-size:.72rem; border:2px solid currentColor; }
+  .chip.good { color:var(--green); } .chip.bad { color:var(--amber); } .chip.mute { color:var(--mute); border-style:dashed; }
+  .proxy { font-family:var(--mono); font-size:.62rem; color:var(--amber); border:1px dashed var(--amber); padding:0 .35rem; letter-spacing:.1em; vertical-align:middle; }
+
+  /* boss */
+  .boss { display:flex; flex-direction:column; gap:1rem; }
+  .boss .bl { display:flex; align-items:center; gap:1rem; flex-wrap:wrap; }
+  .boss .bt { color:var(--ink-dim); }
+  .quote { margin:0; border:2px solid var(--line2); border-left:6px solid var(--red); background:#120b0b; padding:.9rem 1rem; font-family:var(--mono); font-size:.88rem; line-height:1.55; color:var(--ink); word-break:break-word; }
+  .list { list-style:none; margin:1rem 0 0; padding:0; display:flex; flex-direction:column; gap:.4rem; max-width:none; }
+  .list li { display:flex; gap:.6rem; align-items:baseline; font-size:.92rem; }
+  .list .n { font-family:var(--mono); color:var(--amber); min-width:2.6rem; }
+  .list .q { color:var(--ink-dim); font-family:var(--mono); font-size:.84rem; }
+  .list.plain .n { color:var(--green); }
+  .list.quotes li { display:block; }
+  .list.quotes .q { color:var(--ink); font-family:var(--sans); font-size:.98rem; }
+
+  /* ranked + shelf */
+  .ranked { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:.55rem; counter-reset:r; }
+  .ranked li { display:grid; grid-template-columns:2rem 1fr minmax(120px,220px) 3rem; gap:.8rem; align-items:center; border:2px solid var(--line); background:var(--panel2); padding:.6rem .9rem; }
+  .ranked .rank { font-family:var(--mono); color:var(--mute); text-align:center; }
+  .ranked .name { font-weight:600; }
+  .ranked .cnt { font-family:var(--mono); color:var(--gold); text-align:right; }
+  .ranked .where { grid-column:2 / span 3; font-size:.78rem; color:var(--mute); font-family:var(--mono); }
+  .bar { display:inline-flex; gap:2px; height:10px; }
+  .bar i { flex:1; background:var(--line); min-width:4px; }
+  .bar i.on { background:var(--green); }
+  .bar.gold i.on { background:var(--gold); }
+  .shelf { margin-top:1.25rem; border:2px dashed var(--line2); padding:1rem 1.1rem; }
+  .shelf-h { display:flex; align-items:center; gap:.5rem; }
+  .chips { display:flex; flex-wrap:wrap; gap:.35rem; margin-top:.6rem; max-width:none; }
+  .chipname { border:1px solid var(--line2); padding:.05rem .5rem; font-family:var(--mono); font-size:.74rem; color:var(--ink-dim); }
+
+  /* report card */
+  .rc { display:grid; grid-template-columns:minmax(200px,1fr) 2fr; gap:1.25rem; align-items:start; }
+  @media (max-width:760px) { .rc { grid-template-columns:1fr; } }
+  .rc-score { border:2px solid var(--line2); background:var(--panel2); padding:1rem 1.1rem; }
+  .rc-score .rl { font-family:var(--mono); font-size:.72rem; letter-spacing:.12em; text-transform:uppercase; color:var(--ink-dim); margin-top:.4rem; }
+  .trail { display:flex; flex-wrap:wrap; gap:.4rem .5rem; margin-top:.8rem; font-size:.84rem; color:var(--ink-dim); align-items:center; }
+  .trail span { border:1px solid var(--line); padding:.1rem .5rem; }
+  .trail .arr { border:none; color:var(--mute); padding:0; }
+  .trail .pend { border-color:var(--amber); color:var(--amber); }
+  .checklist { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:.5rem; }
+  .checklist li { display:flex; gap:.7rem; align-items:flex-start; border:2px solid var(--line); background:var(--panel2); padding:.65rem .9rem; }
+  .checklist li.promoted { border-color:var(--green-deep); }
+  .checklist li.pending { border-color:var(--amber); }
+  .checklist li > svg { margin-top:.2rem; flex:none; }
+  .checklist div { display:flex; flex-direction:column; gap:.15rem; }
+  .checklist .ct { font-family:var(--mono); font-size:.66rem; letter-spacing:.12em; text-transform:uppercase; color:var(--green-deep); }
+  .checklist .txt { font-size:.95rem; }
+  .checklist .evd { font-family:var(--mono); font-size:.76rem; color:var(--mute); }
+
+  /* guards */
+  .two { display:grid; grid-template-columns:1fr 1fr; gap:1.5rem; align-items:start; }
+  @media (max-width:760px) { .two { grid-template-columns:1fr; } }
+  .gh { display:flex; align-items:center; gap:.5rem; flex-wrap:wrap; }
+
+  /* ledger */
+  .ledger { border:2px solid var(--line); background:var(--panel); box-shadow:6px 6px 0 #000; }
+  .ledger summary { list-style:none; cursor:pointer; padding:1.5rem 1.75rem; display:grid; grid-template-columns:auto 1fr; gap:.25rem 1rem; align-items:center; }
+  .ledger summary::-webkit-details-marker { display:none; }
+  .ledger summary .num { grid-row:1 / span 2; color:var(--green-deep); align-self:start; margin-top:.3rem; }
+  .ledger summary h2::after { content:"  ▸"; color:var(--green-deep); font-size:.9rem; }
+  .ledger[open] summary h2::after { content:"  ▾"; }
+  .lbody { padding:0 1.75rem 1.75rem; font-family:var(--mono); font-size:.84rem; }
+  .lbody h4 { margin:1.75rem 0 .5rem; font-size:.72rem; letter-spacing:.2em; text-transform:uppercase; color:var(--ink-dim); font-weight:500; }
+  .lbody h4:first-child { margin-top:.5rem; }
   .scroll { overflow-x:auto; }
   table { width:100%; border-collapse:collapse; white-space:nowrap; }
-  th,td { text-align:right; padding:.3rem .6rem; border-bottom:1px solid rgba(31,143,69,.35); }
-  th:first-child,td:first-child,td.k { text-align:left; }
-  th { color:var(--dim); font-weight:400; font-size:.72rem; letter-spacing:.12em; }
-  tr:last-child td { border-bottom:none; }
-  tfoot td { border-top:1px solid var(--dim); border-bottom:none; font-weight:700; }
-  .dim { color:var(--dim); }
-  td.wrap, .wrap { white-space:normal; }
-  h2 .n { color:var(--p); letter-spacing:0; text-transform:none; font-size:.74rem; margin-left:.75rem; }
-  .cols { display:grid; grid-template-columns:1fr 1fr; gap:1.5rem; align-items:start; }
-  @media (max-width:820px) { .cols { grid-template-columns:1fr; } }
-  .tiles { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:.6rem; }
-  .tile { border:1px solid var(--dim); padding:.65rem .8rem; }
-  .tile .l { font-size:.66rem; letter-spacing:.14em; color:var(--dim); text-transform:uppercase; }
-  .tile .v { font-size:1.5rem; font-weight:500; line-height:1.15; margin-top:.2rem; }
-  .tile .v small { font-size:.72rem; color:var(--dim); font-weight:400; margin-left:.3rem; }
-  .tile .d { font-size:.72rem; color:var(--dim); margin-top:.15rem; }
-  .tile.hot .v { color:var(--warn); }
-  .cards { display:grid; grid-template-columns:repeat(auto-fill,minmax(330px,1fr)); gap:.75rem; }
-  .card { border:1px solid var(--dim); padding:.8rem .95rem 1.4rem; display:flex; flex-direction:column; gap:.45rem; position:relative; }
-  .card.warn { border-color:var(--warn-dim); }
-  .card .top { display:flex; align-items:center; gap:.5rem; }
-  .card .rid { color:var(--dim); margin-left:auto; font-size:.66rem; }
-  .card h3 { margin:0; font-size:.98rem; font-weight:500; line-height:1.35; text-wrap:balance; }
-  .card .ev { font-size:.78rem; border-left:2px solid var(--dim); padding-left:.6rem; word-break:break-word; }
-  .card .rec { font-size:.78rem; }
-  .card .rec::before { content:"→ "; color:var(--dim); }
-  .card .not { font-size:.72rem; color:var(--dim); margin-top:auto; padding-top:.4rem; border-top:1px dashed var(--dim); }
-  .card .not::before { content:"does not prove · "; letter-spacing:.08em; text-transform:uppercase; font-size:.62rem; }
-  .card .src { position:absolute; right:.95rem; bottom:.5rem; font-size:.62rem; color:var(--dim); letter-spacing:.06em; }
-  .pill { display:inline-block; padding:.05rem .45rem; border:1px solid currentColor; font-size:.64rem;
-    letter-spacing:.12em; text-transform:uppercase; text-shadow:none; line-height:1.5; }
-  .pill.type { color:var(--p); } .pill.info { color:var(--dim); }
-  .pill.warn, .pill.life, .pill.pend { color:var(--warn); }
-  .pill.ok { color:var(--p); background:rgba(51,255,102,.08); }
-  .pill.na { color:var(--dim); border-style:dashed; }
-  .life { display:grid; grid-template-columns:1fr 1.6fr; gap:1.25rem; align-items:start; }
-  @media (max-width:820px) { .life { grid-template-columns:1fr; } }
-  .lifebox { border:1px solid var(--dim); padding:.8rem .95rem; }
-  .lifebox .l { font-size:.66rem; letter-spacing:.14em; color:var(--dim); text-transform:uppercase; }
-  .lifebox .big { font-size:1.4rem; font-weight:500; line-height:1.2; }
-  .lifebox .big small { font-size:.75rem; color:var(--dim); font-weight:400; }
-  .trail { display:flex; gap:.5rem; align-items:center; margin-top:.7rem; font-size:.74rem; color:var(--dim); flex-wrap:wrap; }
-  .trail .step { border:1px solid var(--dim); padding:.2rem .55rem; }
-  .trail .step b { color:var(--p); font-weight:500; }
-  .chips { display:inline-flex; flex-wrap:wrap; gap:.35rem; margin-top:.4rem; }
-  .chip { border:1px solid var(--dim); padding:.05rem .5rem; font-size:.7rem; color:var(--dim); }
-  .proxy { font-size:.6rem; color:var(--warn-dim); border:1px dashed var(--warn-dim); padding:0 .35rem; letter-spacing:.1em; text-shadow:none; }
-  .fold { color:var(--dim); font-size:.74rem; text-align:center; margin:2.5rem 0 0; letter-spacing:.14em; }
-  .fold::before, .fold::after { content:" ▓▒░ "; color:var(--dim); }
-  .chart { display:flex; align-items:flex-end; gap:3px; height:110px; margin-top:.5rem; }
-  .bar { flex:1; background:linear-gradient(180deg,var(--p),var(--dim)); position:relative; min-width:6px; }
-  .bar span { position:absolute; bottom:100%; left:50%; transform:translateX(-50%);
-    font-size:.6rem; color:var(--dim); opacity:0; white-space:nowrap; }
-  .bar:hover span { opacity:1; }
-  footer { margin-top:2rem; padding-top:.75rem; border-top:1px solid var(--dim);
-    color:var(--dim); font-size:.72rem; }
+  th,td { text-align:right; padding:.3rem .6rem; border-bottom:1px solid var(--line); }
+  th.k,td.k { text-align:left; }
+  th { color:var(--ink-dim); font-weight:400; font-size:.7rem; letter-spacing:.12em; }
+  tr.total td { border-top:2px solid var(--line2); border-bottom:none; font-weight:700; }
+  .tchart { display:flex; align-items:flex-end; gap:3px; height:110px; margin-top:.5rem; border-bottom:2px solid var(--line); }
+  .tbar { flex:1; background:var(--green-deep); position:relative; min-width:6px; }
+  .tbar span { position:absolute; bottom:100%; left:50%; transform:translateX(-50%); font-size:.66rem; color:var(--ink-dim); opacity:0; white-space:nowrap; }
+  .tbar:hover { background:var(--green); } .tbar:hover span { opacity:1; }
+  footer { max-width:880px; margin:1.5rem auto 0; color:var(--mute); font-size:.82rem; font-family:var(--mono); line-height:1.6; }
+  @media (prefers-reduced-motion: no-preference) { .crow, .tile, .card { transition:border-color .15s; } }
+  @media (max-width:560px) { .scene, .cover { padding:1.1rem 1rem 1.25rem; } .ranked li { grid-template-columns:2rem 1fr 3rem; } .ranked .bar { display:none; } }
 </style>
 <main>
-  <h1>LOOP-STATS ▓ ${esc(d.project)}</h1>
-  <p class="sub">${esc(d.generatedAt.slice(0, 16).replace('T', ' '))} · window: ${esc(d.window)} · ${d.totals.runs} agent runs · ${human(d.totals.tokens)} tokens${d.warnings ? ` · ${d.warnings} parse warnings` : ''}</p>
-
-  ${sectionSub('Cards', 'rule-based · zero tokens · each one carries its evidence and its limits', cardsBody)}
-  ${sectionSub('Session-review lifecycle', 'what Loop 6 proposed, and where it went', reviewBody)}
-  ${sectionSub('Session hygiene', 'how the driving went — every proxy says so', hygieneBody)}
-  ${sectionSub('Tools &amp; failures', t ? `${t.totalCalls} calls · ${t.totalErrors} errors · ${t.denials.count} refused` : '', toolsBody)}
-  ${sectionSub('Guards &amp; hooks', 'what blocked a call, and what merely ran', guardsBody)}
-  ${sectionSub('Skills &amp; commands', 'installed against invoked', skillsBody)}
-
-  <p class="fold">accounting</p>
-
-  <h2>Tokens by agent × model</h2>
-  <div class="scroll"><table>
-    <thead><tr><th>agent</th><th>runs</th><th>in</th><th>out</th><th>cache-r</th><th>cache-w</th><th>est.$</th></tr></thead>
-    <tbody>${agentRows}</tbody>
-    <tfoot><tr><td class="k">TOTAL</td><td>${d.totals.runs}</td><td>${human(d.totals.in)}</td>
-      <td>${human(d.totals.out)}</td><td>${human(d.totals.cacheRead)}</td>
-      <td>${human(d.totals.cacheWrite)}</td><td>${d.totals.costUsd.toFixed(2)}</td></tr></tfoot>
-  </table></div>
-  ${d.unpricedModels.length ? `<p class="sub">est.$ excludes unpriced models: ${esc(d.unpricedModels.join(', '))}</p>` : ''}
-  ${d.introPricedModels.length ? `<p class="sub">priced at introductory rate: ${esc(d.introPricedModels.join(', '))}</p>` : ''}
-
-  ${section('Model line-up — configured vs. observed', lineupRows ? `<div class="scroll"><table>
-    <thead><tr><th>role</th><th>configured</th><th>observed</th><th>runs</th></tr></thead>
-    <tbody>${lineupRows}</tbody></table></div>
-    <p class="sub">⚠ = drift: the role ran on a different model family than model-lineup.json configures.</p>` : '')}
-
-  <h2>Tokens per day</h2>
-  <div class="chart">${bars}</div>
-
-  ${section('Workflow activations', wfRows ? `<div class="scroll"><table>
-    <thead><tr><th>run</th><th>workflow</th><th>started</th><th>duration</th><th>rounds</th><th>tokens</th><th>verdict</th><th>result</th></tr></thead>
-    <tbody>${wfRows}</tbody></table></div>` : '')}
-
-  ${section('Loop runs (findings JSON)', loopRows ? `<div class="scroll"><table>
-    <thead><tr><th>date</th><th>loop</th><th>rounds</th><th>verdict</th><th>stopped by</th></tr></thead>
-    <tbody>${loopRows}</tbody></table></div>` : '')}
-
-  <h2>Savings — measured counterfactuals only</h2>
-  ${savingsBody}
-  ${section('Optimizer predictions', predRows ? `<div class="scroll"><table>
-    <thead><tr><th>v</th><th>date</th><th>change</th><th>prediction</th><th>outcome</th></tr></thead>
-    <tbody>${predRows}</tbody></table></div>` : '')}
-
-  ${section('Learnings', learnRows ? `<div class="scroll"><table>
-    <thead><tr><th>date</th><th>skill</th><th>entry</th></tr></thead>
-    <tbody>${learnRows}</tbody></table></div>` : '')}
-
-  <h2>Prompts</h2>
-  <p class="sub">${d.prompts.total} user turns · ${d.prompts.avgWords.toFixed(1)} words avg ·
-    ${d.prompts.sessionsPerDay.toFixed(1)} sessions/day ·
-    ${Math.round(d.prompts.followUpRate * 100)}% follow-ups (proxy: a turn landing right after the agent ended its own)<br>
-    Counts every user-role turn in the transcript. A slash command or a loop that re-prompts its session
-    writes one too, and nothing in the format marks it apart from a keystroke — so these are turns, not keystrokes.</p>
-  <div class="scroll"><table><tbody>${topRows}</tbody></table></div>
-
-  <footer>v2 · cards are rule-based recommendations: each prints its evidence, the field it came from,
-  and what it does not prove, and a rule that finds no evidence prints nothing. Nothing here edits
-  anything — you promote. Every figure is measured from local transcripts and the repo's own loop records;
-  est.$ is list price × measured tokens, never a multiplier, and a saving with no counterfactual behind
-  it is not shown — the reason it cannot be shown is.</footer>
-</main>`;
+  ${cover}
+  ${oneThing}
+  ${driving}
+  ${breaking}
+  ${topSkills}
+  ${reportCard}
+  ${moreCards}
+  ${guards}
+  ${ledger}
+</main>
+<footer>v2.7 · every figure is measured from local transcripts and the repo's own loop records. Cards are rule-based recommendations: each prints its evidence, the field it came from and what it does not prove, and a rule that finds no evidence prints nothing. est.$ is list price × measured tokens, never a multiplier. A comparison is shown only where the window before was busy enough to anchor one. Nothing here edits anything — you promote.${d.warnings ? ` ${d.warnings} transcript line(s) could not be read.` : ''}</footer>`;
 }
 
 // The cross-project view shares the CRT shell but not the report: no cards, because a card belongs to
