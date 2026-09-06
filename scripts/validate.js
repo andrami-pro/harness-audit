@@ -38,6 +38,7 @@ const walk = (dir) => {
     .flatMap((e) => (e.isDirectory() ? walk(path.join(dir, e.name)) : [path.join(dir, e.name)]))
     .sort();
 };
+const slugOfPath = (p) => p.replace(/[/.]/g, '-');
 const hasFrontmatterField = (rel, field) => {
   const s = read(rel);
   if (!/^---\n/.test(s)) throw new Error(`${rel} missing frontmatter`);
@@ -482,6 +483,73 @@ check('loop-stats degrades gracefully on the broken telemetry fixture', () => {
   if (d.totals.runs !== 1) throw new Error(`totals.runs = ${d.totals.runs}, expected 1 — only the clean turn should survive`);
 
   return `${d.warnings} warnings · ${d.totals.runs} run survived`;
+});
+
+// `--project` takes a path as readily as a slug. The two are not interchangeable in one case that
+// bites daily: Claude Code slugs the *realpath* of the cwd, so a project reached through a symlinked
+// parent (~/Documents/pro-projects -> ~/projects/pro-projects here) has its telemetry under the
+// realpath slug while every record inside still reports the symlink path as its cwd. Passing the
+// path the user actually types must find the directory anyway, and a miss must name what was tried.
+//
+// Negative controls (2026-09-06, each applied, observed, reverted — all exit 1):
+//   realpathSync dropped from slugCandidates .... symlinked-path candidates = 1, expected 2
+//   candidate loop replaced by args.project ..... path form throws "no telemetry under ..."
+check('loop-stats resolves --project from a slug, a path and a symlinked path', () => {
+  const script = path.join(ROOT, 'scripts/loop-stats.js');
+  const { slugCandidates } = require(script);
+
+  const plain = slugCandidates('/workspace/demo');
+  if (plain.length !== 1 || plain[0] !== '-workspace-demo') throw new Error(`path slug = ${JSON.stringify(plain)}`);
+  const asSlug = slugCandidates('-workspace-demo');
+  if (asSlug.length !== 1 || asSlug[0] !== '-workspace-demo') throw new Error('a slug must pass through untouched');
+
+  const real = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'harness-real-')));
+  const linkDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'harness-link-')));
+  const link = path.join(linkDir, 'via-symlink');
+  fs.symlinkSync(real, link);
+  const both = slugCandidates(link);
+  if (both.length !== 2) throw new Error(`symlinked-path candidates = ${both.length}, expected 2`);
+  if (both[0] !== slugOfPath(real)) throw new Error('realpath slug must be tried first');
+  if (both[1] !== slugOfPath(link)) throw new Error('the literal path must stay as a fallback candidate');
+
+  // A path form must reach the same fixture the slug form reaches.
+  const root = path.join(ROOT, 'scripts/fixtures/telemetry');
+  const viaSlug = execFileSync('node', [script, '--root', root, '--project', 'demo', '--json'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  if (JSON.parse(viaSlug).totals.runs !== 8) throw new Error('slug form regressed');
+
+  // And a miss must print the candidates, not just the first one.
+  let stderr = '';
+  try {
+    execFileSync('node', [script, '--root', root, '--project', '/nonexistent/project-x', '--json'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    throw new Error('a missing project must exit non-zero');
+  } catch (e) {
+    stderr = String(e.stderr || '');
+    if (!/tried: /.test(stderr)) throw new Error(`error must name the candidates tried, got: ${stderr.split('\n')[0]}`);
+    if (!/available:/.test(stderr)) throw new Error('error must still list the available slugs');
+  }
+  return 'slug · path · symlinked path all resolve';
+});
+
+// --from-json re-renders a saved aggregate without re-walking the transcripts; --json-out saves it.
+// The pair is what lets /dashboard and /session-review share one parse instead of paying for two.
+//
+// Negative control (2026-09-06, applied, observed, reverted): --from-json branch removed from main()
+// so the flag fell through to a live aggregate — exit 1, "no telemetry under ... tried: -tmp-...".
+check('loop-stats round-trips its aggregate through --json-out / --from-json', () => {
+  const script = path.join(ROOT, 'scripts/loop-stats.js');
+  const root = path.join(ROOT, 'scripts/fixtures/telemetry');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-json-'));
+  const out = path.join(tmp, 'demo.json');
+
+  execFileSync('node', [script, '--root', root, '--project', 'demo', '--json-out', out], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  const saved = JSON.parse(fs.readFileSync(out, 'utf8'));
+  if (saved.totals.runs !== 8) throw new Error(`--json-out wrote totals.runs = ${saved.totals.runs}, expected 8`);
+
+  // Rendered from the file alone: --root points nowhere, so a live parse would abort.
+  const rendered = execFileSync('node', [script, '--root', path.join(tmp, 'no-such-root'), '--from-json', out],
+    { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  if (!/LOOP-STATS/.test(rendered)) throw new Error('--from-json did not render the saved aggregate');
+  return '--json-out → --from-json renders without touching transcripts';
 });
 
 // D25a — the HARD guardrail is the one piece of F11 that must never have a confirmable escape

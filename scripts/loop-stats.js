@@ -45,10 +45,30 @@ const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
 // the context suffix carries no long-context premium and the date suffix is a pinned snapshot.
 const baseModel = (m) => String(m || 'unknown').replace(/\[[^\]]*\]$/, '').replace(/-\d{8}$/, '');
 
+// Claude Code slugs the *real* path of the cwd: a project reached through a symlinked parent lands
+// under the realpath slug while every record inside still says cwd=<symlink path>. Both candidates
+// are returned, realpath first, so `--project <path>` finds the directory either way. A value that
+// already looks like a slug (leading dash, no slash) is passed through untouched.
+const slugOf = (p) => p.replace(/[/.]/g, '-');
+function slugCandidates(p) {
+  if (!p) return [];
+  // No separator means it is already a directory name under --root (`demo`, `-home-user-repo`),
+  // not a path to slug. Only a real path gets converted.
+  if (!p.includes('/')) return [p];
+  const abs = path.resolve(p);
+  const out = [slugOf(abs)];
+  try {
+    const real = fs.realpathSync(abs);
+    if (real !== abs) out.unshift(slugOf(real));
+  } catch { /* nonexistent path: the resolved slug is still a legitimate guess */ }
+  return out;
+}
+
 function parseArgs(argv) {
   const a = {
     root: path.join(os.homedir(), '.claude', 'projects'),
     project: null, repo: null, sinceMs: null, html: null, json: false, top: 3, lineup: null,
+    jsonOut: null, fromJson: null,
   };
   for (let i = 0; i < argv.length; i++) {
     const flag = argv[i];
@@ -57,6 +77,8 @@ function parseArgs(argv) {
     else if (flag === '--repo') a.repo = argv[++i];
     else if (flag === '--html') a.html = argv[++i];
     else if (flag === '--json') a.json = true;
+    else if (flag === '--json-out') a.jsonOut = argv[++i];
+    else if (flag === '--from-json') a.fromJson = argv[++i];
     else if (flag === '--lineup') a.lineup = argv[++i];
     else if (flag === '--top') {
       const n = Number.parseInt(argv[++i], 10);
@@ -71,7 +93,8 @@ function parseArgs(argv) {
   }
   a.root = path.resolve(a.root);
   if (a.repo) a.repo = path.resolve(a.repo);
-  a.project = a.project || process.cwd().replace(/[/.]/g, '-');
+  a.projectCandidates = slugCandidates(a.project || process.cwd());
+  a.project = a.projectCandidates[0];
   return a;
 }
 
@@ -171,7 +194,8 @@ function parseSession(projectDir, sessionId) {
       const u = usageOf(r);
       if (u) turns.push({ agentType: 'main', model: r.message.model, ts: r.timestamp, usage: u });
       for (const b of (r.message && r.message.content) || []) {
-        if (b && b.type === 'tool_use' && b.name === 'Task') taskLabels.set(b.id, b.input || {});
+        // The subagent tool was renamed Task → Agent; both spawn the same subagents/agent-*.jsonl.
+        if (b && b.type === 'tool_use' && (b.name === 'Task' || b.name === 'Agent')) taskLabels.set(b.id, b.input || {});
       }
       prevKind = 'assistant';
     } else if (r.type === 'user') {
@@ -449,11 +473,14 @@ function parseRepo(repo) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 function aggregate(args) {
-  const projectDir = path.join(args.root, args.project);
-  if (!fs.existsSync(projectDir)) {
+  const candidates = args.projectCandidates && args.projectCandidates.length ? args.projectCandidates : [args.project];
+  const found = candidates.find((slug) => fs.existsSync(path.join(args.root, slug)));
+  if (!found) {
     const available = ls(args.root).filter((d) => !d.startsWith('.')).slice(0, 8);
-    throw new Error(`no telemetry at ${projectDir}\navailable under ${args.root}:\n  ${available.join('\n  ') || '(none)'}`);
+    throw new Error(`no telemetry under ${args.root} — tried: ${candidates.join(', ')}\navailable:\n  ${available.join('\n  ') || '(none)'}`);
   }
+  args.project = found;
+  const projectDir = path.join(args.root, found);
 
   const sessions = ls(projectDir).filter((f) => f.endsWith('.jsonl')).map((f) => f.replace(/\.jsonl$/, ''));
   let turns = [];
@@ -903,9 +930,16 @@ function renderHtml(d) {
 function main() {
   const args = parseArgs(process.argv.slice(2));
   let data;
-  try { data = aggregate(args); }
-  catch (e) { process.stderr.write(`loop-stats: ${e.message}\n`); process.exit(1); }
+  try {
+    // --from-json re-renders a saved aggregate without touching the transcripts (a 1 GB root takes
+    // seconds to walk; a saved JSON takes none). The file is trusted as far as its shape parses.
+    data = args.fromJson ? JSON.parse(fs.readFileSync(args.fromJson, 'utf8')) : aggregate(args);
+  } catch (e) { process.stderr.write(`loop-stats: ${e.message}\n`); process.exit(1); }
 
+  if (args.jsonOut) {
+    try { fs.writeFileSync(args.jsonOut, `${JSON.stringify(data, null, 2)}\n`); process.stderr.write(`loop-stats: wrote ${args.jsonOut}\n`); }
+    catch (e) { process.stderr.write(`loop-stats: cannot write ${args.jsonOut}: ${e.code}\n`); process.exit(1); }
+  }
   if (args.html) {
     try { fs.writeFileSync(args.html, renderHtml(data)); process.stderr.write(`loop-stats: wrote ${args.html}\n`); }
     catch (e) { process.stderr.write(`loop-stats: cannot write ${args.html}: ${e.code}\n`); process.exit(1); }
@@ -913,4 +947,6 @@ function main() {
   process.stdout.write(args.json ? `${JSON.stringify(data, null, 2)}\n` : `${renderAnsi(data)}\n`);
 }
 
-main();
+if (require.main === module) main();
+
+module.exports = { slugCandidates, promptText, parseArgs, aggregate, renderAnsi, renderHtml };
