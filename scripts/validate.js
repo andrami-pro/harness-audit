@@ -2027,6 +2027,9 @@ const runNode = (args, env, input) => {
   } catch (e) { return { code: e.status, out: e.stdout || '', err: e.stderr || '' }; }
 };
 
+// Negative control (2026-09-22, applied, observed, reverted — exit 1):
+//   readKey() stops honouring the `off` sentinel in secrets.env ....................................
+//     "TYPESAFE_API_KEY=off in secrets.env did not pause the client"
 check('jev client is a no-op without a key, reads the secrets file, and honours JEV_MOCK_FILE', () => {
   mustExist('scripts/jev.js');
   const script = path.join(ROOT, 'scripts/jev.js');
@@ -2054,6 +2057,11 @@ check('jev client is a no-op without a key, reads the secrets file, and honours 
 // a blocker at p=0.90 is NEW (its bar is 0.95), a minor at 0.91 is carried, an exact restatement is
 // carried without any request, a different file is never paired, and without a key the output
 // says exact-only and counts what is left for the chair — never silently new, never silently gone.
+//
+// Negative control (2026-09-22, applied, observed, reverted — exit 1):
+//   DEDUPE_BLOCKER_THRESHOLD lowered to 0.85 ........................................................
+//     "mock NEW line wrong — a blocker at p=0.90 must stay new" — and the eval check went red with it,
+//     because the eval reads the same constant instead of keeping its own copy.
 check('loop-gate dedupe counts NEW arithmetically, never hides a blocker, and degrades to exact-only', () => {
   const script = path.join(ROOT, 'scripts/loop-gate.js');
   const prev = path.join(ROOT, 'scripts/fixtures/findings/dedupe-prev.json');
@@ -2084,6 +2092,9 @@ check('loop-gate dedupe counts NEW arithmetically, never hides a blocker, and de
   return 'exact-only without a key · blocker at 0.90 stays new · minor at 0.91 carried · API failure announced · un-aggregated input refused (exit 2)';
 });
 
+// Negative control (2026-09-22, applied, observed, reverted — exit 1):
+//   the router's race timer lifted from BUDGET_MS to 5000 ..........................................
+//     "a slow API held the prompt for 4040ms — the budget is 1500"
 check('prompt-router emits one advisory UserPromptSubmit context under budget and never decides', () => {
   const script = path.join(ROOT, 'scripts/hooks/prompt-router.js');
   mustExist('scripts/hooks/prompt-router.js');
@@ -2184,6 +2195,15 @@ check('jev live smoke — one noul round trip to api.typesafe.ai', () => {
 // and the preflight's was `includes('pass') || includes('exit:0')` over a seat's prose — which reads
 // "3 passed, 2 failed", "bypass", and a SKIP followed by the gate's closing PASS banner as green.
 // This check runs the template itself with stub seats, so it asserts behaviour, not spelling.
+//
+// Negative controls (2026-09-22, each applied, observed, reverted — all exit 1):
+//   reviewer verdict back to includes('APPROVED') .................................................
+//     "'not APPROVED' in a [FAIL] line approved the change — the verdict is the last line, whole"
+//   preflightPassed = exitCode === 0 (skipped ignored) .............................................
+//     "exit 0 with a SKIP passed — a skipped check is not a passed one"
+//   Pi mirror only, back to a substring test on the log ............................................
+//     "a clean exit 0 did not pass" — predicted the SKIP message; it failed one case earlier, because a
+//     clean gate whose log never says the word is red to a substring test too. The mirror is checked.
 check('develop-phase template decides from the verdict line and the exit code, and a SKIP is not a PASS', () => {
   const harness = `
     const fs = require('fs');
@@ -2228,6 +2248,12 @@ check('develop-phase template decides from the verdict line and the exit code, a
 // asserts the eval's own arithmetic: a corpus that stays well-formed and balanced, exit 3 without a
 // key (nothing measured is not a pass), a classifier that carries everything → exit 1 naming the
 // hidden new blockers, one that carries nothing → exit 0 with the missed restatements listed.
+//
+// Negative controls (2026-09-22, each applied, observed, reverted — all exit 1):
+//   the eval's bar() stripped of the blocker rule ..................................................
+//     "at p=0.90 the eval carried a new blocker — it lost the 0.95 blocker bar loop-gate applies"
+//   two corpus cases put on the same critic + file .................................................
+//     "corpus invalid: cases[26] (c27) shares critic + file with another case"
 check('jev dedupe eval: corpus balanced, exit 3 without a key, exit 1 when a new blocker is hidden', () => {
   const script = path.join(ROOT, 'benchmarks/jev_dedupe_eval.js');
   mustExist('benchmarks/jev_dedupe_eval.js');
