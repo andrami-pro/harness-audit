@@ -35,6 +35,11 @@
 #                      as-is, no merge — meant for a specific test lineup.
 #                      Omitting --lineup entirely leaves today's defaults
 #                      intact: no lineup resolution, no frontmatter rewrite.
+#   --skip-jev        skip the TypeSafe Jev key prompt. Interactive installs
+#                      ask once whether you have a key (stored in
+#                      ~/.agents/secrets.env, never in the repo); --yes and
+#                      non-TTY shells never ask. No key = Jev stays off and
+#                      the loops run exactly as before.
 #   --skip-subagent-check   --target pi only. Generate .pi/agents/ even
 #                      though the pi-subagents extension isn't detected.
 #                      These agents WILL NOT dispatch until it's installed —
@@ -67,6 +72,7 @@ TARGET=""
 SKIP_GRAPHIFY=0
 ASSUME_YES=0
 SKIP_SUBAGENT_CHECK=0
+SKIP_JEV=0
 LINEUP_REQUESTED=0
 LINEUP_FILE=""
 
@@ -76,6 +82,7 @@ while [ $# -gt 0 ]; do
     --skip-graphify) SKIP_GRAPHIFY=1; shift ;;
     --yes) ASSUME_YES=1; shift ;;
     --skip-subagent-check) SKIP_SUBAGENT_CHECK=1; shift ;;
+    --skip-jev) SKIP_JEV=1; shift ;;
     --lineup)
       LINEUP_REQUESTED=1
       shift
@@ -88,7 +95,7 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-[ -n "$TARGET" ] || { echo "Usage: ./install.sh --target {claude|claude-user|cursor|kilo|antigravity|pi|opencode|kilo-loops} [--skip-graphify] [--yes] [--lineup [path]] [--skip-subagent-check]" >&2; exit 1; }
+[ -n "$TARGET" ] || { echo "Usage: ./install.sh --target {claude|claude-user|cursor|kilo|antigravity|pi|opencode|kilo-loops} [--skip-graphify] [--yes] [--lineup [path]] [--skip-subagent-check] [--skip-jev]" >&2; exit 1; }
 [ -d "$SRC_DIR" ] || { echo "error: $SRC_DIR not found (run from the repo root)" >&2; exit 1; }
 
 case "$TARGET" in
@@ -482,5 +489,20 @@ if [ "$LINEUP_REQUESTED" -eq 1 ]; then
   else
     echo "⚠ --lineup: no commands/agents install path for target '$TARGET' yet (that target gets loops via"
     echo "  the Claude Code plugin marketplace instead) — the skill copy above is unaffected."
+  fi
+fi
+
+# ── TypeSafe Jev (optional) ─────────────────────────────────────────────────────────────────────
+# One question, only on a TTY, only when no key is stored yet. The key is global (one machine, every
+# project) and lives in ~/.agents/secrets.env — never in this repo, never in the target project.
+# Without a key every Jev path is a no-op and nothing leaves the machine. --yes never answers this
+# for you: consenting to send prompts and findings to a third party is not a CI default.
+if [ "$SKIP_JEV" -eq 0 ] && [ "$ASSUME_YES" -eq 0 ] && [ -t 0 ] && command -v node >/dev/null 2>&1; then
+  if ! node "$ROOT_DIR/scripts/jev-setup.js" --status >/dev/null 2>&1; then
+    echo ""
+    echo "TypeSafe Jev (optional): a fast classifier that dedupes panel findings between rounds and"
+    echo "suggests a skill/model tier per prompt. Sends finding text and prompt text to api.typesafe.ai"
+    echo "(US-hosted, EU SCCs in their DPA, no training on inputs). README §Jev has the details."
+    node "$ROOT_DIR/scripts/jev-setup.js" || true
   fi
 fi

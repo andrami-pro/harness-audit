@@ -1,0 +1,4 @@
+#!/bin/sh
+# Turn TypeSafe Jev on for this machine (key → ~/.agents/secrets.env), or report why it is off.
+#   bin/jev-setup [--status|--ping|--key <key>]
+exec node "$(CDPATH= cd -- "$(dirname -- "$0")/../scripts" && pwd)/jev-setup.js" "$@"

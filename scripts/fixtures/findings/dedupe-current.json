@@ -1,0 +1,12 @@
+[
+  { "id": "R2-F1", "critic": "style", "severity": "major", "file": "README.md", "line": 12,
+    "summary": "The intro paragraph opens with three stacked adjectives.", "fix": "cut to one" },
+  { "id": "R2-F2", "critic": "style", "severity": "minor", "file": "README.md", "line": 30,
+    "summary": "the opening still leads with a pile of adjectives", "fix": "lead with the verb" },
+  { "id": "R2-F3", "critic": "correctness", "severity": "blocker", "file": "README.md", "line": 44,
+    "summary": "the install snippet still points at a marketplace id nobody published", "fix": "use the published id" },
+  { "id": "R2-F4", "critic": "safety", "severity": "major", "file": "scripts/loop-gate.js", "line": 0,
+    "summary": "a fixture carries a real-looking token", "fix": "replace with a placeholder" },
+  { "id": "R2-F5", "critic": "domain", "severity": "major", "file": "README.md", "line": 3,
+    "summary": "the French locale lacks the pricing table", "fix": "add it" }
+]

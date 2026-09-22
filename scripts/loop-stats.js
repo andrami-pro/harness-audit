@@ -3071,5 +3071,5 @@ if (require.main === module) main();
 
 module.exports = {
   slugCandidates, promptText, parseArgs, aggregate, aggregateAll, briefOf, BRIEF_KEYS,
-  evaluateCards, parseReviewCards, RULES, renderAnsi, renderHtml,
+  evaluateCards, parseReviewCards, RULES, renderAnsi, renderHtml, inventorySkills,
 };

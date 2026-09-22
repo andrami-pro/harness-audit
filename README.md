@@ -24,6 +24,14 @@ This loads the skill **and** four guards that run on every session:
 
 The guards are deliberately conservative (short, high-precision pattern lists — when in doubt they allow). The repeat guard is advisory by design: a polling loop that repeats a call on purpose still gets the nudge, and the model decides. To disable them, uninstall the plugin and use the skill-only install below.
 
+Three more hooks ride the same install. None of them blocks anything:
+
+| Hook | Event | What it does |
+|---|---|---|
+| `loop-telemetry` | `SubagentStop`, `Stop` | Appends one ndjson line per agent boundary for `/dashboard-harness`. Local file, never sent anywhere |
+| `prompt-router` | `UserPromptSubmit` | **Off unless a TypeSafe key is present.** Asks Jev which installed skill fits the prompt and which subagent tier (haiku/sonnet/opus) it deserves; injects one advisory line. Sends the first 1500 chars of the prompt and the installed skill names + descriptions — see [§Jev](#jev--the-optional-system-one-classifier) |
+| `jev-nudge` | `SessionStart` | While no key is present, says once a day that Jev is off and names `bin/jev-setup`. Silent with a key |
+
 ### Option 2 — skill only (Claude Code, no hooks)
 
 ```bash
@@ -572,16 +580,78 @@ status that is not blocked — the shapes that let a claim hide. It certifies no
 clears it is what the builder reported, and `/iterate` says so wherever it quotes one. The independent
 read is the scorer's scorecard, not the handoff.
 
+From round 2 on, the same script decides which of a round's findings **restate** the previous
+round's — the call the stop rule of `/orchestrate` hangs on, and until now the one call left to the
+chair, the party holding every fix it applied:
+
+```bash
+node scripts/loop-gate.js dedupe round-<n-1>.json raw/<n>-aggregate.json --out dedupe-<n>.json
+```
+
+Same critic, same file, normalized summary identical → restated, no model involved. The pairs that
+survive that go to Jev (below) as one request, one yes-probability per pair, thresholded in code:
+0.85, and **0.95 for a blocker** — deduping away a real new blocker opens a gate on a defect nobody
+fixed, so the bar is higher on the side where the mistake costs more. The output is three lines the
+chair reads and a JSON it never has to: `DEDUPE:` (`jev` or `exact-only`), `NEW: blocker n major m
+minor k` — the stop arithmetic — and `CARRIED:` with every carried blocker and major printed by id.
+Nothing is deduped silently. Without a key, or when the API fails, the first line says `exact-only`,
+`UNJUDGED:` counts the pairs left, and the chair compares those by meaning and reports the round as
+ungated — announced, never hidden.
+
 The gate is Claude Code-only; every other target degrades it to a hand-check the chair performs on
 itself. See [Compatibility across harnesses](#compatibility-across-harnesses).
+
+## Jev — the optional System One classifier
+
+[TypeSafe's Jev](https://docs.typesafe.ai) answers three shapes only — a yes-probability, one option
+out of a map, a position on a scale — over the text you hand it, in well under a second, for a few
+cents per million input tokens. It reads no file and runs no tool. That makes it the right party for
+exactly two calls in this package that a frontier model was making by judgment and code should own:
+
+- **`loop-gate.js dedupe`** — is this round's finding a restatement of last round's? (above)
+- **`prompt-router`** — which installed skill fits this prompt, and which subagent tier does it
+  deserve? One advisory line per prompt; the model still decides.
+
+**Off by default, on by one key.** Every Jev path checks `TYPESAFE_API_KEY` — the environment, or a
+`TYPESAFE_API_KEY=` line in `~/.agents/secrets.env` (the file the line-up advisor already reads,
+mode 0600, outside every repo). No key: `isEnabled()` is false, the dedupe prints `exact-only`, the
+router and the nudge stay silent, and the loops run exactly as they did in 2.7. `TYPESAFE_API_KEY=off`
+pauses it without deleting the key. The switch is global: one machine, every project.
+
+```bash
+bin/jev-setup            # asks for the key on a TTY, stores it, pings api.typesafe.ai
+bin/jev-setup --status   # exit 0 = on, 3 = off
+bin/jev-setup --ping     # one round trip, never writes
+./install.sh --target …  # asks the same question once, interactively; --yes and --skip-jev never ask
+```
+
+**What leaves the machine, only while a key is present:**
+
+| Path | Sent to `api.typesafe.ai` |
+|---|---|
+| `dedupe` | For each pair: the two findings' `id`, `critic`, `severity`, `file`, `line`, `summary`, `fix` |
+| `prompt-router` | The first 1500 characters of the prompt you just typed; the names and 120-char descriptions of your installed skills |
+
+**What never leaves, key or no key:** transcripts. `/session-review` and `/dashboard-harness` keep
+their promise — no API call, nothing leaves the machine — and `scripts/validate.js` holds them to it.
+The security guards are unchanged and never call anything.
+
+Where it goes (from TypeSafe's legal pages, read 2026-09-22 — re-check them, they are theirs to
+change): the service is hosted in the United States; their DPA incorporates the EU Standard
+Contractual Clauses (SCCs, 2021/914) and the UK addendum, with the customer as controller; they state they
+do not train on inputs; retention is "as long as necessary", zero-data-retention is an enterprise
+option. If your projects carry EU client data, the router is the path to think about — it sends
+prompt text — and the honest setting for such a machine is no key at all.
 
 ## Repo layout
 
 ```
 .claude-plugin/     plugin + marketplace manifests
 skills/harness-audit/   SKILL.md + rubric-template.md + verifier-protocol.md (the portable part)
-hooks/ + scripts/hooks/ three security guards + the repeat-tool loop-hygiene guard (plugin install only)
+hooks/ + scripts/hooks/ three security guards + the repeat-tool guard + telemetry + the Jev router/nudge (plugin install only)
 scripts/loop-gate.js    the deterministic seam inside a loop — see below
+scripts/jev.js          the one door to TypeSafe Jev, and the one switch (TYPESAFE_API_KEY) — see §Jev
+bin/jev-setup           store the key, ping the API, report status
 scripts/check-doc-budgets.js  word-ceiling gate for standing docs (docs/doc-budgets.json)
 scripts/validate.js     this package's own preflight gate — run `node scripts/validate.js` before releasing
 install.sh              multi-IDE skill installer

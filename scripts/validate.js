@@ -261,16 +261,27 @@ check('hooks.json valid + every referenced script exists and parses', () => {
 //     "README's install sentence does not count four guards — hooks.json installs 4"
 check('README discloses every PreToolUse guard hooks.json installs', () => {
   const h = JSON.parse(read('hooks/hooks.json'));
-  const guards = new Set((h.hooks.PreToolUse || []).flatMap((g) => g.hooks.map((x) => {
+  const scriptsOf = (event) => (h.hooks[event] || []).flatMap((g) => g.hooks.map((x) => {
     const m = /scripts\/hooks\/([\w-]+)\.js/.exec(x.command);
     return m ? m[1] : null;
-  })).filter(Boolean));
+  })).filter(Boolean);
+  const guards = new Set(scriptsOf('PreToolUse'));
   if (guards.size < 3) throw new Error(`expected ≥3 PreToolUse guards in hooks.json, found ${guards.size}`);
   const t = read('README.md');
   const install = t.split('### Option 2')[0];
   for (const g of guards) {
     if (!new RegExp(`^\\|\\s*\`${g}\``, 'm').test(install)) {
       throw new Error(`README never discloses the PreToolUse guard '${g}' — it runs on every tool call and the install section does not say so`);
+    }
+  }
+  // The same rule for every other event: a hook that runs on each prompt or each session start and
+  // is named nowhere in the install section is a hook nobody consented to, guard or not.
+  for (const event of Object.keys(h.hooks)) {
+    if (event === 'PreToolUse') continue;
+    for (const g of new Set(scriptsOf(event))) {
+      if (!new RegExp(`^\\|\\s*\`${g}\``, 'm').test(install)) {
+        throw new Error(`README never discloses the ${event} hook '${g}' in the install section`);
+      }
     }
   }
   const WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven'];
@@ -1996,6 +2007,176 @@ check('install.sh --lineup stamps the project roles and never clobbers a customi
 
   fs.rmSync(tmp, { recursive: true, force: true });
   return `implementer=${impl} · reviewer=${rev} (${famOf(impl)} ≠ ${famOf(rev)}) · custom agent preserved · frontmatter-less file left alone`;
+});
+
+// ── TypeSafe Jev ──────────────────────────────────────────────────────────────────────────────────
+// Every Jev path is off unless a key is present, and the tests must be true on a machine that has
+// one: each child process below runs with HOME pointed at an empty dir and TYPESAFE_API_KEY removed,
+// so a developer's real key is never what the gate measured. JEV_MOCK_FILE stands in for the API.
+const jevEnv = (extra = {}) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'jev-home-'));
+  const env = { ...process.env, HOME: home, ...extra };
+  delete env.TYPESAFE_API_KEY;
+  if (!('JEV_MOCK_FILE' in extra)) delete env.JEV_MOCK_FILE;
+  return { env, home };
+};
+const jevMock = (name) => path.join(ROOT, 'scripts/fixtures/jev', name);
+const runNode = (args, env, input) => {
+  try {
+    return { code: 0, out: execFileSync('node', args, { env, input, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }), err: '' };
+  } catch (e) { return { code: e.status, out: e.stdout || '', err: e.stderr || '' }; }
+};
+
+check('jev client is a no-op without a key, reads the secrets file, and honours JEV_MOCK_FILE', () => {
+  mustExist('scripts/jev.js');
+  const script = path.join(ROOT, 'scripts/jev.js');
+  execFileSync('node', ['--check', script], { stdio: 'pipe' });
+  const probe = (env) => runNode(['-e', `
+    const j = require(${JSON.stringify(script)});
+    j.noul('x', 'y', { waits: [] }).then((p) => console.log('P', p), (e) => console.log('E', e.code || e.message));
+  `], env);
+  const off = probe(jevEnv().env);
+  if (!/^E JEV_DISABLED/m.test(off.out)) throw new Error(`without a key the client answered: ${off.out.trim() || off.err.trim()}`);
+  const { env, home } = jevEnv();
+  fs.mkdirSync(path.join(home, '.agents'));
+  fs.writeFileSync(path.join(home, '.agents', 'secrets.env'), 'TYPESAFE_API_KEY=off\n');
+  if (!/^E JEV_DISABLED/m.test(probe(env).out)) throw new Error('TYPESAFE_API_KEY=off in secrets.env did not pause the client');
+  const st = runNode(['-e', `console.log(JSON.stringify(require(${JSON.stringify(script)}).status()))`], { ...env, TYPESAFE_API_KEY: 'k' });
+  if (!/"source":"env"/.test(st.out)) throw new Error(`env key not reported as source env: ${st.out}`);
+  const mock = probe(jevEnv({ JEV_MOCK_FILE: jevMock('mock-noul.json') }).env);
+  if (!/^P 0\.97/m.test(mock.out)) throw new Error(`mock did not answer 0.97: ${mock.out.trim() || mock.err.trim()}`);
+  const fail = probe(jevEnv({ JEV_MOCK_FILE: jevMock('mock-fail.json') }).env);
+  if (!/^E timeout/m.test(fail.out)) throw new Error(`mock-fail did not surface as a timeout: ${fail.out.trim()}`);
+  return 'disabled without a key · `off` sentinel honoured · env > secrets · mock answers and fails on demand';
+});
+
+// The dedupe replaces a sentence addressed to the chair with arithmetic. The controls that matter:
+// a blocker at p=0.90 is NEW (its bar is 0.95), a minor at 0.91 is carried, an exact restatement is
+// carried without any request, a different file is never paired, and without a key the output
+// says exact-only and counts what is left for the chair — never silently new, never silently gone.
+check('loop-gate dedupe counts NEW arithmetically, never hides a blocker, and degrades to exact-only', () => {
+  const script = path.join(ROOT, 'scripts/loop-gate.js');
+  const prev = path.join(ROOT, 'scripts/fixtures/findings/dedupe-prev.json');
+  const cur = path.join(ROOT, 'scripts/fixtures/findings/dedupe-current.json');
+  const off = runNode([script, 'dedupe', prev, cur], jevEnv().env);
+  if (off.code !== 0) throw new Error(`no-key run exited ${off.code}: ${off.err.trim()}`);
+  if (!/^DEDUPE: exact-only \(no TYPESAFE_API_KEY\)/m.test(off.out)) throw new Error(`no-key run did not announce exact-only: ${off.out}`);
+  if (!/^NEW: blocker 1 major 2 minor 1/m.test(off.out)) throw new Error(`no-key NEW line wrong: ${off.out}`);
+  if (!/^UNJUDGED: 2 pair/m.test(off.out)) throw new Error('no-key run did not count the pairs left for the chair');
+
+  const out = path.join(jevEnv().home, 'dedupe.json');
+  const on = runNode([script, 'dedupe', prev, cur, '--out', out], jevEnv({ JEV_MOCK_FILE: jevMock('mock-dedupe.json') }).env);
+  if (on.code !== 0) throw new Error(`mock run exited ${on.code}: ${on.err.trim()}`);
+  if (!/^DEDUPE: jev \(2 pair\(s\), 1 request/m.test(on.out)) throw new Error(`mock run header wrong: ${on.out}`);
+  if (!/^NEW: blocker 1 major 2 minor 0/m.test(on.out)) throw new Error(`mock NEW line wrong — a blocker at p=0.90 must stay new: ${on.out}`);
+  if (!/^CARRIED: blocker 0 major 1 minor 1/m.test(on.out)) throw new Error(`mock CARRIED line wrong: ${on.out}`);
+  if (!/R2-F1 major restates R1-F1 \(p=1\.00, exact\)/.test(on.out)) throw new Error('the exact restatement is not printed under CARRIED');
+  const report = JSON.parse(fs.readFileSync(out, 'utf8'));
+  const byId = Object.fromEntries(report.findings.map((f) => [f.id, f]));
+  if (byId['R2-F3'].new !== true || byId['R2-F3'].p !== 0.9) throw new Error('blocker R2-F3 at p=0.90 was deduped — the blocker bar is 0.95');
+  if (byId['R2-F2'].new !== false || byId['R2-F2'].restates !== 'R1-F1') throw new Error('minor R2-F2 at p=0.91 was not carried');
+  if (byId['R2-F4'].via !== 'no-candidate') throw new Error('a different file was paired');
+
+  const broken = runNode([script, 'dedupe', prev, cur], jevEnv({ JEV_MOCK_FILE: jevMock('mock-fail.json') }).env);
+  if (broken.code !== 0 || !/^DEDUPE: exact-only \(jev unavailable: timeout/m.test(broken.out)) throw new Error(`API failure did not degrade to exact-only with its reason: ${broken.out} ${broken.err}`);
+  const bad = runNode([script, 'dedupe', prev, path.join(ROOT, 'scripts/fixtures/findings/valid-findings.json')], jevEnv().env);
+  if (bad.code !== 2 || !/missing "id"/.test(bad.err)) throw new Error('an un-aggregated findings array (no id/critic) was accepted — dedupe runs after the chair assigns ids');
+  return 'exact-only without a key · blocker at 0.90 stays new · minor at 0.91 carried · API failure announced · un-aggregated input refused (exit 2)';
+});
+
+check('prompt-router emits one advisory UserPromptSubmit context under budget and never decides', () => {
+  const script = path.join(ROOT, 'scripts/hooks/prompt-router.js');
+  mustExist('scripts/hooks/prompt-router.js');
+  execFileSync('node', ['--check', script], { stdio: 'pipe' });
+  const fx = (name) => read(path.join('scripts/fixtures/hooks', name));
+  const withSkill = (extra) => {
+    const e = jevEnv(extra);
+    fs.mkdirSync(path.join(e.home, '.claude', 'skills', 'harness-audit'), { recursive: true });
+    fs.writeFileSync(path.join(e.home, '.claude', 'skills', 'harness-audit', 'SKILL.md'), '---\nname: harness-audit\ndescription: audit a harness\n---\n');
+    fs.mkdirSync(path.join(e.home, '.claude', 'skills', 'harness-audit:harness-audit'), { recursive: true });
+    fs.writeFileSync(path.join(e.home, '.claude', 'skills', 'harness-audit:harness-audit', 'SKILL.md'), '---\nname: x\ndescription: audit a harness\n---\n');
+    return { ...e.env, PROMPT_ROUTER_DIR: path.join(e.home, 'router-cache') };
+  };
+  if (runNode([script], jevEnv().env, fx('user-prompt-submit-jev.json')).out !== '') throw new Error('the router spoke without a key');
+  const mockEnv = withSkill({ JEV_MOCK_FILE: jevMock('mock-router.json') });
+  if (runNode([script], mockEnv, fx('user-prompt-submit-slash.json')).out !== '') throw new Error('the router spoke on a slash command — the human already chose');
+  if (runNode([script], mockEnv, fx('other-event.json')).out !== '') throw new Error('a non-UserPromptSubmit payload produced output');
+  const r = runNode([script], mockEnv, fx('user-prompt-submit-jev.json'));
+  let o;
+  try { o = JSON.parse(r.out); } catch { throw new Error(`stdout is not JSON: ${r.out.slice(0, 80)} ${r.err.slice(0, 120)}`); }
+  const h = o.hookSpecificOutput;
+  if (!h || h.hookEventName !== 'UserPromptSubmit') throw new Error('hookEventName is not UserPromptSubmit');
+  if (!/likely skill `harness-audit:harness-audit` \(p=0\.71\)/.test(h.additionalContext)) throw new Error(`skill suggestion missing: ${h.additionalContext}`);
+  if (!/subagent tier sonnet \(p=0\.62\)/.test(h.additionalContext)) throw new Error(`tier suggestion missing: ${h.additionalContext}`);
+  for (const k of Object.keys(o)) if (k !== 'hookSpecificOutput') throw new Error(`unknown top-level key ${k}`);
+  if ('decision' in o || 'permissionDecision' in h) throw new Error('the router decided — it is advisory only');
+  const t0 = Date.now();
+  const slow = runNode([script], withSkill({ JEV_MOCK_FILE: jevMock('mock-slow.json') }), fx('user-prompt-submit-jev.json'));
+  const ms = Date.now() - t0;
+  if (slow.code !== 0 || slow.out !== '') throw new Error(`a slow API produced output or a non-zero exit: ${slow.out}`);
+  if (ms > 2500) throw new Error(`a slow API held the prompt for ${ms}ms — the budget is 1500`);
+  return `silent without key / on slash / on other events · skill + tier suggested from mock · slow API dropped in ${ms}ms · never decides`;
+});
+
+check('jev-nudge fires once a day and only while Jev is off; jev-setup reports status by exit code', () => {
+  const nudge = path.join(ROOT, 'scripts/hooks/jev-nudge.js');
+  const setup = path.join(ROOT, 'scripts/jev-setup.js');
+  for (const f of ['scripts/hooks/jev-nudge.js', 'scripts/jev-setup.js', 'bin/jev-setup']) mustExist(f);
+  execFileSync('node', ['--check', nudge], { stdio: 'pipe' });
+  execFileSync('node', ['--check', setup], { stdio: 'pipe' });
+  const start = read('scripts/fixtures/hooks/session-start.json');
+  const e = jevEnv();
+  const env = { ...e.env, JEV_NUDGE_DIR: path.join(e.home, 'nudge') };
+  const first = runNode([nudge], env, start);
+  let o;
+  try { o = JSON.parse(first.out); } catch { throw new Error(`first start did not nudge: ${first.out.slice(0, 80)}`); }
+  if (o.hookSpecificOutput.hookEventName !== 'SessionStart' || !/bin\/jev-setup/.test(o.hookSpecificOutput.additionalContext)) throw new Error('the nudge does not name bin/jev-setup');
+  if (runNode([nudge], env, start).out !== '') throw new Error('the nudge fired twice in one day');
+  if (runNode([nudge], { ...env, TYPESAFE_API_KEY: 'k', JEV_NUDGE_DIR: path.join(e.home, 'nudge2') }, start).out !== '') throw new Error('the nudge fired with a key present');
+  if (runNode([nudge], env, read('scripts/fixtures/hooks/other-event.json')).out !== '') throw new Error('a non-SessionStart payload produced output');
+  if (runNode([setup, '--status'], e.env).code !== 3) throw new Error('jev-setup --status without a key must exit 3');
+  if (runNode([setup, '--status'], { ...e.env, TYPESAFE_API_KEY: 'k' }).code !== 0) throw new Error('jev-setup --status with a key must exit 0');
+  const h = JSON.parse(read('hooks/hooks.json')).hooks;
+  if (!JSON.stringify(h.SessionStart || []).includes('jev-nudge.js')) throw new Error('hooks.json does not install jev-nudge on SessionStart');
+  if (!JSON.stringify(h.UserPromptSubmit || []).includes('prompt-router.js')) throw new Error('hooks.json does not install prompt-router on UserPromptSubmit');
+  const inst = read('install.sh');
+  if (!/--skip-jev/.test(inst) || !/jev-setup\.js" --status/.test(inst)) throw new Error('install.sh never asks about a Jev key (or cannot be told not to)');
+  if (!/"\$ASSUME_YES" -eq 0 \] && \[ -t 0 \]/.test(inst)) throw new Error('install.sh may ask for a Jev key non-interactively or under --yes — consent is never a CI default');
+  return 'nudge once/day · silent with a key · setup exit 3/0 · both hooks wired · install.sh asks only on a TTY';
+});
+
+check('the panel loops route round-2 dedupe through loop-gate and degrade honestly', () => {
+  for (const cmd of ['orchestrate', 'review-loop']) {
+    const src = read(`commands/${cmd}.md`);
+    if (!/loop-gate\.js" dedupe/.test(src)) throw new Error(`${cmd} never runs loop-gate.js dedupe — "new vs restated" is back in the chair's hands`);
+    if (!/`NEW:`/.test(src) || !/exact-only/.test(src) || !/UNJUDGED/.test(src)) throw new Error(`${cmd} does not tell the chair how to read DEDUPE/NEW/UNJUDGED`);
+    if (/Judge by meaning, not by string equality\./.test(src)) throw new Error(`${cmd} still asks the chair to judge restatements by meaning as the primary path`);
+  }
+  const pi = read('scripts/port-loops.js');
+  if (!/loop-gate\.js" dedupe/.test(pi)) throw new Error('port-loops.js has no Pi substitution for the dedupe block — the ported command would call a script Pi never installs');
+  return 'orchestrate + review-loop call dedupe from round 2, read NEW:, disclose exact-only · Pi port degrades it to a hand-check';
+});
+
+check('README discloses Jev: the env var, the endpoint, what leaves the machine, and the off-by-default guarantee', () => {
+  const t = read('README.md');
+  for (const must of ['TYPESAFE_API_KEY', 'api.typesafe.ai', 'bin/jev-setup', 'exact-only', 'prompt-router', 'jev-nudge']) {
+    if (!t.includes(must)) throw new Error(`README never mentions ${must}`);
+  }
+  if (!/## Jev/.test(t)) throw new Error('README has no §Jev');
+  const sec = t.split(/^## Jev/m)[1].split(/^## /m)[0];
+  if (!/transcript/i.test(sec) || !/never/i.test(sec)) throw new Error('§Jev does not say transcripts never leave the machine');
+  if (!/United States|US-hosted|hosted in the US/.test(sec) || !/SCC/.test(sec)) throw new Error('§Jev does not state where the data goes and under which transfer clauses');
+  return '§Jev present · env var, endpoint, setup command, degradation mode, both hooks, data flow and residency disclosed';
+});
+
+// The only check here that touches the network, and it is opt-in twice: a key AND JEV_LIVE=1.
+check('jev live smoke — one noul round trip to api.typesafe.ai', () => {
+  const script = path.join(ROOT, 'scripts/jev.js');
+  if (process.env.JEV_LIVE !== '1') skip('set JEV_LIVE=1 (and a TYPESAFE_API_KEY) to run the live round trip');
+  if (!require(script).isEnabled()) skip('no TYPESAFE_API_KEY — nothing to ping');
+  const r = runNode([path.join(ROOT, 'scripts/jev-setup.js'), '--ping'], process.env);
+  if (r.code !== 0 || !/^OK/.test(r.out)) throw new Error(`ping failed: ${r.out.trim()} ${r.err.trim()}`);
+  return r.out.trim();
 });
 
 const GLYPH = { pass: '✓', fail: '✗', skip: '⊘' };
