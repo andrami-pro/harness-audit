@@ -2245,9 +2245,14 @@ check('jev dedupe eval: corpus balanced, exit 3 without a key, exit 1 when a new
   if (off.code !== 3 || !/NOT MEASURED/.test(off.out)) throw new Error(`without a key the eval exited ${off.code}: ${off.out.trim()}`);
   const all = runNode([script], jevEnv({ JEV_MOCK_FILE: jevMock('mock-noul.json') }).env);
   if (all.code !== 1 || !/VERDICT: FAIL/.test(all.out) || !/c04 blocker/.test(all.out)) throw new Error(`a classifier that carries everything did not fail the eval: exit ${all.code}`);
+  // p = 0.90 everywhere sits between the two bars: every non-blocker is carried, no blocker is. If the
+  // eval ever drops the blocker bar, c04 shows up in the hidden list.
+  const mid = runNode([script], jevEnv({ JEV_MOCK_FILE: jevMock('mock-090.json') }).env);
+  if (mid.code !== 1 || !/c05 major/.test(mid.out)) throw new Error(`at p=0.90 the eval did not hide the new majors it should: exit ${mid.code}`);
+  if (/c04 blocker|c06 blocker|c12 blocker/.test(mid.out)) throw new Error('at p=0.90 the eval carried a new blocker — it lost the 0.95 blocker bar loop-gate applies');
   const none = runNode([script], jevEnv({ JEV_MOCK_FILE: jevMock('mock-dedupe.json') }).env);
   if (none.code !== 0 || !/VERDICT: PASS/.test(none.out) || !/MISSED at loop-gate/.test(none.out)) throw new Error(`a classifier that carries nothing did not pass with its misses listed: exit ${none.code}`);
-  return `${corpus.cases.length} cases (${restated.length} restated / ${fresh.length} new, ${newBlockers} new blockers) · off → 3 · carry-all → 1 · carry-none → 0`;
+  return `${corpus.cases.length} cases (${restated.length} restated / ${fresh.length} new, ${newBlockers} new blockers) · off → 3 · carry-all → 1 · p=0.90 hides majors, never blockers · carry-none → 0`;
 });
 
 check('jev dedupe eval — live, against api.typesafe.ai', () => {
