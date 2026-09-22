@@ -338,22 +338,48 @@ Last line (no extra text): APPROVED or REJECTED`,
     { model: 'fable', label: `review:iter${iteration}`, phase: 'Review' }
   )
 
-  approved = lastReview.includes('APPROVED')
+  // The verdict is the LAST line, compared whole. A substring test reads "[FAIL] … not APPROVED"
+  // as an approval, and one stray word opens the loop.
+  approved = lastReview.trim().split('\n').pop().replace(/[*`_\s]/g, '') === 'APPROVED'
   log(approved ? `✓ APPROVED iter ${iteration}` : `✗ REJECTED — correcting`)
 }
 
 if (!approved) log(`⚠ Did not converge after ${maxIter} iter — escalate to the human`)
 
 phase('Preflight')
-// Adapt this command to the project's preflight (detected in Step 1)
+// The runtime has no shell, so a seat runs the gate — and reports FIELDS, not prose. A substring test
+// for "pass" turns "3 passed, 2 failed", "bypass", or a SKIP followed by the gate's closing PASS
+// banner into a green preflight. An exit code and a list of skipped checks cannot be misread that way.
+const PREFLIGHT_CMD = 'npm run preflight' // Adapt to the project's gate (detected in Step 1)
+const PREFLIGHT_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['exitCode', 'skipped', 'failedCheck', 'tail'],
+  properties: {
+    exitCode: { type: 'integer' },
+    skipped: { type: 'array', items: { type: 'string' } },
+    failedCheck: { type: ['string', 'null'] },
+    tail: { type: 'string' },
+  },
+}
 const preflight = await agent(
-  `Run the project's preflight gate and report the full output + exit code.
-If it fails: identify the exact check that failed.`,
-  { model: 'sonnet', label: 'preflight', phase: 'Preflight' }
+  `Run exactly this and change nothing: ${PREFLIGHT_CMD}; echo "EXIT=$?"
+Report, without interpreting:
+- exitCode: the number printed after EXIT=
+- skipped: every output line that reports a check as skipped or not run (SKIP, skipped, ⊘, "not verified"), verbatim
+- failedCheck: the check that failed, or null when exitCode is 0
+- tail: the last 60 lines of output, verbatim
+Do not fix anything.`,
+  { model: 'sonnet', label: 'preflight', phase: 'Preflight', schema: PREFLIGHT_SCHEMA }
 )
 
-const preflightPassed = preflight.toLowerCase().includes('pass') || preflight.includes('exit:0')
-log(`Preflight: ${preflightPassed ? 'PASS' : 'FAIL'}`)
+// A skipped check is not a passed one: exit 0 with a SKIP is NOT VERIFIED, and the handoff says so.
+const skipped = preflight?.skipped ?? []
+const preflightPassed = preflight?.exitCode === 0 && skipped.length === 0
+const preflightState = preflightPassed ? 'PASS'
+  : preflight?.exitCode === 0 ? `NOT VERIFIED (${skipped.length} skipped)`
+  : `FAIL (exit ${preflight?.exitCode ?? '?'}${preflight?.failedCheck ? ` · ${preflight.failedCheck}` : ''})`
+log(`Preflight: ${preflightState}`)
 
 // The handoff is what the seats REPORT: the reviewer's [PASS|FAIL] lines are its evidence, the open
 // [FAIL] lines are its blocker. Nothing in this runtime can re-run them, so the label says so.
@@ -362,9 +388,9 @@ const openFails = verdictLines.filter((l) => l.startsWith('[FAIL]'))
 const handoff = {
   status: approved && preflightPassed ? 'complete' : approved ? 'continue' : 'blocked',
   summary: approved
-    ? `Reviewer approved after ${iteration} iteration(s); preflight ${preflightPassed ? 'green' : 'red'}`
+    ? `Reviewer approved after ${iteration} iteration(s); preflight ${preflightState}`
     : `Reviewer still rejects after ${maxIter} iteration(s)`,
-  evidence: [...verdictLines, `preflight: ${preflightPassed ? 'PASS' : 'FAIL'}`],
+  evidence: [...verdictLines, `preflight: ${preflightState}`, ...skipped.map((l) => `preflight skipped: ${l}`)],
   ...(approved ? {} : { blocker: openFails.join(' · ') || 'reviewer returned REJECTED with no [FAIL] line' }),
 }
 const LABEL = 'Reported by the implementer/reviewer seats — not independently certified: '
@@ -373,6 +399,7 @@ return {
   task, iterations: iteration, approved, preflightPassed, handoff,
   nextStep: LABEL + (approved && preflightPassed
     ? 'git add -p && git commit'
+    : approved && preflight?.exitCode === 0 ? 'Preflight skipped checks — supply what they need and re-run; a SKIP is not a PASS'
     : approved ? 'Preflight failed — fix before commit'
     : `Did not converge — review remaining [FAIL] after ${maxIter} iter and report to the human`),
 }

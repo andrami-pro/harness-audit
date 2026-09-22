@@ -2179,6 +2179,86 @@ check('jev live smoke — one noul round trip to api.typesafe.ai', () => {
   return r.out.trim();
 });
 
+// The develop-phase template is code the skill writes INTO other projects, so a bug in it ships to
+// every repo the audit touches. Two lived there: the reviewer's verdict was `includes('APPROVED')`,
+// and the preflight's was `includes('pass') || includes('exit:0')` over a seat's prose — which reads
+// "3 passed, 2 failed", "bypass", and a SKIP followed by the gate's closing PASS banner as green.
+// This check runs the template itself with stub seats, so it asserts behaviour, not spelling.
+check('develop-phase template decides from the verdict line and the exit code, and a SKIP is not a PASS', () => {
+  const harness = `
+    const fs = require('fs');
+    const md = fs.readFileSync(process.argv[1], 'utf8');
+    const block = (md.match(/\`\`\`js\\n([\\s\\S]*?)\`\`\`/g) || []).find((b) => /name: 'develop-phase'/.test(b));
+    if (!block) { console.log('NO_TEMPLATE'); process.exit(0); }
+    const src = block.replace(/^\`\`\`js\\n/, '').replace(/\`\`\`$/, '').replace(/^export /m, '');
+    const AsyncFn = Object.getPrototypeOf(async function () {}).constructor;
+    const run = (review, pf) => new AsyncFn('args', 'agent', 'log', 'phase', src)(
+      { maxIter: 1 },
+      async (_p, o) => (o.label === 'preflight' ? pf : String(o.label).startsWith('review') ? review : 'impl'),
+      () => {}, () => {});
+    const pf = (exitCode, skipped = [], tail = '') => ({ exitCode, skipped, failedCheck: exitCode ? 'test' : null, tail });
+    (async () => {
+      const out = {};
+      out.pass = await run('[PASS] a — x\\nAPPROVED', pf(0));
+      out.skip = await run('[PASS] a — x\\n**APPROVED**', pf(0, ['SKIP: token absent'], 'SKIP: token absent\\nPASS'));
+      out.fail = await run('[PASS] a — x\\nAPPROVED', pf(1, [], 'Tests: 3 passed, 2 failed'));
+      out.prose = await run('[FAIL] b — not APPROVED yet\\nREJECTED', pf(0));
+      console.log(JSON.stringify(Object.fromEntries(Object.entries(out).map(([k, r]) => [k, [r.approved, r.preflightPassed, r.handoff.status]]))));
+    })().catch((e) => console.log('THREW ' + e.message));
+  `;
+  const seen = [];
+  for (const rel of ['skills/harness-audit/SKILL.md', '.pi/skills/harness-audit/SKILL.md']) {
+    const out = execFileSync('node', ['-e', harness, path.join(ROOT, rel)], { encoding: 'utf8' }).trim();
+    if (out === 'NO_TEMPLATE') throw new Error(`${rel} has no develop-phase template`);
+    if (out.startsWith('THREW')) throw new Error(`${rel}: the develop-phase template throws when run — ${out.slice(6)}`);
+    const r = JSON.parse(out);
+    const want = { pass: [true, true, 'complete'], skip: [true, false, 'continue'], fail: [true, false, 'continue'], prose: [false, true, 'blocked'] };
+    for (const [k, v] of Object.entries(want)) {
+      if (JSON.stringify(r[k]) !== JSON.stringify(v)) {
+        const why = { pass: 'a clean exit 0 did not pass', skip: 'exit 0 with a SKIP passed — a skipped check is not a passed one', fail: "exit 1 with '3 passed' in the log passed — the verdict is the exit code, not a word in the output", prose: "'not APPROVED' in a [FAIL] line approved the change — the verdict is the last line, whole" }[k];
+        throw new Error(`${rel}: ${why} (got ${JSON.stringify(r[k])})`);
+      }
+    }
+    seen.push(rel.startsWith('.pi') ? 'pi mirror' : 'skill');
+  }
+  return `${seen.join(' + ')}: pass → complete · SKIP → continue · exit 1 → continue · "not APPROVED" → blocked`;
+});
+
+// The dedupe's thresholds were chosen, not measured; the eval is what measures them. Offline this
+// asserts the eval's own arithmetic: a corpus that stays well-formed and balanced, exit 3 without a
+// key (nothing measured is not a pass), a classifier that carries everything → exit 1 naming the
+// hidden new blockers, one that carries nothing → exit 0 with the missed restatements listed.
+check('jev dedupe eval: corpus balanced, exit 3 without a key, exit 1 when a new blocker is hidden', () => {
+  const script = path.join(ROOT, 'benchmarks/jev_dedupe_eval.js');
+  mustExist('benchmarks/jev_dedupe_eval.js');
+  mustExist('benchmarks/jev-dedupe/corpus.json');
+  const { validateCorpus } = require(script);
+  const corpus = JSON.parse(read('benchmarks/jev-dedupe/corpus.json'));
+  const errors = validateCorpus(corpus);
+  if (errors.length) throw new Error(`corpus invalid: ${errors[0]}`);
+  const restated = corpus.cases.filter((c) => c.restates !== null);
+  const fresh = corpus.cases.filter((c) => c.restates === null);
+  if (restated.length < 10 || fresh.length < 10) throw new Error(`corpus too lopsided to measure both errors: ${restated.length} restated / ${fresh.length} new (need ≥10 each)`);
+  const newBlockers = fresh.filter((c) => c.current.severity === 'blocker').length;
+  if (newBlockers < 4) throw new Error(`only ${newBlockers} new blockers — the error that matters needs ≥4 chances to happen`);
+  const off = runNode([script], jevEnv().env);
+  if (off.code !== 3 || !/NOT MEASURED/.test(off.out)) throw new Error(`without a key the eval exited ${off.code}: ${off.out.trim()}`);
+  const all = runNode([script], jevEnv({ JEV_MOCK_FILE: jevMock('mock-noul.json') }).env);
+  if (all.code !== 1 || !/VERDICT: FAIL/.test(all.out) || !/c04 blocker/.test(all.out)) throw new Error(`a classifier that carries everything did not fail the eval: exit ${all.code}`);
+  const none = runNode([script], jevEnv({ JEV_MOCK_FILE: jevMock('mock-dedupe.json') }).env);
+  if (none.code !== 0 || !/VERDICT: PASS/.test(none.out) || !/MISSED at loop-gate/.test(none.out)) throw new Error(`a classifier that carries nothing did not pass with its misses listed: exit ${none.code}`);
+  return `${corpus.cases.length} cases (${restated.length} restated / ${fresh.length} new, ${newBlockers} new blockers) · off → 3 · carry-all → 1 · carry-none → 0`;
+});
+
+check('jev dedupe eval — live, against api.typesafe.ai', () => {
+  if (process.env.JEV_LIVE !== '1') skip('set JEV_LIVE=1 (and a TYPESAFE_API_KEY) to measure the dedupe thresholds live');
+  if (!require(path.join(ROOT, 'scripts/jev.js')).isEnabled()) skip('no TYPESAFE_API_KEY — nothing to measure');
+  const r = runNode([path.join(ROOT, 'benchmarks/jev_dedupe_eval.js')], process.env);
+  const verdict = (r.out.match(/^VERDICT: .*$/m) || [''])[0];
+  if (r.code !== 0) throw new Error(verdict || `eval exited ${r.code}: ${r.err.trim()}`);
+  return verdict.replace(/^VERDICT: /, '');
+});
+
 const GLYPH = { pass: '✓', fail: '✗', skip: '⊘' };
 let failed = 0, skipped = 0;
 for (const r of results) {

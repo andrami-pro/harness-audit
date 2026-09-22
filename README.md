@@ -632,6 +632,16 @@ bin/jev-setup --ping     # one round trip, never writes
 | `dedupe` | For each pair: the two findings' `id`, `critic`, `severity`, `file`, `line`, `summary`, `fix` |
 | `prompt-router` | The first 1500 characters of the prompt you just typed; the names and 120-char descriptions of your installed skills |
 
+**Calibrate before you trust it.** The 0.85 / 0.95 thresholds were chosen, not measured.
+`node benchmarks/jev_dedupe_eval.js` measures them: it runs a labelled corpus
+(`benchmarks/jev-dedupe/corpus.json` — paraphrases, cross-language restatements, and hard negatives
+that share a file, a line or most of their words with an old finding and are still new) through the
+production `dedupe()`, then prices every threshold from that one request. The two errors are not
+symmetric, so neither is the verdict: a restatement read as new costs a redundant fix round; a new
+blocker or major read as a restatement is hidden from the stop rule, and any of those at the
+shipped thresholds exits 1. The corpus is small and synthetic — add pairs from your own
+`loop-runs/` before you call a threshold settled. `JEV_LIVE=1 node scripts/validate.js` runs it.
+
 **What never leaves, key or no key:** transcripts. `/session-review` and `/dashboard-harness` keep
 their promise — no API call, nothing leaves the machine — and `scripts/validate.js` holds them to it.
 The security guards are unchanged and never call anything.
