@@ -2244,6 +2244,77 @@ check('develop-phase template decides from the verdict line and the exit code, a
   return `${seen.join(' + ')}: pass → complete · SKIP → continue · exit 1 → continue · "not APPROVED" → blocked`;
 });
 
+// The template also carries the seats around the loop: a scout and an analyst before the implementer, and a
+// reviewer that may be another vendor's model reached through scripts/external-review.sh. Each is a way for
+// the gate to go quiet wrong: a blocker that the implementer ignores, a reviewer that shares the
+// implementer's family, an external review whose verdict is never read, or a dead seat that hangs the run.
+// The check runs the template with stub seats and asserts what each case actually did.
+//
+// Negative controls (2026-09-26, each applied to the skill template, observed, reverted — all exit 1):
+//   the familyOf() guard commented out ...............................................................
+//     "a reviewer of the implementer's own family ran — D25a is enforced at run time, no seat may start"
+//   the analyst's `BLOCKER:` prefix compared against `BLOCKED:` .......................................
+//     "the implementer ran after the analyst reported a blocker — it must stop before any implementer token"
+check('develop-phase template: a blocker stops before the implementer, a same-family reviewer is refused, an external verdict is read, a dead seat degrades', () => {
+  const harness = (mdPath) => {
+    const fs = require('fs');
+    const md = fs.readFileSync(mdPath, 'utf8');
+    const block = (md.match(/```js\n([\s\S]*?)```/g) || []).find((b) => /name: 'develop-phase'/.test(b));
+    if (!block) { console.log('NO_TEMPLATE'); return; }
+    const src = block.replace(/^```js\n/, '').replace(/```$/, '').replace(/^export /m, '');
+    const AsyncFn = Object.getPrototypeOf(async function () {}).constructor;
+    const pf = { exitCode: 0, skipped: [], failedCheck: null, tail: '' };
+    const run = async (args, seat) => {
+      const calls = [];
+      const agent = async (prompt, o) => { calls.push({ label: String(o.label), model: o.model, prompt }); return seat(String(o.label)); };
+      const out = await new AsyncFn('args', 'agent', 'log', 'phase', src)(args, agent, () => {}, () => {});
+      return { status: out.handoff.status, approved: out.approved, calls };
+    };
+    const ok = (l) => (l === 'preflight' ? pf : l.startsWith('review') ? '[PASS] a — x\nAPPROVED' : l === 'scout' ? 'BRIEF-TEXT' : l === 'analyst' ? 'PLAN-TEXT' : 'impl');
+    const ext = (verdict) => (l) => (l.startsWith('review') ? { output: verdict } : ok(l));
+    const EXT = 'openrouter/acme/model-x';
+    const labels = (r) => r.calls.map((c) => c.label);
+    (async () => {
+      const blocker = await run({ maxIter: 1 }, (l) => (l === 'analyst' ? 'BLOCKER: which tenant?' : ok(l)));
+      const family = await run({ maxIter: 1, reviewerModel: 'opus' }, ok);
+      const familyExt = await run({ maxIter: 1, reviewerModel: 'openrouter/anthropic/claude-opus-5.5' }, ok);
+      const yes = await run({ maxIter: 1, reviewerModel: EXT }, ext('[PASS] a — x\nAPPROVED'));
+      const no = await run({ maxIter: 1, reviewerModel: EXT }, ext('[FAIL] a — x\nREJECTED'));
+      const deadScout = await run({ maxIter: 1 }, (l) => (l === 'scout' ? null : ok(l)));
+      const deadReviewer = await run({ maxIter: 1 }, (l) => (l.startsWith('review') ? null : ok(l)));
+      const plain = await run({ maxIter: 1, preparer: false }, ok);
+      console.log(JSON.stringify({
+        blocker: [blocker.status, labels(blocker).some((l) => l.startsWith('impl'))],
+        family: [family.status, family.calls.length, familyExt.status, familyExt.calls.length],
+        external: [yes.approved, yes.calls.find((c) => c.label.startsWith('review')).prompt.includes(`scripts/external-review.sh ${EXT}`), no.approved, no.status],
+        deadScout: [deadScout.approved, deadScout.calls.find((c) => c.label.startsWith('impl')).prompt.includes('BRIEF:')],
+        deadReviewer: deadReviewer.status,
+        plain: labels(plain).filter((l) => l === 'scout' || l === 'analyst').length,
+      }));
+    })().catch((e) => console.log('THREW ' + e.message));
+  };
+  const seen = [];
+  for (const rel of ['skills/harness-audit/SKILL.md', '.pi/skills/harness-audit/SKILL.md']) {
+    const out = execFileSync('node', ['-e', `(${harness})(process.argv[1])`, path.join(ROOT, rel)], { encoding: 'utf8' }).trim();
+    if (out === 'NO_TEMPLATE') throw new Error(`${rel} has no develop-phase template`);
+    if (out.startsWith('THREW')) throw new Error(`${rel}: the develop-phase template throws when run — ${out.slice(6)}`);
+    const r = JSON.parse(out);
+    const want = {
+      blocker: [['blocked', false], 'the implementer ran after the analyst reported a blocker — it must stop before any implementer token'],
+      family: [['blocked', 0, 'blocked', 0], "a reviewer of the implementer's own family ran — D25a is enforced at run time, no seat may start"],
+      external: [[true, true, false, 'blocked'], "an external reviewer's verdict was not read from its output, or the bridge was not called with the model id"],
+      deadScout: [[true, false], 'a dead scout changed the run — it must continue and the implementer must not receive a brief that does not exist'],
+      deadReviewer: ['blocked', 'a dead reviewer seat did not end in a blocked handoff'],
+      plain: [0, 'preparer: false still ran the scout or the analyst'],
+    };
+    for (const [k, [v, why]] of Object.entries(want)) {
+      if (JSON.stringify(r[k]) !== JSON.stringify(v)) throw new Error(`${rel}: ${why} (got ${JSON.stringify(r[k])})`);
+    }
+    seen.push(rel.startsWith('.pi') ? 'pi mirror' : 'skill');
+  }
+  return `${seen.join(' + ')}: blocker → stop before implementer · same family → refused before any seat · external verdict read · dead scout degrades · dead reviewer → blocked · preparer:false skips both`;
+});
+
 // The dedupe's thresholds were chosen, not measured; the eval is what measures them. Offline this
 // asserts the eval's own arithmetic: a corpus that stays well-formed and balanced, exit 3 without a
 // key (nothing measured is not a pass), a classifier that carries everything → exit 1 naming the

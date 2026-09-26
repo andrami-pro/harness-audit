@@ -95,7 +95,7 @@ Just ask in natural language. The skill triggers on phrases such as:
 - "rubric" · "independent verifier" · "loop-readiness"
 - "make this repo portable across Claude Code / Codex / Cursor"
 
-It detects the stack automatically, audits the four pillars, grades loop-readiness (L0–L3) and memory maturity (M1–M5), writes an executable rubric, emits a role-differentiated develop-phase workflow (Implementer → adversarial Reviewer → Preflight, each on the model tier that fits the job), and runs an adversarial fresh-context verification of its own findings before delivering.
+It detects the stack automatically, audits the four pillars, grades loop-readiness (L0–L3) and memory maturity (M1–M5), writes an executable rubric, emits a role-differentiated develop-phase workflow (Scout → Analyst → Implementer → adversarial Reviewer → Preflight, each on the model tier that fits the job), and runs an adversarial fresh-context verification of its own findings before delivering.
 
 ## The four pillars
 
@@ -155,6 +155,25 @@ naming the corrected id. The failure it exists for is silent: a line-up reading
 `nvidia-nim/zai/glm-5.2` (the real pair is `nvidia/z-ai/glm-5.2`) is valid JSON, passes every other check,
 and surfaces only as a dispatch that hangs and exits 1 with no mention of the model. On a machine without
 `pi` installed the check reports SKIPPED rather than failing a line-up it cannot verify.
+
+## develop-phase: scout, analyst, and a reviewer from another vendor
+
+The workflow the audit writes into a repo has two seats before the implementer, and a reviewer that need not be an
+Anthropic model:
+
+- **Scout** (cheap tier, read-only) reads the repo, code graph first when one exists, and returns a ≤ 400-word brief.
+- **Analyst** (workhorse tier) checks the brief and returns a ≤ 300-word plan. A first line `BLOCKER: …` stops the run
+  before the implementer spends a token. Scout and analyst run once, outside the loop; if either dies the run goes on
+  without it. Pass `preparer: false` for a trivial task: on a one-file task they cost more than the implementation.
+- **Reviewer** is a native alias by default. Pass `reviewerModel: "openrouter/<vendor>/<model>"` (any id `pi --list-models`
+  shows) and the audit's Step 4c copies `skills/harness-audit/external-review.sh` into the repo as
+  `scripts/external-review.sh`: `pi` runs the review with read-only tools and the workflow decides from the last line.
+  It needs `pi` on PATH and the provider key in the auth `pi` uses. The reviewer/implementer family rule (D25a) is also
+  enforced at run time: the same family returns a `blocked` handoff before any seat runs.
+
+Where the saving comes from: the reviewer seat first, then an implementer that no longer reads the repo. Where it does not:
+a trivial task, and any plan whose limit counts tokens without weighting them by model, because the scout reads a lot on a
+cheap tier.
 
 ## Line-up advisor — rankings × price × data policy, weekly
 
