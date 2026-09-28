@@ -171,6 +171,15 @@ Anthropic model:
   It needs `pi` on PATH and the provider key in the auth `pi` uses. The reviewer/implementer family rule (D25a) is also
   enforced at run time: the same family returns a `blocked` handoff before any seat runs.
 
+**On Pi** the same loop is `scripts/develop-phase-pi.js` (Pi has no Workflow runtime). The loop is code, not a prompt:
+each seat is one `pi -p --no-session` call with its own tool allowlist, every model comes from the `pi` column of the
+line-up at run time (the analyst sits in `architect`, the new `scout` role feeds the brief), D25a is re-checked before
+any seat, preflight is the project's own gate run through the shell (a `SKIP` line is not a pass), and the commit
+message is the only thing a model writes in the commit step. With a TypeSafe key, Jev sizes the task first: `trivial`
+skips scout and analyst, `bounded` gives the analyst the implementer's model. From a Pi session, a small extension can
+expose it as `/develop-phase <task>`; from a shell: `node scripts/develop-phase-pi.js --task "…" [--no-preparer]
+[--no-commit] [--max-iter N] [--preflight "<cmd>"] [--no-jev]`.
+
 Where the saving comes from: the reviewer seat first, then an implementer that no longer reads the repo. Where it does not:
 a trivial task, and any plan whose limit counts tokens without weighting them by model, because the scout reads a lot on a
 cheap tier.
@@ -680,6 +689,7 @@ skills/harness-audit/   SKILL.md + rubric-template.md + verifier-protocol.md (th
 hooks/ + scripts/hooks/ three security guards + the repeat-tool guard + telemetry + the Jev router/nudge (plugin install only)
 scripts/loop-gate.js    the deterministic seam inside a loop — see below
 scripts/jev.js          the one door to TypeSafe Jev, and the one switch (TYPESAFE_API_KEY) — see §Jev
+scripts/develop-phase-pi.js  the develop-phase loop for Pi: seats from the line-up, verdict/exit code read by code
 bin/jev-setup           store the key, ping the API, report status
 scripts/check-doc-budgets.js  word-ceiling gate for standing docs (docs/doc-budgets.json)
 scripts/validate.js     this package's own preflight gate — run `node scripts/validate.js` before releasing

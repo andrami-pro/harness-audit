@@ -56,6 +56,7 @@ const INDEPENDENT_OF = {
 };
 
 const PROFILES = {
+  scout:        { metrics: ['agentic'],                                        minCtx: 500_000, price: 2.0, sensitive: true, tools: true },
   architect:    { metrics: ['intelligence', 'lm_hard'],                        minCtx: 200_000, price: 0.3, sensitive: true },
   orchestrator: { metrics: ['agentic', 'lm_agent'],                            minCtx: 500_000, price: 0.7, sensitive: true, tools: true },
   implementer:  { metrics: ['coding', 'swe', 'lm_coding'],                     minOut: 64_000,  price: 0.7, sensitive: true, tools: true },

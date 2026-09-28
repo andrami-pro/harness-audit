@@ -450,6 +450,8 @@ if [ "$LINEUP_REQUESTED" -eq 1 ]; then
         preflight.md) ROLE=preflight ;;
         judge.md) ROLE=judge ;;
         explainer.md) ROLE=explainer ;;
+        scout.md) ROLE=scout ;;
+        analyst.md) ROLE=architect ;;
         *) ROLE="" ;;
       esac
       [ -n "$ROLE" ] || continue

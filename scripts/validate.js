@@ -2361,6 +2361,63 @@ check('jev dedupe eval — live, against api.typesafe.ai', () => {
   return verdict.replace(/^VERDICT: /, '');
 });
 
+// develop-phase-pi.js holds the loop in code, so the loop is tested with a fake `pi` on PATH that answers
+// per seat (HARNESS_SEAT) — no network, no model. Four runs: a clean pass that commits, a same-family
+// line-up refused before any seat, an analyst BLOQUEO that stops before the implementer, and a gate that
+// exits 0 with a SKIP line, which must not count as a pass.
+check('develop-phase-pi: loop in code — pass commits, D25a refuses, BLOQUEO stops, SKIP is not a PASS', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dp-pi-'));
+  const bin = path.join(tmp, 'bin');
+  fs.mkdirSync(bin);
+  fs.writeFileSync(path.join(bin, 'pi'), `#!/bin/sh
+case "$HARNESS_SEAT" in
+  scout) echo "brief: sum.js:1" ;;
+  analyst) if [ -n "$FAKE_BLOCK" ]; then echo "BLOQUEO: falta decidir"; else echo "1. sum.js"; fi ;;
+  implementer-*) echo "module.exports = 2;" > sum.js; echo "sum.js cambiado" ;;
+  reviewer-*) printf '[PASS] a — x\\n**APROBADO**\\n' ;;
+  commit) echo "fix: ajusta sum" ;;
+esac
+`, { mode: 0o755 });
+  const lineup = (reviewer) => {
+    const f = path.join(tmp, `lineup-${reviewer}.json`);
+    const e = (model) => ({ provider: 'fake', model });
+    fs.writeFileSync(f, JSON.stringify({ version: 1, defaults: {}, harness: { pi: {
+      scout: e('scout-1'), architect: e('arch-1'), orchestrator: e('orch-1'), implementer: e('impl-1'), reviewer: e(reviewer),
+    } } }));
+    return f;
+  };
+  const repo = (name) => {
+    const d = path.join(tmp, name);
+    fs.mkdirSync(d);
+    execFileSync('sh', ['-c', 'git init -q && echo "module.exports = 1;" > sum.js && git add -A && git -c user.email=t@t -c user.name=t commit -qm init'], { cwd: d });
+    return d;
+  };
+  const run = (name, { reviewer = 'rev-1', preflight = 'true', env = {} } = {}) => {
+    const cwd = repo(name);
+    const r = require('node:child_process').spawnSync('node', [path.join(ROOT, 'scripts/develop-phase-pi.js'), '--task', 't', '--max-iter', '1', '--no-jev', '--preflight', preflight], {
+      cwd, encoding: 'utf8',
+      env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, MODEL_LINEUP_PATH: lineup(reviewer), GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t', ...env },
+    });
+    let out = null;
+    try { out = JSON.parse(r.stdout); } catch { /* refused runs print no JSON */ }
+    return { code: r.status, out, err: r.stderr, log: execFileSync('git', ['log', '--oneline'], { cwd, encoding: 'utf8' }).trim().split('\n') };
+  };
+  const pass = run('pass');
+  if (pass.code !== 0 || pass.out.handoff.status !== 'complete' || !pass.out.commit.committed || pass.log[0].indexOf('fix: ajusta sum') === -1) {
+    throw new Error(`clean run did not complete and commit: exit ${pass.code} ${pass.err.slice(-300)}`);
+  }
+  const fam = run('family', { reviewer: 'impl-2' });
+  if (fam.code !== 2 || fam.out || !/D25a|family/.test(fam.err)) throw new Error(`same-family reviewer not refused: exit ${fam.code}`);
+  const cl = run('claude', { reviewer: 'claude-fable-5' });
+  if (cl.code !== 2 || cl.out || !/non-Claude/.test(cl.err)) throw new Error(`a Claude seat on Pi was not refused: exit ${cl.code}`);
+  const block = run('block', { env: { FAKE_BLOCK: '1' } });
+  if (block.code !== 1 || block.out.handoff.status !== 'blocked' || block.out.iterations !== 0) throw new Error('BLOQUEO did not stop before the implementer');
+  const skipRun = run('skip', { preflight: 'echo "SKIP notion:verify"; exit 0' });
+  if (skipRun.code !== 1 || skipRun.out.preflightPassed || skipRun.out.commit || skipRun.out.handoff.status !== 'continue') throw new Error('exit 0 with a SKIP line counted as a pass');
+  fs.rmSync(tmp, { recursive: true, force: true });
+  return 'pass → complete + commit · same family → exit 2 · BLOQUEO → blocked at 0 iter · SKIP → continue, no commit';
+});
+
 const GLYPH = { pass: '✓', fail: '✗', skip: '⊘' };
 let failed = 0, skipped = 0;
 for (const r of results) {
