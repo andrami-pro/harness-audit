@@ -19,9 +19,15 @@
 //
 // Usage (from the session's worktree):
 //   node develop-phase-pi.js --task "<task>" [--max-iter 5] [--no-preparer] [--no-commit]
-//                            [--preflight "<command>"] [--no-jev]
+//                            [--preflight "<command>"] [--no-jev] [--run-dir <path>] [--no-tmux]
 // Progress goes to stderr, one line per event; the result (handoff JSON) goes to stdout. Every seat's
-// prompt and output are kept under the run dir printed at start.
+// prompt and full transcript are kept under the run dir printed at start:
+//   <name>.live.log  — that seat's actions as they happen (tool calls, thinking, final answer)
+//   bus.log          — only the hand-offs between seats (brief → plan → diff → verdict → preflight →
+//                      commit), the "conversation" the loop actually has with itself
+// Unless --no-tmux, a detached tmux session (never an existing pane — see scripts/dp-tmux.sh) opens a
+// live view: bus.log on top, the currently active seat's log on the bottom. The attach command is
+// printed once, at start. A missing tmux, or any failure starting it, is silent and never fails the run.
 // Exit 0 — approved and preflight PASS. Exit 1 — anything else (blocked, rejected, crash, preflight not
 // green). Exit 2 — line-up refused (D25a) or usage error.
 
@@ -42,7 +48,7 @@ const READ_ONLY = 'read,grep,find,ls';
 
 // ── args ─────────────────────────────────────────────────────────────────────────────────────────────
 function parseArgs(argv) {
-  const a = { task: '', maxIter: 5, preparer: true, commit: true, preflight: null, jev: true };
+  const a = { task: '', maxIter: 5, preparer: true, commit: true, preflight: null, jev: true, runDir: null, tmux: true };
   for (let i = 0; i < argv.length; i += 1) {
     const k = argv[i];
     if (k === '--task') a.task = argv[++i] || '';
@@ -51,6 +57,8 @@ function parseArgs(argv) {
     else if (k === '--no-commit') a.commit = false;
     else if (k === '--preflight') a.preflight = argv[++i] || null;
     else if (k === '--no-jev') a.jev = false;
+    else if (k === '--run-dir') a.runDir = argv[++i] || null;
+    else if (k === '--no-tmux') a.tmux = false;
     else throw new Error(`unknown argument: ${k}`);
   }
   if (!a.task.trim()) throw new Error('--task is required');
@@ -105,31 +113,86 @@ async function sizeTask(task) {
 }
 
 // ── seats ────────────────────────────────────────────────────────────────────────────────────────────
-// One seat = one ephemeral pi run. The prompt travels as a file (@path) because a diff does not fit in
-// argv. HARNESS_SEAT tells this package's own Pi extensions (the Jev router) that the session is a seat,
-// not a human: no advisory line, no API call per seat.
+// One seat = one ephemeral pi run, in --mode json so its actions can be shown live instead of only its
+// final answer. The prompt travels as a file (@path) because a diff does not fit in argv. HARNESS_SEAT
+// tells this package's own Pi extensions (the Jev router) that the session is a seat, not a human: no
+// advisory line, no API call per seat.
+const TRUNC = (s, n = 200) => (s.length > n ? `${s.slice(0, n)}…` : s);
+
+// Translates one `pi --mode json` line into a human line for <name>.live.log, or null for events with
+// nothing worth showing (session/turn boundaries, partial tool-output streaming). Returns the event's
+// assistant text too, when there is one — the caller keeps only the LAST one as the seat's final answer,
+// exactly as plain-text mode's stdout used to be (final answer only, no tool calls, no thinking).
+function translateEvent(d) {
+  if (d.type === 'tool_execution_start') {
+    return { line: `🔧 ${d.toolName}${d.input ? ` ${TRUNC(JSON.stringify(d.input), 160)}` : ''}` };
+  }
+  if (d.type === 'tool_execution_end') {
+    const r = d.result?.content?.[0]?.text ?? d.result?.content?.[0]?.type ?? '';
+    return { line: `   ↳ ${TRUNC(String(r).replace(/\n/g, ' '), 160)}` };
+  }
+  if (d.type === 'message_end' && d.message?.role === 'assistant') {
+    // errorMessage rides an otherwise-empty assistant message (stopReason: "error") — checked first,
+    // since an empty content array would otherwise fall through silently and the error never surfaces.
+    if (d.message.errorMessage) return { line: `✗ ${d.message.errorMessage}` };
+    const parts = Array.isArray(d.message.content) ? d.message.content : [];
+    const thinking = parts.filter((p) => p.type === 'thinking').map((p) => p.thinking).join(' ');
+    const text = parts.filter((p) => p.type === 'text').map((p) => p.text).join('\n');
+    const lines = [];
+    if (thinking) lines.push(`💭 ${TRUNC(thinking, 200)}`);
+    if (text) lines.push(`💬 ${TRUNC(text, 400)}`);
+    return { line: lines.join('\n') || null, text: text || null };
+  }
+  return { line: null };
+}
+
 function runSeat({ name, model, tools, prompt, runDir, timeoutS }) {
   const promptFile = path.join(runDir, `${name}.prompt.md`);
+  const liveFile = path.join(runDir, `${name}.live.log`);
   fs.writeFileSync(promptFile, prompt);
+  fs.writeFileSync(liveFile, `── ${name} (${model}) ──\n`);
   const started = Date.now();
   return new Promise((resolve) => {
-    const child = spawn('pi', ['-p', '--no-session', '--model', model, '--tools', tools, `@${promptFile}`, 'Haz la tarea descrita arriba.'],
+    const child = spawn('pi', ['-p', '--mode', 'json', '--no-session', '--model', model, '--tools', tools, `@${promptFile}`, 'Haz la tarea descrita arriba.'],
       { cwd: process.cwd(), env: { ...process.env, HARNESS_SEAT: name }, stdio: ['ignore', 'pipe', 'pipe'] });
-    let out = '';
+    let raw = '';
+    let jsonSeen = false;
+    let lastText = '';
+    let buf = '';
     let err = '';
-    child.stdout.on('data', (c) => { out += c; });
+    child.stdout.on('data', (c) => {
+      raw += c;
+      buf += c;
+      const lines = buf.split('\n');
+      buf = lines.pop() || '';
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        let d;
+        try { d = JSON.parse(line); } catch { continue; } // non-JSON stdout (a non-pi `pi` on PATH): raw is the fallback
+        jsonSeen = true;
+        const t = translateEvent(d);
+        if (t.line) fs.appendFileSync(liveFile, `${t.line}\n`);
+        if (t.text) lastText = t.text; // overwritten on every assistant turn; the LAST one wins, as before
+      }
+    });
     child.stderr.on('data', (c) => { err += c; });
     const timer = setTimeout(() => child.kill('SIGTERM'), timeoutS * 1000);
     child.on('error', (e) => { err += String(e.message); });
     child.on('close', (code, signal) => {
       clearTimeout(timer);
+      // A binary on PATH that isn't pi (a test double, most often) never emits parseable JSON: fall back
+      // to the old contract, the whole of stdout, so nothing here depends on --mode json existing.
+      const out = jsonSeen ? lastText : raw;
       fs.writeFileSync(path.join(runDir, `${name}.out.md`), out);
       if (err.trim()) fs.writeFileSync(path.join(runDir, `${name}.err.txt`), err);
       const secs = Math.round((Date.now() - started) / 1000);
       if (code !== 0 || !out.trim()) {
-        log(`  ✗ ${name} (${model}) died: ${signal ? `killed ${signal} after ${secs}s` : `exit ${code}`} — ${err.trim().split('\n').pop() || 'empty output'}`);
+        const line = `✗ murió: ${signal ? `killed ${signal} after ${secs}s` : `exit ${code}`} — ${err.trim().split('\n').pop() || 'empty output'}`;
+        fs.appendFileSync(liveFile, `${line}\n`);
+        log(`  ${line.replace('✗ murió', `✗ ${name} (${model}) murió`)}`);
         return resolve('');
       }
+      fs.appendFileSync(liveFile, `── fin (${secs}s) ──\n`);
       log(`  ✓ ${name} (${model}) ${secs}s`);
       resolve(out.trim());
     });
@@ -235,9 +298,24 @@ async function main() {
   let seats;
   try { seats = resolveSeats(root); } catch (e) { log(`develop-phase-pi: line-up refused — ${e.message}`); return e.code || 2; }
 
-  const runDir = fs.mkdtempSync(path.join(os.tmpdir(), 'develop-phase-pi-'));
+  const runDir = a.runDir || fs.mkdtempSync(path.join(os.tmpdir(), 'develop-phase-pi-'));
+  fs.mkdirSync(runDir, { recursive: true });
+  const busPath = path.join(runDir, 'bus.log');
+  const bus = (line) => fs.appendFileSync(busPath, `[${new Date().toISOString().slice(11, 19)}] ${line}\n`);
   const branch = git(['rev-parse', '--abbrev-ref', 'HEAD']).out.trim();
   const { task } = a;
+
+  // Best-effort live view: a detached tmux session, bus.log on top and the active seat's log on the
+  // bottom (scripts/dp-tmux.sh — never touches an existing session or pane). Missing tmux, or anything
+  // going wrong starting it, is silent: a live view is a convenience, never a reason to fail the run.
+  let tmuxSession = null;
+  if (a.tmux) {
+    try {
+      const r = spawnSync(path.join(__dirname, 'dp-tmux.sh'), [runDir], { encoding: 'utf8', timeout: 5000 });
+      if (r.status === 0 && r.stdout.trim()) tmuxSession = r.stdout.trim();
+      else if (r.stderr?.trim()) log(`(${r.stderr.trim()})`);
+    } catch { /* tmux is a convenience: never block the run */ }
+  }
 
   let preparer = a.preparer;
   let analystSeat = seats.architect;
@@ -250,6 +328,8 @@ async function main() {
 
   log(`Task: "${task}" · branch ${branch} · max ${a.maxIter} iter · run dir ${runDir}`);
   log(`Seats: ${preparer ? `scout=${seats.scout} · analyst=${analystSeat} · ` : ''}implementer=${seats.implementer} · reviewer=${seats.reviewer}`);
+  if (tmuxSession) log(`Vista en vivo: tmux attach -t ${tmuxSession}`);
+  bus(`Tarea: ${task}`);
 
   const result = (fields) => ({ task, branch, runDir, seats: { ...seats, analyst: preparer ? analystSeat : null }, ...fields });
   const crash = (who, iteration) => result({
@@ -287,7 +367,8 @@ Devuelve un brief de ≤ 400 palabras, sin relleno:
 - Preguntas abiertas o ambigüedades que un humano debería resolver
 No propongas la solución.`,
     });
-    if (!brief) log('⚠ Scout sin resultado — el implementer explora solo');
+    if (!brief) { log('⚠ Scout sin resultado — el implementer explora solo'); bus('Scout: sin resultado'); }
+    else bus(`Scout → brief (${brief.length} car.): ${TRUNC(brief.replace(/\n+/g, ' '), 300)}`);
 
     if (brief) {
       log('── Plan');
@@ -306,15 +387,16 @@ Devuelve un plan de ≤ 300 palabras:
 Si el brief no basta o hay una ambigüedad que bloquea, la PRIMERA línea es "BLOQUEO: <motivo>" y nada más.
 Sin código completo: lo escribe el implementer.`,
       });
-      if (!plan) log('⚠ Analista sin resultado — el implementer parte solo del brief');
+      if (!plan) { log('⚠ Analista sin resultado — el implementer parte solo del brief'); bus('Analista: sin resultado'); }
       else if (/^\W*BLOQUEO:/.test(plan.trimStart())) {
         log('⛔ El analista detectó un bloqueo — se corta antes del implementer');
+        bus(`Analista → BLOQUEO: ${TRUNC(plan.trim(), 300)}`);
         return finish(result({
           iterations: 0, approved: false, preflightPassed: false, commit: null,
           handoff: { status: 'blocked', summary: 'El analista pidió una decisión antes de implementar', evidence: [brief], blocker: plan.trim() },
           nextStep: 'Resolver el bloqueo con el humano y relanzar (o --no-preparer si la tarea ya es clara)',
         }));
-      }
+      } else bus(`Analista → plan: ${TRUNC(plan.replace(/\n+/g, ' '), 300)}`);
     }
   }
 
@@ -347,15 +429,18 @@ reutilizar lo que ya existe, sin dependencia nueva sin justificación.\n` : ''}$
 TAREA: ${task}${correction}
 Al terminar: lista archivos creados/modificados + descripción de cada cambio.`,
     });
-    if (!lastImpl) return finish(crash('implementer', iteration));
+    if (!lastImpl) { bus(`Implementer iter ${iteration}: sin resultado`); return finish(crash('implementer', iteration)); }
 
     log(`── Iteración ${iteration}/${a.maxIter} · Review`);
     const changes = changeSet();
     if (changes.empty) {
       lastReview = '[FAIL] diff — el implementer no dejó ningún cambio en el worktree\nRECHAZADO';
       log('  ✗ sin cambios en el worktree — cuenta como RECHAZADO');
+      bus(`Implementer iter ${iteration} → sin cambios en el worktree (RECHAZADO)`);
       continue;
     }
+    const touched = git(['diff', '--name-only', 'HEAD']).out.trim().split('\n').filter(Boolean);
+    bus(`Implementer iter ${iteration} → diff (${touched.length} archivo(s)): ${touched.join(', ')}`);
     lastReview = await runSeat({
       name: `reviewer-${iteration}`, model: seats.reviewer, tools: READ_ONLY, runDir, timeoutS: SEAT_TIMEOUT_S.reviewer,
       prompt: `${reviewerRole ? `${stripFrontmatter(fs.readFileSync(reviewerRole, 'utf8'))}\n\n---\n\n` : ''}Eres el revisor adversarial de un loop de desarrollo.
@@ -375,31 +460,37 @@ Prohibido: leer fuera del repositorio, .env*, *secret*, y cualquier archivo igno
 Formato: [PASS|FAIL] criterio — evidencia concreta
 Última línea, sola y sin texto extra: APROBADO o RECHAZADO`,
     });
-    if (!lastReview) return finish(crash('reviewer', iteration));
+    if (!lastReview) { bus(`Reviewer iter ${iteration}: sin resultado`); return finish(crash('reviewer', iteration)); }
     approved = verdictOf(lastReview);
+    const fails = lastReview.split('\n').filter((l) => /^\s*\[FAIL\]/.test(l)).length;
     log(approved ? `✓ APROBADO iter ${iteration}` : '✗ RECHAZADO — corrigiendo');
+    bus(`Reviewer iter ${iteration} → ${approved ? 'APROBADO' : `RECHAZADO (${fails} FAIL)`}`);
   }
-  if (!approved) log(`⚠ No convergió tras ${a.maxIter} iter — escalar al humano`);
+  if (!approved) { log(`⚠ No convergió tras ${a.maxIter} iter — escalar al humano`); bus(`No convergió tras ${a.maxIter} iteración(es)`); }
 
   log('── Preflight');
   const cmd = preflightCommand(root, a.preflight);
   const pf = runPreflight(cmd, runDir);
   log(`Preflight${cmd ? ` (${cmd})` : ''}: ${pf.state}`);
+  bus(`Preflight${cmd ? ` (${cmd})` : ''} → ${pf.state}`);
 
   let commit = null;
   if (approved && pf.passed && a.commit) {
     log('── Commit');
     commit = await commitChanges(task, seats.orchestrator, runDir);
     log(commit.committed ? `✓ commit ${commit.hash} — ${commit.message}` : `⚠ sin commit: ${commit.note}`);
+    bus(commit.committed ? `Commit → ${commit.hash} — ${commit.message}` : `Commit → no hecho: ${commit.note}`);
   }
 
   const verdictLines = lastReview.split('\n').filter((l) => /^\s*\[(PASS|FAIL)\]/.test(l)).map((l) => l.trim());
   const openFails = verdictLines.filter((l) => l.startsWith('[FAIL]'));
   const LABEL = 'Reportado por implementer/reviewer — no certificado de forma independiente: ';
+  const status = approved && pf.passed ? 'complete' : approved ? 'continue' : 'blocked';
+  bus(`Fin: ${status}`);
   return finish(result({
     iterations: iteration, approved, preflightPassed: pf.passed, commit,
     handoff: {
-      status: approved && pf.passed ? 'complete' : approved ? 'continue' : 'blocked',
+      status,
       summary: approved
         ? `Reviewer aprobó tras ${iteration} iteración(es); preflight ${pf.state}${commit && commit.committed ? `; commit ${commit.hash}` : ''}`
         : `Reviewer sigue rechazando tras ${a.maxIter} iteración(es)`,

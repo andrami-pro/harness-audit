@@ -2394,7 +2394,7 @@ esac
   };
   const run = (name, { reviewer = 'rev-1', preflight = 'true', env = {} } = {}) => {
     const cwd = repo(name);
-    const r = require('node:child_process').spawnSync('node', [path.join(ROOT, 'scripts/develop-phase-pi.js'), '--task', 't', '--max-iter', '1', '--no-jev', '--preflight', preflight], {
+    const r = require('node:child_process').spawnSync('node', [path.join(ROOT, 'scripts/develop-phase-pi.js'), '--task', 't', '--max-iter', '1', '--no-jev', '--no-tmux', '--preflight', preflight], {
       cwd, encoding: 'utf8',
       env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, MODEL_LINEUP_PATH: lineup(reviewer), GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t', ...env },
     });
