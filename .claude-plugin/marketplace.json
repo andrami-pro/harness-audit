@@ -7,8 +7,19 @@
   "plugins": [
     {
       "name": "harness-audit",
-      "source": "./",
-      "description": "Harness audit methodology (four pillars, executable rubric, independent verifier) + the six loops that converge against it (/orchestrate, /skill-loop, /review-loop, /iterate, /session-review, plus the stateless preflight pattern) + a zero-token telemetry dashboard (loop-stats.js) + write-time security guards + a repeat-tool loop-hygiene guard + optional TypeSafe Jev classifier (finding dedupe, prompt routing; off without a key)."
+      "source": "./plugins/harness-audit",
+      "description": "Audit any repo's agent harness against four pillars (harness-in-code, role separation, automatic verification, loop design) and emit an executable rubric a loop can converge against, plus the independent-verifier protocol and the model line-up resolver that keeps reviewer and implementer in different families."
+    },
+    {
+      "name": "harness-loops",
+      "source": "./plugins/harness-loops",
+      "description": "The loops that build against a harness rubric: /orchestrate, /review-loop, /iterate and /skill-loop, the critic, scorer, optimizer and skill-improver agents, the loop-gate that checks every seat's output, the Pi develop-phase runner, and the optional TypeSafe Jev classifier (round-to-round finding dedupe and a per-prompt skill/model-tier router; off without a TYPESAFE_API_KEY)."
+    },
+    {
+      "name": "harness-guards",
+      "source": "./plugins/harness-guards",
+      "description": "Protect and observe any Claude Code session: write-time guards (destructive-command gate, secret scan, --no-verify block), a repeat-tool loop-hygiene reminder, loop telemetry, and /dashboard-harness and /session-review, a zero-token auditor read from the local transcripts that never leaves the machine."
     }
-  ]
+  ],
+  "description": "Three plugins for coding agents: diagnose a harness (harness-audit), build against it (harness-loops), protect and observe every session (harness-guards). Each installs alone."
 }

@@ -122,10 +122,10 @@ Also detect: package manager (`pnpm-lock.yaml` → pnpm, `yarn.lock` → yarn, `
 | Pre-commit hook | Hook framework installed | `test -f lefthook.yml` OR `.husky/` OR `.pre-commit-config.yaml` OR `pre-commit` in git hooks |
 | CI workflow | At least one CI pipeline runs preflight on PR | `ls .github/workflows/*.yml` or equivalent |
 | Self-improving loop | AGENTS.md/CLAUDE.md instructs reviewer to propose new rules | `grep -i "self.improv\|propose.*rule\|update.*agents.md" AGENTS.md CLAUDE.md 2>/dev/null` |
-| Secret-scan gate | A write-time or pre-commit check catches credential patterns (`sk-`, `ghp_`, `AKIA`, PEM blocks) before they land in tracked files | inspect hook config (`hooks/hooks.json`, lefthook, pre-commit) for a secret scanner — this plugin ships one (`secret-scan.js`) |
-| Destructive-command guard | Agent sessions cannot run `rm -rf` against root/home, `git checkout --force`, or `git clean -fdx` unchecked | inspect hook config for a Bash pre-execution guard — this plugin ships one (`destructive-guard.js`) |
-| No-verify blocked | `git commit/push --no-verify` is rejected, so the pre-commit gate cannot be silently bypassed | `grep -rE "no.?verify" hooks/ .husky/ lefthook.yml 2>/dev/null` — this plugin ships `block-no-verify.js` |
-| Loop-hygiene guard | A tool-call hook counts consecutive byte-identical calls (same tool, same canonical arguments) and injects an escalating reminder at 3/5/8 — advisory, never a deny, so a model stuck re-running the same grep is told so instead of burning the budget | inspect hook config for a repeat-call guard — this plugin ships `repeat-tool-guard.js` (PreToolUse, matcher `.*`) |
+| Secret-scan gate | A write-time or pre-commit check catches credential patterns (`sk-`, `ghp_`, `AKIA`, PEM blocks) before they land in tracked files | inspect hook config (`hooks/hooks.json`, lefthook, pre-commit) for a secret scanner — the `harness-guards` plugin ships one (`secret-scan.js`) |
+| Destructive-command guard | Agent sessions cannot run `rm -rf` against root/home, `git checkout --force`, or `git clean -fdx` unchecked | inspect hook config for a Bash pre-execution guard — the `harness-guards` plugin ships one (`destructive-guard.js`) |
+| No-verify blocked | `git commit/push --no-verify` is rejected, so the pre-commit gate cannot be silently bypassed | `grep -rE "no.?verify" hooks/ .husky/ lefthook.yml 2>/dev/null` — the `harness-guards` plugin ships `block-no-verify.js` |
+| Loop-hygiene guard | A tool-call hook counts consecutive byte-identical calls (same tool, same canonical arguments) and injects an escalating reminder at 3/5/8 — advisory, never a deny, so a model stuck re-running the same grep is told so instead of burning the budget | inspect hook config for a repeat-call guard — the `harness-guards` plugin ships `repeat-tool-guard.js` (PreToolUse, matcher `.*`) |
 
 #### Pillar 4 — Loop design (rubrics + continuous memory)
 
@@ -614,7 +614,7 @@ offers, not auto-fired mid-session.
 ```
 
 Retrospective visibility for all three levels — which loop fired, when, on what — comes free from
-`/dashboard-harness` (or `bin/loop-stats`); the announcement rule above gives it live, at dispatch time.
+`/dashboard-harness` (or `bin/loop-stats`), both in the `harness-guards` plugin; the announcement rule above gives it live, at dispatch time.
 
 **Critical zones by stack** (adapt to the stack detected in Step 1 — trigger B above):
 

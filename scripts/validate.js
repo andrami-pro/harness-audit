@@ -38,6 +38,18 @@ const walk = (dir) => {
     .flatMap((e) => (e.isDirectory() ? walk(path.join(dir, e.name)) : [path.join(dir, e.name)]))
     .sort();
 };
+// Three plugins in one marketplace (PRD-004 D1). Each installs alone, so each check reads the plugin that
+// ships the file; the helpers below read the shipped set across all three.
+const PLUGINS = ['harness-audit', 'harness-loops', 'harness-guards'];
+const LOOPS = 'plugins/harness-loops';
+const commandsMd = () => PLUGINS.flatMap((p) => globMd(`plugins/${p}/commands`)).sort();
+const agentsMd = () => PLUGINS.flatMap((p) => globMd(`plugins/${p}/agents`)).sort();
+const commandPath = (name) => commandsMd().find((f) => path.basename(f) === `${name}.md`) || `commands/${name}.md`;
+// Hook script paths are relative to the plugin that installs them (${CLAUDE_PLUGIN_ROOT}).
+const hookManifests = () => PLUGINS
+  .map((p) => `plugins/${p}/hooks/hooks.json`)
+  .filter((rel) => fs.existsSync(path.join(ROOT, rel)))
+  .map((rel) => ({ rel, dir: path.dirname(path.dirname(rel)), hooks: JSON.parse(read(rel)).hooks || {} }));
 const slugOfPath = (p) => p.replace(/[/.]/g, '-');
 const hasFrontmatterField = (rel, field) => {
   const s = read(rel);
@@ -47,41 +59,238 @@ const hasFrontmatterField = (rel, field) => {
   if (!new RegExp(`^${field}:[ \\t]*\\S`, 'm').test(fm)) throw new Error(`${rel} frontmatter missing ${field}`);
 };
 
-check('plugin.json valid + required fields', () => {
-  const p = JSON.parse(read('.claude-plugin/plugin.json'));
-  for (const f of ['name', 'description', 'version']) if (!p[f]) throw new Error(`missing field: ${f}`);
-  return `${p.name}@${p.version}`;
+check('every plugin.json valid + required fields', () => {
+  return PLUGINS.map((name) => {
+    const p = JSON.parse(read(`plugins/${name}/.claude-plugin/plugin.json`));
+    for (const f of ['name', 'description', 'version']) if (!p[f]) throw new Error(`plugins/${name}: missing field: ${f}`);
+    if (p.name !== name) throw new Error(`plugins/${name}/.claude-plugin/plugin.json names itself '${p.name}'`);
+    return `${p.name}@${p.version}`;
+  }).join(' · ');
 });
 
-check('marketplace.json valid + lists the plugin', () => {
+check('marketplace.json valid + lists the three plugins, each at its own folder', () => {
   const m = JSON.parse(read('.claude-plugin/marketplace.json'));
   if (!m.name) throw new Error('missing field: name');
-  if (!Array.isArray(m.plugins) || !m.plugins.some((p) => p.name === 'harness-audit')) {
-    throw new Error('plugins[] must include harness-audit');
+  const listed = (m.plugins || []).map((p) => `${p.name}=${p.source}`).sort();
+  const expected = PLUGINS.map((p) => `${p}=./plugins/${p}`).sort();
+  if (listed.join() !== expected.join()) throw new Error(`plugins[] is ${listed.join(', ')}; expected ${expected.join(', ')}`);
+  return listed.join(' · ');
+});
+
+// What each plugin ships, pinned. The union is exactly what the single plugin shipped at 2.9.0 — one
+// skill, six commands, seven agents, seven hook scripts — so the split moved files and dropped none.
+const SPLIT = {
+  'harness-audit': { skills: ['harness-audit'], commands: [], agents: [], hooks: [] },
+  'harness-loops': {
+    skills: [],
+    commands: ['iterate', 'orchestrate', 'review-loop', 'skill-loop'],
+    agents: ['correctness-critic', 'domain-critic', 'process-optimizer', 'safety-critic', 'scorer', 'skill-improver', 'style-critic'],
+    hooks: ['jev-nudge', 'prompt-router'],
+  },
+  'harness-guards': {
+    skills: [],
+    commands: ['dashboard-harness', 'session-review'],
+    agents: [],
+    hooks: ['block-no-verify', 'destructive-guard', 'loop-telemetry', 'repeat-tool-guard', 'secret-scan'],
+  },
+};
+// A module two plugins need ships in each of them, byte for byte; the first plugin listed holds the
+// copy you edit.
+const SHARED = {
+  'scripts/model-lineup.js': ['harness-audit', 'harness-loops', 'harness-guards'],
+  'scripts/skill-inventory.js': ['harness-guards', 'harness-loops'],
+};
+// model-lineup.js loads these only for its `advise` and `ui` subcommands, which only harness-audit's
+// bin/lineup and bin/lineup-advise call. The copies in the other plugins never reach them.
+const LAZY_REQUIRES = { 'model-lineup.js': new Set(['lineup-advise.js', 'lineup-ui.js']) };
+
+const listDir = (abs) => { try { return fs.readdirSync(abs, { withFileTypes: true }); } catch { return []; } };
+const walkAbs = (abs) => listDir(abs)
+  .flatMap((e) => (e.isDirectory() ? walkAbs(path.join(abs, e.name)) : [path.join(abs, e.name)]));
+
+function componentsOf(dir) {
+  const names = (sub, keep) => listDir(path.join(dir, sub)).filter(keep).map((e) => e.name.replace(/\.md$/, '')).sort();
+  const manifest = path.join(dir, 'hooks', 'hooks.json');
+  const hookText = fs.existsSync(manifest) ? fs.readFileSync(manifest, 'utf8') : '';
+  return {
+    skills: names('skills', (e) => e.isDirectory() && fs.existsSync(path.join(dir, 'skills', e.name, 'SKILL.md'))),
+    commands: names('commands', (e) => e.name.endsWith('.md')),
+    agents: names('agents', (e) => e.name.endsWith('.md')),
+    hooks: [...new Set((hookText.match(/scripts\/hooks\/[\w-]+\.js/g) || []).map((s) => path.basename(s, '.js')))].sort(),
+  };
+}
+
+const componentDiff = (dir, expected) => Object.keys(expected)
+  .filter((k) => componentsOf(dir)[k].join() !== expected[k].join())
+  .map((k) => `${k} = [${componentsOf(dir)[k].join(', ')}], expected [${expected[k].join(', ')}]`);
+
+// Installed, ${CLAUDE_PLUGIN_ROOT} is the plugin's own cache folder, and a sibling plugin's files are
+// not in it. So every path a plugin names — in its manifests and prose, its require() calls, its bin
+// wrappers — has to resolve inside its own folder.
+function selfContainmentProblems(dir) {
+  const problems = [];
+  const files = walkAbs(dir);
+  const relOf = (f) => path.relative(dir, f);
+  for (const f of files.filter((x) => /\.(md|json)$/.test(x))) {
+    for (const m of fs.readFileSync(f, 'utf8').matchAll(/\$\{CLAUDE_PLUGIN_ROOT(?::-[^}]*)?\}\/([\w./-]*\w)/g)) {
+      if (!fs.existsSync(path.join(dir, m[1]))) problems.push(`${relOf(f)} names \${CLAUDE_PLUGIN_ROOT}/${m[1]}, which this plugin does not ship`);
+    }
   }
+  for (const f of files.filter((x) => x.endsWith('.js'))) {
+    const t = fs.readFileSync(f, 'utf8');
+    const lazy = LAZY_REQUIRES[path.basename(f)] || new Set();
+    const targets = [
+      ...[...t.matchAll(/require\(\s*'(\.{1,2}\/[^']+)'\s*\)/g)].map((m) => m[1]),
+      ...[...t.matchAll(/join\(__dirname((?:\s*,\s*'[^']*')+)\s*\)/g)]
+        .map((m) => path.join(...m[1].split(',').map((s) => s.trim().replace(/^'|'$/g, '')).filter(Boolean))),
+    ];
+    for (const rel of targets) {
+      const abs = path.resolve(path.dirname(f), rel);
+      if ([abs, `${abs}.js`, `${abs}.json`].some((p) => fs.existsSync(p)) || lazy.has(path.basename(rel))) continue;
+      problems.push(`${relOf(f)} loads ${rel}, which this plugin does not ship`);
+    }
+    try { execFileSync('node', ['--check', f], { stdio: 'pipe' }); } catch { problems.push(`${relOf(f)} does not parse`); }
+  }
+  for (const e of listDir(path.join(dir, 'bin'))) {
+    const f = path.join(dir, 'bin', e.name);
+    for (const m of fs.readFileSync(f, 'utf8').matchAll(/\/\.\.\/scripts" && pwd\)\/([\w.-]+)/g)) {
+      if (!fs.existsSync(path.join(dir, 'scripts', m[1]))) problems.push(`${relOf(f)} runs scripts/${m[1]}, which this plugin does not ship`);
+    }
+  }
+  return problems;
+}
+
+// Every hook command, run exactly as hooks.json spells it, with ${CLAUDE_PLUGIN_ROOT} set to the plugin
+// folder and HOME set to a scratch dir (the telemetry hook writes under HOME, Jev reads its key there).
+const HOOK_PAYLOADS = {
+  PreToolUse: 'pre-tool-use-bash-desc-1.json',
+  UserPromptSubmit: 'user-prompt-submit.json',
+  SessionStart: 'session-start.json',
+  Stop: 'stop.json',
+  SubagentStop: 'subagent-stop.json',
+};
+function hookRunProblems(dir) {
+  const manifest = path.join(dir, 'hooks', 'hooks.json');
+  if (!fs.existsSync(manifest)) return [];
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-hookrun-'));
+  const env = { PATH: process.env.PATH, HOME: scratch, TMPDIR: scratch, CLAUDE_PLUGIN_ROOT: dir };
+  const problems = [];
+  for (const [event, entries] of Object.entries(JSON.parse(fs.readFileSync(manifest, 'utf8')).hooks || {})) {
+    const fixture = HOOK_PAYLOADS[event];
+    if (!fixture) { problems.push(`no payload fixture for ${event} — add one to HOOK_PAYLOADS`); continue; }
+    const input = fs.readFileSync(path.join(ROOT, 'scripts/fixtures/hooks', fixture), 'utf8');
+    for (const h of entries.flatMap((e) => e.hooks || [])) {
+      try {
+        execFileSync('sh', ['-c', h.command], { input, env, cwd: scratch, stdio: 'pipe', timeout: 15000 });
+      } catch (e) {
+        problems.push(`${event} \`${h.command}\` exited ${e.status}: ${String(e.stderr || '').trim().split('\n')[0]}`);
+      }
+    }
+  }
+  fs.rmSync(scratch, { recursive: true, force: true });
+  return problems;
+}
+
+function isolationReport(name, dir) {
+  const problems = [
+    ...componentDiff(dir, SPLIT[name]),
+    ...selfContainmentProblems(dir),
+    ...hookRunProblems(dir),
+  ];
+  if (problems.length) throw new Error(`${name} alone: ${problems.join(' · ')}`);
+  const c = componentsOf(dir);
+  return `${name}: ${c.skills.length}s/${c.commands.length}c/${c.agents.length}a/${c.hooks.length}h`;
+}
+
+// PRD-004 step 1: the split changes where files live, not what ships. Each plugin is copied ALONE into
+// an empty directory — the shape of its install cache — and must still resolve every path it names
+// and run every hook it installs.
+//
+// Negative controls (2026-10-10, each applied on a committed tree, observed, reverted — all exit 1):
+//   plugins/harness-loops/scripts/skill-inventory.js deleted ......................................
+//     "harness-loops alone: scripts/hooks/prompt-router.js loads ../skill-inventory.js, which this
+//      plugin does not ship"
+//   prompt-router.js pointed back at '../loop-stats.js' (the pre-split import) .....................
+//     "harness-loops alone: scripts/hooks/prompt-router.js loads ../loop-stats.js, which this plugin
+//      does not ship"
+//   agents/scorer.md moved from harness-loops to harness-guards ....................................
+//     "harness-loops alone: agents = [...], expected [...]"
+check('each plugin is self-contained: copied alone, every path it names resolves inside it and every hook runs', () => {
+  const union = { skills: [], commands: [], agents: [], hooks: [] };
+  const lines = PLUGINS.map((name) => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), `harness-alone-${name}-`));
+    const dir = path.join(tmp, name);
+    fs.cpSync(path.join(ROOT, 'plugins', name), dir, { recursive: true });
+    try {
+      for (const k of Object.keys(union)) union[k].push(...componentsOf(dir)[k]);
+      return isolationReport(name, dir);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+  const totals = Object.entries(union).map(([k, v]) => `${v.length} ${k}`).join(', ');
+  if (totals !== '1 skills, 6 commands, 7 agents, 7 hooks') throw new Error(`the three plugins ship ${totals}; 2.9.0 shipped 1 skills, 6 commands, 7 agents, 7 hooks`);
+  return `${lines.join(' · ')} — union ${totals}`;
+});
+
+check('a module two plugins need ships byte-identical in each of them', () => {
+  for (const [rel, [owner, ...copies]] of Object.entries(SHARED)) {
+    const canonical = read(`plugins/${owner}/${rel}`);
+    for (const p of copies) {
+      if (read(`plugins/${p}/${rel}`) !== canonical) {
+        throw new Error(`plugins/${p}/${rel} drifted from plugins/${owner}/${rel} — edit the ${owner} copy, then cp it over`);
+      }
+    }
+  }
+  return Object.entries(SHARED).map(([rel, ps]) => `${path.basename(rel)} ×${ps.length}`).join(' · ');
+});
+
+// The same claim through the real installer: `claude plugin install` into a throwaway
+// CLAUDE_CONFIG_DIR, one plugin at a time, then the isolation report over the copy it installed.
+// It never touches ~/.claude. Without the CLI it is unrun, never green.
+check('each plugin installs ALONE through `claude plugin install` and its installed copy is self-contained', () => {
+  try { execFileSync('claude', ['--version'], { stdio: 'pipe', timeout: 30000 }); }
+  catch { skip('no `claude` CLI on PATH — the copied-alone check above still ran'); }
+  return PLUGINS.map((name) => {
+    const cfg = fs.mkdtempSync(path.join(os.tmpdir(), `harness-install-${name}-`));
+    const run = (args) => execFileSync('claude', args, {
+      env: { ...process.env, CLAUDE_CONFIG_DIR: cfg }, stdio: 'pipe', encoding: 'utf8', timeout: 120000,
+    });
+    try {
+      run(['plugin', 'marketplace', 'add', ROOT]);
+      run(['plugin', 'install', `${name}@harness-audit`]);
+      const installed = JSON.parse(run(['plugin', 'list', '--json']));
+      if (installed.length !== 1 || installed[0].id !== `${name}@harness-audit`) {
+        throw new Error(`installing ${name} left [${installed.map((p) => p.id).join(', ')}] installed`);
+      }
+      return isolationReport(name, installed[0].installPath);
+    } finally {
+      fs.rmSync(cfg, { recursive: true, force: true });
+    }
+  }).join(' · ');
 });
 
 check('SKILL.md exists with name + description frontmatter', () => {
-  hasFrontmatterField('skills/harness-audit/SKILL.md', 'name');
-  hasFrontmatterField('skills/harness-audit/SKILL.md', 'description');
+  hasFrontmatterField('plugins/harness-audit/skills/harness-audit/SKILL.md', 'name');
+  hasFrontmatterField('plugins/harness-audit/skills/harness-audit/SKILL.md', 'description');
 });
 
 check('companion templates present', () => {
-  mustExist('skills/harness-audit/rubric-template.md');
-  mustExist('skills/harness-audit/verifier-protocol.md');
+  mustExist('plugins/harness-audit/skills/harness-audit/rubric-template.md');
+  mustExist('plugins/harness-audit/skills/harness-audit/verifier-protocol.md');
   mustExist('WHITEPAPER.md');
   mustExist('README.md');
   mustExist('LICENSE');
 });
 
 check('verifier-protocol has the negative-control self-test', () => {
-  if (!/negative control|negative-control/i.test(read('skills/harness-audit/verifier-protocol.md'))) {
+  if (!/negative control|negative-control/i.test(read('plugins/harness-audit/skills/harness-audit/verifier-protocol.md'))) {
     throw new Error('missing negative-control section (v2 requirement)');
   }
 });
 
 check('no stale model lineup (Haiku must not be the preflight tier)', () => {
-  const files = ['skills/harness-audit/SKILL.md', 'WHITEPAPER.md', 'README.md', ...globMd('commands'), ...globMd('agents')];
+  const files = ['plugins/harness-audit/skills/harness-audit/SKILL.md', 'WHITEPAPER.md', 'README.md', ...commandsMd(), ...agentsMd()];
   for (const rel of files) {
     const hits = read(rel).split('\n')
       .map((l, i) => ({ l, n: i + 1 }))
@@ -92,7 +301,7 @@ check('no stale model lineup (Haiku must not be the preflight tier)', () => {
 });
 
 check('benchmark figures are hedged, not asserted', () => {
-  const files = ['skills/harness-audit/SKILL.md', 'WHITEPAPER.md', ...globMd('commands'), ...globMd('agents')];
+  const files = ['plugins/harness-audit/skills/harness-audit/SKILL.md', 'WHITEPAPER.md', ...commandsMd(), ...agentsMd()];
   for (const rel of files) {
     const t = read(rel);
     if (/89\s*%/.test(t) && !/directional|illustrative|not (yet )?(independently )?reproduced/i.test(t)) {
@@ -103,14 +312,14 @@ check('benchmark figures are hedged, not asserted', () => {
 });
 
 check('every commands/*.md has a frontmatter description', () => {
-  const files = globMd('commands');
+  const files = commandsMd();
   if (!files.length) throw new Error('commands/ is empty — the plugin ships no loop');
   for (const rel of files) hasFrontmatterField(rel, 'description');
   return `${files.length} command(s) checked`;
 });
 
 check('every agents/*.md has a frontmatter description', () => {
-  const files = globMd('agents');
+  const files = agentsMd();
   if (!files.length) throw new Error('agents/ is empty — the plugin ships no critics');
   for (const rel of files) hasFrontmatterField(rel, 'description');
   return `${files.length} agent(s) checked`;
@@ -125,7 +334,7 @@ check('every agents/*.md has a frontmatter description', () => {
 // Negative control (2026-07-13, reverted): quotes stripped from commands/orchestrate.md's description
 // — exit 1, "commands/orchestrate.md: 'description' is an unquoted YAML scalar containing ': '".
 check('every frontmatter survives a STRICT YAML parser (GitHub, Pi), not just a lenient one', () => {
-  const files = [...globMd('commands'), ...globMd('agents')];
+  const files = [...commandsMd(), ...agentsMd()];
   if (!files.length) throw new Error('nothing scanned — the gate would pass vacuously');
   for (const rel of files) {
     const m = /^---\n([\s\S]*?)\n---/.exec(read(rel));
@@ -158,7 +367,7 @@ check('every frontmatter survives a STRICT YAML parser (GitHub, Pi), not just a 
 // exit 1, "commands/iterate.md frontmatter missing argument-hint"; an extra command copied in —
 // exit 1, "commands/*.md = 7, expected exactly 6" (2026-09-06, reverted).
 check('exactly 6 commands — 5 loops and 1 observer — each with description + argument-hint', () => {
-  const files = globMd('commands');
+  const files = commandsMd();
   if (files.length !== 6) throw new Error(`commands/*.md = ${files.length}, expected exactly 6`);
   for (const rel of files) {
     hasFrontmatterField(rel, 'description');
@@ -224,7 +433,7 @@ check('no private contract leaks in commands/, agents/, benchmarks/, scripts/, d
   // the exact failure this repo keeps finding: absence of evidence read as evidence of absence.
   if (!leaks) skip('no private-terms.json — nothing was scanned (copy private-terms.example.json to enable)');
   if (!leaks.length) throw new Error('private-terms.json has no terms — the gate would pass vacuously');
-  const files = [...walk('commands'), ...walk('agents'), ...walk('benchmarks'), ...walk('scripts'), ...walk('docs'), ...walk('skills')];
+  const files = [...walk('plugins'), ...walk('benchmarks'), ...walk('scripts'), ...walk('docs')];
   if (!files.length) throw new Error('nothing scanned — the gate would pass vacuously');
   for (const rel of files) {
     read(rel).split('\n').forEach((line, i) => {
@@ -236,15 +445,15 @@ check('no private contract leaks in commands/, agents/, benchmarks/, scripts/, d
   return `${files.length} files scanned against ${leaks.length} private term(s)`;
 });
 
-check('hooks.json valid + every referenced script exists and parses', () => {
-  const h = JSON.parse(read('hooks/hooks.json'));
-  const cmds = JSON.stringify(h).match(/scripts\/hooks\/[\w-]+\.js/g) || [];
-  if (cmds.length < 3) throw new Error(`expected ≥3 hook scripts referenced, found ${cmds.length}`);
-  for (const rel of new Set(cmds)) {
+check('every hooks.json valid + every referenced script exists in its own plugin and parses', () => {
+  const rels = hookManifests().flatMap(({ dir, hooks }) => (JSON.stringify(hooks).match(/scripts\/hooks\/[\w-]+\.js/g) || [])
+    .map((s) => path.join(dir, s)));
+  if (rels.length < 3) throw new Error(`expected ≥3 hook scripts referenced, found ${rels.length}`);
+  for (const rel of new Set(rels)) {
     mustExist(rel);
     execFileSync('node', ['--check', path.join(ROOT, rel)], { stdio: 'pipe' });
   }
-  return `${new Set(cmds).size} scripts`;
+  return `${new Set(rels).size} scripts across ${hookManifests().length} manifests`;
 });
 
 // hooks.json is the only place a guard is installed and the README table is the only place a user
@@ -260,7 +469,10 @@ check('hooks.json valid + every referenced script exists and parses', () => {
 //   "four guards that run on every session" reverted to "three" ....................................
 //     "README's install sentence does not count four guards — hooks.json installs 4"
 check('README discloses every PreToolUse guard hooks.json installs', () => {
-  const h = JSON.parse(read('hooks/hooks.json'));
+  const h = { hooks: {} };
+  for (const { hooks } of hookManifests()) {
+    for (const [event, entries] of Object.entries(hooks)) h.hooks[event] = [...(h.hooks[event] || []), ...entries];
+  }
   const scriptsOf = (event) => (h.hooks[event] || []).flatMap((g) => g.hooks.map((x) => {
     const m = /scripts\/hooks\/([\w-]+)\.js/.exec(x.command);
     return m ? m[1] : null;
@@ -306,8 +518,8 @@ check('README discloses every PreToolUse guard hooks.json installs', () => {
 //   agentType stamped as p.agent_type ?? 'unknown' .. "Stop line carries agentType — an absent agent
 //                                                      type is a fact, not a hole to fill"
 check('loop-telemetry hook emits a schema-valid ndjson line', () => {
-  const script = path.join(ROOT, 'scripts/hooks/loop-telemetry.js');
-  mustExist('scripts/hooks/loop-telemetry.js');
+  const script = path.join(ROOT, 'plugins/harness-guards/scripts/hooks/loop-telemetry.js');
+  mustExist('plugins/harness-guards/scripts/hooks/loop-telemetry.js');
   execFileSync('node', ['--check', script], { stdio: 'pipe' });
 
   const out = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'loop-telemetry-')), 'telemetry.ndjson');
@@ -365,8 +577,8 @@ check('loop-telemetry hook emits a schema-valid ndjson line', () => {
 //      the call" — this one was found live before it was a control: the first real session ran the
 //     same grep three times with three descriptions and the guard stayed silent.
 check('repeat-tool-guard emits additionalContext at run 3 and 5, not at 2 or 4, and never a permissionDecision', () => {
-  const script = path.join(ROOT, 'scripts/hooks/repeat-tool-guard.js');
-  mustExist('scripts/hooks/repeat-tool-guard.js');
+  const script = path.join(ROOT, 'plugins/harness-guards/scripts/hooks/repeat-tool-guard.js');
+  mustExist('plugins/harness-guards/scripts/hooks/repeat-tool-guard.js');
   execFileSync('node', ['--check', script], { stdio: 'pipe' });
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'repeat-tool-guard-'));
   const fire = (input) => execFileSync('node', [script], {
@@ -440,8 +652,8 @@ check('install.sh parses (sh -n)', () => {
 //   journal agentId → agent_id ............... totals.runs = 5, expected 8
 //   workflowProgress label → "" .............. workflow agent join lost
 check('loop-stats reconstructs the pinned telemetry fixture', () => {
-  const script = path.join(ROOT, 'scripts/loop-stats.js');
-  mustExist('scripts/loop-stats.js');
+  const script = path.join(ROOT, 'plugins/harness-guards/scripts/loop-stats.js');
+  mustExist('plugins/harness-guards/scripts/loop-stats.js');
   execFileSync('node', ['--check', script], { stdio: 'pipe' });
 
   const raw = execFileSync('node', [script, '--root', path.join(ROOT, 'scripts/fixtures/telemetry'),
@@ -488,7 +700,7 @@ check('loop-stats reconstructs the pinned telemetry fixture', () => {
 // of skipping the one line: `loop-stats: Unterminated string in JSON at position 169 (line 1 column 170)`,
 // exit 1 — and this check fails with it. Reverted (2026-07-12).
 check('loop-stats degrades gracefully on the broken telemetry fixture', () => {
-  const script = path.join(ROOT, 'scripts/loop-stats.js');
+  const script = path.join(ROOT, 'plugins/harness-guards/scripts/loop-stats.js');
   const raw = execFileSync('node', [script, '--root', path.join(ROOT, 'scripts/fixtures/telemetry'),
     '--project', 'demo-broken', '--json'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
   const d = JSON.parse(raw);
@@ -509,7 +721,7 @@ check('loop-stats degrades gracefully on the broken telemetry fixture', () => {
 //   realpathSync dropped from slugCandidates .... symlinked-path candidates = 1, expected 2
 //   candidate loop replaced by args.project ..... path form throws "no telemetry under ..."
 check('loop-stats resolves --project from a slug, a path and a symlinked path', () => {
-  const script = path.join(ROOT, 'scripts/loop-stats.js');
+  const script = path.join(ROOT, 'plugins/harness-guards/scripts/loop-stats.js');
   const { slugCandidates } = require(script);
 
   const plain = slugCandidates('/workspace/demo');
@@ -550,7 +762,7 @@ check('loop-stats resolves --project from a slug, a path and a symlinked path', 
 // Negative control (2026-09-06, applied, observed, reverted): --from-json branch removed from main()
 // so the flag fell through to a live aggregate — exit 1, "no telemetry under ... tried: -tmp-...".
 check('loop-stats round-trips its aggregate through --json-out / --from-json', () => {
-  const script = path.join(ROOT, 'scripts/loop-stats.js');
+  const script = path.join(ROOT, 'plugins/harness-guards/scripts/loop-stats.js');
   const root = path.join(ROOT, 'scripts/fixtures/telemetry');
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-json-'));
   const out = path.join(tmp, 'demo.json');
@@ -583,7 +795,7 @@ check('loop-stats round-trips its aggregate through --json-out / --from-json', (
 //   Task-only spawn lookup (the pre-P0 code) ............... reviewer row absent — agent lands as "subagent"
 //   hook attachments keyed per record instead of per toolUseID  otherHooks[0].runs = 3, expected 2
 check('loop-stats mines tools, guards and hygiene from the signals fixture', () => {
-  const script = path.join(ROOT, 'scripts/loop-stats.js');
+  const script = path.join(ROOT, 'plugins/harness-guards/scripts/loop-stats.js');
   const raw = execFileSync('node', [script, '--root', path.join(ROOT, 'scripts/fixtures/telemetry'),
     '--project', 'demo-signals', '--json'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
   const d = JSON.parse(raw);
@@ -665,7 +877,7 @@ check('loop-stats mines tools, guards and hygiene from the signals fixture', () 
 //   parseReviewCards regex loosened to /^▸/ ........... 5 cards parsed from a 4-card report
 //   usedNotInstalled counting typed /names again ...... usedNotInstalled = [model], expected []
 check('loop-stats reads the skill inventory, the review lifecycle, and fires cards only on evidence', () => {
-  const script = path.join(ROOT, 'scripts/loop-stats.js');
+  const script = path.join(ROOT, 'plugins/harness-guards/scripts/loop-stats.js');
   const root = path.join(ROOT, 'scripts/fixtures/telemetry');
   const repo = path.join(ROOT, 'scripts/fixtures/repo');
   const emptyHome = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-home-'));
@@ -757,7 +969,7 @@ check('loop-stats reads the skill inventory, the review lifecycle, and fires car
 //   disable-model-invocation removed ...................... "must be manual-only"
 //   a Read of a .jsonl added to the body .................. "must not read transcripts itself"
 check('dashboard-harness runs the script and never parses transcripts itself', () => {
-  const rel = 'commands/dashboard-harness.md';
+  const rel = commandPath('dashboard-harness');
   mustExist(rel);
   hasFrontmatterField(rel, 'description');
   hasFrontmatterField(rel, 'argument-hint');
@@ -800,7 +1012,7 @@ check('dashboard-harness runs the script and never parses transcripts itself', (
 //   'agents' added to BRIEF_KEYS ............................... brief carries the accounting again
 //   --repo forwarded into each project of --all ................ every project reports one repo's cards
 check('loop-stats aggregates every project under --all, and --brief withholds the accounting', () => {
-  const script = path.join(ROOT, 'scripts/loop-stats.js');
+  const script = path.join(ROOT, 'plugins/harness-guards/scripts/loop-stats.js');
   const root = path.join(ROOT, 'scripts/fixtures/telemetry');
   const emptyHome = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-all-'));
   const run = (args) => JSON.parse(execFileSync('node', [script, ...args], {
@@ -843,7 +1055,7 @@ check('loop-stats aggregates every project under --all, and --brief withholds th
   }
 
   // The card line format is a parser contract, and the command has to keep writing it.
-  const cmd = read('commands/session-review.md');
+  const cmd = read(commandPath('session-review'));
   // The flag has to be on the invocation, not merely explained in the prose next to it.
   const invocation = (cmd.match(/^.*loop-stats\.js.*$/m) || [''])[0];
   if (!/--brief/.test(invocation)) throw new Error('/session-review must pass --brief on the command line — without it the loop pays for the accounting too');
@@ -885,8 +1097,8 @@ check('loop-stats aggregates every project under --all, and --brief withholds th
 //     claude-3-5-sonnet-20241022 resolved to family "claude-3-5-sonnet" ≠ "claude-sonnet",
 //     resolve exited 0 → "…(invalid-legacy-id.json) — the independence property (D25a) did not fire"
 check('model-lineup.js rejects same-family reviewer/implementer fixtures', () => {
-  const script = path.join(ROOT, 'scripts/model-lineup.js');
-  mustExist('scripts/model-lineup.js');
+  const script = path.join(ROOT, 'plugins/harness-audit/scripts/model-lineup.js');
+  mustExist('plugins/harness-audit/scripts/model-lineup.js');
   execFileSync('node', ['--check', script], { stdio: 'pipe' });
 
   execFileSync('node', [script, 'resolve', '--target', 'claude',
@@ -924,7 +1136,7 @@ check('model-lineup.js rejects same-family reviewer/implementer fixtures', () =>
 //   catalogProblems() skipping entries whose provider is unknown ..................................
 //     nvidia-nim/zai/glm-5.2 passed silently, exit 0 → "check accepted a model no catalog serves".
 check('model-lineup.js check catches a lineup naming a model no provider serves', () => {
-  const script = path.join(ROOT, 'scripts/model-lineup.js');
+  const script = path.join(ROOT, 'plugins/harness-audit/scripts/model-lineup.js');
   const catalog = path.join(ROOT, 'scripts/fixtures/lineup/catalog-pi.txt');
   mustExist('scripts/fixtures/lineup/catalog-pi.txt');
   mustExist('scripts/fixtures/lineup/invalid-catalog-miss.json');
@@ -963,9 +1175,9 @@ check('model-lineup.js check catches a lineup naming a model no provider serves'
 //   paint() always returning the escape wrapper ........ the piped matrix carried \x1b[2m around every
 //     cell → "static output must be pipe-safe" fired.
 check('lineup-ui prints and validates the matrix without a TTY', () => {
-  const script = path.join(ROOT, 'scripts/lineup-ui.js');
-  mustExist('scripts/lineup-ui.js');
-  mustExist('bin/lineup');
+  const script = path.join(ROOT, 'plugins/harness-audit/scripts/lineup-ui.js');
+  mustExist('plugins/harness-audit/scripts/lineup-ui.js');
+  mustExist('plugins/harness-audit/bin/lineup');
   execFileSync('node', ['--check', script], { stdio: 'pipe' });
 
   const catalog = path.join(ROOT, 'scripts/fixtures/lineup/catalog-pi.txt');
@@ -1013,10 +1225,10 @@ check('lineup-ui prints and validates the matrix without a TTY', () => {
 //   `excludeFamily` not passed for reviewer → reviewer top-1 = kimi-k3 = implementer top-1 → D25a check
 //     fired.
 check('lineup-advise produces a report from pinned fixtures and honours privacy + D25a', () => {
-  const script = path.join(ROOT, 'scripts/lineup-advise.js');
+  const script = path.join(ROOT, 'plugins/harness-audit/scripts/lineup-advise.js');
   const fixtures = path.join(ROOT, 'scripts/fixtures/advise');
-  mustExist('scripts/lineup-advise.js');
-  mustExist('scripts/lineup-aliases.json');
+  mustExist('plugins/harness-audit/scripts/lineup-advise.js');
+  mustExist('plugins/harness-audit/scripts/lineup-aliases.json');
   for (const f of ['aa', 'lmarena', 'swebench', 'openrouter', 'pi']) mustExist(`scripts/fixtures/advise/${f}-2026-08-25.json`);
   execFileSync('node', ['--check', script], { stdio: 'pipe' });
 
@@ -1036,7 +1248,7 @@ check('lineup-advise produces a report from pinned fixtures and honours privacy 
   // would otherwise drop the assertion with it and the check would pass for the wrong reason (it did,
   // the first time).
   const CODE_FACING = new Set(['architect', 'orchestrator', 'implementer', 'reviewer', 'critic']);
-  const { familyOf } = require(path.join(ROOT, 'scripts/model-lineup.js'));
+  const { familyOf } = require(path.join(ROOT, 'plugins/harness-audit/scripts/model-lineup.js'));
   for (const [role, list] of Object.entries(json.suggestions)) {
     for (const s of list) {
       if (s.id.endsWith(':batch')) throw new Error(`${role}: a :batch endpoint was offered (${s.id})`);
@@ -1077,7 +1289,7 @@ check("README documents the default model line-up and why `model:` can't just be
   const section = t.split(/## The default model line-up[^\n]*\n/i)[1].split(/\n## /)[0];
 
   const tiers = new Set();
-  for (const rel of globMd('agents')) {
+  for (const rel of agentsMd()) {
     const m = /^model:\s*(\S+)/m.exec(read(rel).split('---')[1] || '');
     if (m) tiers.add(m[1]);
   }
@@ -1088,7 +1300,7 @@ check("README documents the default model line-up and why `model:` can't just be
     }
   }
 
-  const { hardViolation } = require(path.join(ROOT, 'scripts/model-lineup.js'));
+  const { hardViolation } = require(path.join(ROOT, 'plugins/harness-audit/scripts/model-lineup.js'));
   const sameFamily = {
     reviewer: { model: 'claude-sonnet-4-5', family: 'claude-sonnet' },
     implementer: { model: 'claude-sonnet-4-5', family: 'claude-sonnet' },
@@ -1160,7 +1372,7 @@ check("README documents the default model line-up and why `model:` can't just be
 //     "a present ledger this parser cannot read is reported as absent: 'PREDICT no process-log.md —
 //      /iterate has never run here'"
 check('loop-stats scores the savings fixture from the ledger, not the prose', () => {
-  const script = path.join(ROOT, 'scripts/loop-stats.js');
+  const script = path.join(ROOT, 'plugins/harness-guards/scripts/loop-stats.js');
   const stats = (repo, ...flags) => execFileSync('node', [script,
     '--root', path.join(ROOT, 'scripts/fixtures/telemetry'), '--project', 'demo', '--repo', repo, ...flags],
   { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
@@ -1288,13 +1500,13 @@ check('loop-stats scores the savings fixture from the ledger, not the prose', ()
 check('every loop command produces the v2 schema the dashboard reads', () => {
   const V2 = ['startedAt', 'endedAt', 'tokens'];
   for (const cmd of ['orchestrate', 'iterate', 'review-loop', 'skill-loop']) {
-    const src = read(`commands/${cmd}.md`);
+    const src = read(commandPath(cmd));
     const missing = V2.filter((f) => !src.includes(`"${f}"`));
     if (missing.length) {
       throw new Error(`${cmd} writes a loop-runs JSON but never instructs the v2 round field(s): ${missing.join(', ')}`);
     }
   }
-  const ab = read('commands/skill-loop.md');
+  const ab = read(commandPath('skill-loop'));
   if (!ab.includes('"armTokens"') || !/withSkill[\s\S]{0,120}withoutSkill/.test(ab)) {
     throw new Error('skill-loop must instruct armTokens: the Δ tokens row of loop-stats has no other producer');
   }
@@ -1357,7 +1569,7 @@ check('port-loops.js transforms every real command/agent into valid target front
   const OC_PERMISSION_KEYS = new Set(['read', 'edit', 'glob', 'grep', 'list', 'bash', 'task',
     'external_directory', 'todowrite', 'webfetch', 'websearch', 'lsp', 'skill', 'question', 'doom_loop']);
 
-  for (const rel of globMd('commands')) {
+  for (const rel of commandsMd()) {
     const { fm, body } = port.parseFrontmatter(read(rel));
     const { fm: out } = port.transformCommandOpenCodeKilo(fm);
     const description = out.find(([k]) => k === 'description');
@@ -1387,7 +1599,7 @@ check('port-loops.js transforms every real command/agent into valid target front
     }
   }
 
-  for (const rel of globMd('agents')) {
+  for (const rel of agentsMd()) {
     const { fm } = port.parseFrontmatter(read(rel));
 
     const { fm: ocOut } = port.transformAgentOpenCodeKilo(fm);
@@ -1421,7 +1633,7 @@ check('port-loops.js transforms every real command/agent into valid target front
   } catch (e) { piThrew = /missing name/.test(e.message); }
   if (!piThrew) throw new Error('transformAgentPi accepted a fixture with no name field');
 
-  return `${globMd('commands').length} command(s) + ${globMd('agents').length} agent(s) round-tripped through opencode/kilo + pi`;
+  return `${commandsMd().length} command(s) + ${agentsMd().length} agent(s) round-tripped through opencode/kilo + pi`;
 });
 
 // Every capability the port DESTROYS has to be named in the README, because the README is the only
@@ -1472,7 +1684,7 @@ check('README discloses every guardrail the port destroys', () => {
   // What the transform actually destroys, asked of the transform itself rather than assumed here: a
   // future field silently added to the drop list fails this check until the README names it too.
   const cmdDrops = new Set();
-  for (const rel of globMd('commands')) {
+  for (const rel of commandsMd()) {
     port.transformCommandOpenCodeKilo(port.parseFrontmatter(read(rel)).fm).dropped.forEach((d) => cmdDrops.add(d));
   }
   if (!cmdDrops.has('disable-model-invocation')) {
@@ -1499,7 +1711,7 @@ check('README discloses every guardrail the port destroys', () => {
   // Command frontmatter never carries `model:` (verified against the transform itself, not assumed) —
   // the caveat is about the 7 ported AGENTS, and it has to say so for Pi specifically, not just for
   // OpenCode/Kilo Code.
-  for (const rel of globMd('commands')) {
+  for (const rel of commandsMd()) {
     if (port.transformCommandPi(port.parseFrontmatter(read(rel)).fm, port.parseFrontmatter(read(rel)).body).fm.some(([k]) => k === 'model')) {
       throw new Error(`${rel}: pi-ported command now carries a model: field — the README's "no commands carry model:" claim is stale`);
     }
@@ -1518,7 +1730,7 @@ check('README discloses every guardrail the port destroys', () => {
   }
 
   // The fact seat losing its only route to facts is a caveat, not a footnote.
-  const piDrops = port.transformAgentPi(port.parseFrontmatter(read('agents/correctness-critic.md')).fm).dropped;
+  const piDrops = port.transformAgentPi(port.parseFrontmatter(read(`${LOOPS}/agents/correctness-critic.md`)).fm).dropped;
   if (piDrops.includes('WebSearch') && !/correctness-critic[\s\S]{0,300}WebSearch/i.test(compat)) {
     throw new Error('README never discloses that correctness-critic loses WebSearch on Pi');
   }
@@ -1554,7 +1766,7 @@ check("install.sh --target pi installs templates Pi can actually load", () => {
 
   const promptDir = path.join(clean, '.pi/prompts');
   const promptFiles = fs.existsSync(promptDir) ? fs.readdirSync(promptDir).filter((f) => f.endsWith('.md')).sort() : [];
-  const expected = globMd('commands').map((f) => path.basename(f))
+  const expected = commandsMd().map((f) => path.basename(f))
     .filter((f) => !port.PI_UNPORTABLE_COMMANDS.has(path.basename(f, '.md'))).sort();
   if (promptFiles.length !== expected.length) {
     throw new Error(`install.sh --target pi wrote ${promptFiles.length} prompt template(s), expected ${expected.length} — session-review shells out to \${CLAUDE_PLUGIN_ROOT}/scripts/loop-stats.js and cannot run on Pi`);
@@ -1609,8 +1821,8 @@ check("install.sh --target pi installs templates Pi can actually load", () => {
 //   the `applies: false with no evidence` rule struck from checkScorecard .........................
 //     "the gate lets an unjustified applies:false through — the one exit a criterion has" (as predicted)
 check('loop-gate refuses malformed seat output and computes the gate arithmetic', () => {
-  const script = path.join(ROOT, 'scripts/loop-gate.js');
-  mustExist('scripts/loop-gate.js');
+  const script = path.join(ROOT, 'plugins/harness-loops/scripts/loop-gate.js');
+  mustExist('plugins/harness-loops/scripts/loop-gate.js');
   execFileSync('node', ['--check', script], { stdio: 'pipe' });
 
   const run = (args) => {
@@ -1703,7 +1915,7 @@ check('loop-gate refuses malformed seat output and computes the gate arithmetic'
 //      gate reached two loops that install.sh copies WITHOUT scripts/, and nothing said so.
 check('the panel and build loops actually run their seats through loop-gate', () => {
   for (const cmd of ['orchestrate', 'review-loop', 'iterate']) {
-    const src = read(`commands/${cmd}.md`);
+    const src = read(commandPath(cmd));
     if (!/loop-gate\.js" check-findings/.test(src)) {
       throw new Error(`${cmd} dispatches seats but never gates their JSON — loop-gate.js check-findings has no producer`);
     }
@@ -1763,7 +1975,7 @@ check('the panel and build loops actually run their seats through loop-gate', ()
 //     "iterate never records the builder's handoff in its run JSON — the gate checks a field no loop
 //      writes"
 check('loop-gate check-handoff refuses a malformed handoff and accepts a complete one', () => {
-  const script = path.join(ROOT, 'scripts/loop-gate.js');
+  const script = path.join(ROOT, 'plugins/harness-loops/scripts/loop-gate.js');
   const gate = require(script);
   const run = (fixture, seat) => {
     try {
@@ -1791,7 +2003,7 @@ check('loop-gate check-handoff refuses a malformed handoff and accepts a complet
   if (!gate.checkHandoff({ status: 'continue', summary: 'x', evidence: 'y' }).length) throw new Error('checkHandoff accepted evidence as a bare string');
 
   // The field has to have a producer, or the gate checks a shape no loop ever writes.
-  if (!/"handoff"/.test(read('commands/iterate.md'))) {
+  if (!/"handoff"/.test(read(commandPath('iterate')))) {
     throw new Error('iterate never records the builder\'s handoff in its run JSON — the gate checks a field no loop writes');
   }
   return 'valid + aggregate accepted; 4 defect classes refused with self-repairable errors';
@@ -1811,8 +2023,8 @@ check('loop-gate check-handoff refuses a malformed handoff and accepts a complet
 //   the empty-manifest refusal removed ...............................................................
 //     "empty.json: exit 0, expected 2 — a manifest that budgets nothing passed"
 check('check-doc-budgets exits 1 over budget, 0 within, 2 with no manifest', () => {
-  const script = path.join(ROOT, 'scripts/check-doc-budgets.js');
-  mustExist('scripts/check-doc-budgets.js');
+  const script = path.join(ROOT, 'plugins/harness-audit/scripts/check-doc-budgets.js');
+  mustExist('plugins/harness-audit/scripts/check-doc-budgets.js');
   execFileSync('node', ['--check', script], { stdio: 'pipe' });
   const root = path.join(ROOT, 'scripts/fixtures/doc-budgets');
   const run = (manifest) => {
@@ -1848,8 +2060,8 @@ check('check-doc-budgets exits 1 over budget, 0 within, 2 with no manifest', () 
 //   ⚠ removed from the ADR row in SKILL.md ...........................................................
 //     "SKILL.md's ADR-lifecycle row is not flagged ⚠ aspirational"
 check('rubric-template and SKILL.md both carry the four Pillar-4 criteria, and the ADR/postmortem rows are flagged aspirational', () => {
-  const rubric = read('skills/harness-audit/rubric-template.md');
-  const skill = read('skills/harness-audit/SKILL.md');
+  const rubric = read('plugins/harness-audit/skills/harness-audit/rubric-template.md');
+  const skill = read('plugins/harness-audit/skills/harness-audit/SKILL.md');
   const markers = ['Alternatives considered', 'why the safety nets missed it', 'check-doc-budgets.js', 'proven by mutation'];
   for (const m of markers) {
     if (!rubric.includes(m)) throw new Error(`rubric-template.md lacks the criterion marker '${m}'`);
@@ -1995,7 +2207,7 @@ check('install.sh --lineup stamps the project roles and never clobbers a customi
   if (impl !== 'opus') throw new Error(`implementer.md kept model: ${impl} — the stamper skipped the role D25a is about`);
   if (!rev) throw new Error('reviewer.md lost its model: line');
   // The property, not the literal: whatever the line-up resolves to, these two may never be the same.
-  const { familyOf } = require(path.join(ROOT, 'scripts/model-lineup.js'));
+  const { familyOf } = require(path.join(ROOT, 'plugins/harness-audit/scripts/model-lineup.js'));
   const ALIAS = { fable: 'claude-fable-5', opus: 'claude-opus-5', sonnet: 'claude-sonnet-5', haiku: 'claude-haiku-4-5-20251001' };
   const famOf = (a) => familyOf({ model: ALIAS[a] || a });
   if (famOf(impl) === famOf(rev)) {
@@ -2031,8 +2243,8 @@ const runNode = (args, env, input) => {
 //   readKey() stops honouring the `off` sentinel in secrets.env ....................................
 //     "TYPESAFE_API_KEY=off in secrets.env did not pause the client"
 check('jev client is a no-op without a key, reads the secrets file, and honours JEV_MOCK_FILE', () => {
-  mustExist('scripts/jev.js');
-  const script = path.join(ROOT, 'scripts/jev.js');
+  mustExist('plugins/harness-loops/scripts/jev.js');
+  const script = path.join(ROOT, 'plugins/harness-loops/scripts/jev.js');
   execFileSync('node', ['--check', script], { stdio: 'pipe' });
   const probe = (env) => runNode(['-e', `
     const j = require(${JSON.stringify(script)});
@@ -2063,7 +2275,7 @@ check('jev client is a no-op without a key, reads the secrets file, and honours 
 //     "mock NEW line wrong — a blocker at p=0.90 must stay new" — and the eval check went red with it,
 //     because the eval reads the same constant instead of keeping its own copy.
 check('loop-gate dedupe counts NEW arithmetically, never hides a blocker, and degrades to exact-only', () => {
-  const script = path.join(ROOT, 'scripts/loop-gate.js');
+  const script = path.join(ROOT, 'plugins/harness-loops/scripts/loop-gate.js');
   const prev = path.join(ROOT, 'scripts/fixtures/findings/dedupe-prev.json');
   const cur = path.join(ROOT, 'scripts/fixtures/findings/dedupe-current.json');
   const off = runNode([script, 'dedupe', prev, cur], jevEnv().env);
@@ -2096,8 +2308,8 @@ check('loop-gate dedupe counts NEW arithmetically, never hides a blocker, and de
 //   the router's race timer lifted from BUDGET_MS to 5000 ..........................................
 //     "a slow API held the prompt for 4040ms — the budget is 1500"
 check('prompt-router emits one advisory UserPromptSubmit context under budget and never decides', () => {
-  const script = path.join(ROOT, 'scripts/hooks/prompt-router.js');
-  mustExist('scripts/hooks/prompt-router.js');
+  const script = path.join(ROOT, 'plugins/harness-loops/scripts/hooks/prompt-router.js');
+  mustExist('plugins/harness-loops/scripts/hooks/prompt-router.js');
   execFileSync('node', ['--check', script], { stdio: 'pipe' });
   const fx = (name) => read(path.join('scripts/fixtures/hooks', name));
   const withSkill = (extra) => {
@@ -2130,9 +2342,9 @@ check('prompt-router emits one advisory UserPromptSubmit context under budget an
 });
 
 check('jev-nudge fires once a day and only while Jev is off; jev-setup reports status by exit code', () => {
-  const nudge = path.join(ROOT, 'scripts/hooks/jev-nudge.js');
-  const setup = path.join(ROOT, 'scripts/jev-setup.js');
-  for (const f of ['scripts/hooks/jev-nudge.js', 'scripts/jev-setup.js', 'bin/jev-setup']) mustExist(f);
+  const nudge = path.join(ROOT, 'plugins/harness-loops/scripts/hooks/jev-nudge.js');
+  const setup = path.join(ROOT, 'plugins/harness-loops/scripts/jev-setup.js');
+  for (const f of ['plugins/harness-loops/scripts/hooks/jev-nudge.js', 'plugins/harness-loops/scripts/jev-setup.js', 'plugins/harness-loops/bin/jev-setup']) mustExist(f);
   execFileSync('node', ['--check', nudge], { stdio: 'pipe' });
   execFileSync('node', ['--check', setup], { stdio: 'pipe' });
   const start = read('scripts/fixtures/hooks/session-start.json');
@@ -2147,7 +2359,7 @@ check('jev-nudge fires once a day and only while Jev is off; jev-setup reports s
   if (runNode([nudge], env, read('scripts/fixtures/hooks/other-event.json')).out !== '') throw new Error('a non-SessionStart payload produced output');
   if (runNode([setup, '--status'], e.env).code !== 3) throw new Error('jev-setup --status without a key must exit 3');
   if (runNode([setup, '--status'], { ...e.env, TYPESAFE_API_KEY: 'k' }).code !== 0) throw new Error('jev-setup --status with a key must exit 0');
-  const h = JSON.parse(read('hooks/hooks.json')).hooks;
+  const h = JSON.parse(read(`${LOOPS}/hooks/hooks.json`)).hooks;
   if (!JSON.stringify(h.SessionStart || []).includes('jev-nudge.js')) throw new Error('hooks.json does not install jev-nudge on SessionStart');
   if (!JSON.stringify(h.UserPromptSubmit || []).includes('prompt-router.js')) throw new Error('hooks.json does not install prompt-router on UserPromptSubmit');
   const inst = read('install.sh');
@@ -2158,7 +2370,7 @@ check('jev-nudge fires once a day and only while Jev is off; jev-setup reports s
 
 check('the panel loops route round-2 dedupe through loop-gate and degrade honestly', () => {
   for (const cmd of ['orchestrate', 'review-loop']) {
-    const src = read(`commands/${cmd}.md`);
+    const src = read(commandPath(cmd));
     if (!/loop-gate\.js" dedupe/.test(src)) throw new Error(`${cmd} never runs loop-gate.js dedupe — "new vs restated" is back in the chair's hands`);
     if (!/`NEW:`/.test(src) || !/exact-only/.test(src) || !/UNJUDGED/.test(src)) throw new Error(`${cmd} does not tell the chair how to read DEDUPE/NEW/UNJUDGED`);
     if (/Judge by meaning, not by string equality\./.test(src)) throw new Error(`${cmd} still asks the chair to judge restatements by meaning as the primary path`);
@@ -2182,10 +2394,10 @@ check('README discloses Jev: the env var, the endpoint, what leaves the machine,
 
 // The only check here that touches the network, and it is opt-in twice: a key AND JEV_LIVE=1.
 check('jev live smoke — one noul round trip to api.typesafe.ai', () => {
-  const script = path.join(ROOT, 'scripts/jev.js');
+  const script = path.join(ROOT, 'plugins/harness-loops/scripts/jev.js');
   if (process.env.JEV_LIVE !== '1') skip('set JEV_LIVE=1 (and a TYPESAFE_API_KEY) to run the live round trip');
   if (!require(script).isEnabled()) skip('no TYPESAFE_API_KEY — nothing to ping');
-  const r = runNode([path.join(ROOT, 'scripts/jev-setup.js'), '--ping'], process.env);
+  const r = runNode([path.join(ROOT, 'plugins/harness-loops/scripts/jev-setup.js'), '--ping'], process.env);
   if (r.code !== 0 || !/^OK/.test(r.out)) throw new Error(`ping failed: ${r.out.trim()} ${r.err.trim()}`);
   return r.out.trim();
 });
@@ -2227,7 +2439,7 @@ check('develop-phase template decides from the verdict line and the exit code, a
     })().catch((e) => console.log('THREW ' + e.message));
   `;
   const seen = [];
-  for (const rel of ['skills/harness-audit/SKILL.md', '.pi/skills/harness-audit/SKILL.md']) {
+  for (const rel of ['plugins/harness-audit/skills/harness-audit/SKILL.md', '.pi/skills/harness-audit/SKILL.md']) {
     const out = execFileSync('node', ['-e', harness, path.join(ROOT, rel)], { encoding: 'utf8' }).trim();
     if (out === 'NO_TEMPLATE') throw new Error(`${rel} has no develop-phase template`);
     if (out.startsWith('THREW')) throw new Error(`${rel}: the develop-phase template throws when run — ${out.slice(6)}`);
@@ -2294,7 +2506,7 @@ check('develop-phase template: a blocker stops before the implementer, a same-fa
     })().catch((e) => console.log('THREW ' + e.message));
   };
   const seen = [];
-  for (const rel of ['skills/harness-audit/SKILL.md', '.pi/skills/harness-audit/SKILL.md']) {
+  for (const rel of ['plugins/harness-audit/skills/harness-audit/SKILL.md', '.pi/skills/harness-audit/SKILL.md']) {
     const out = execFileSync('node', ['-e', `(${harness})(process.argv[1])`, path.join(ROOT, rel)], { encoding: 'utf8' }).trim();
     if (out === 'NO_TEMPLATE') throw new Error(`${rel} has no develop-phase template`);
     if (out.startsWith('THREW')) throw new Error(`${rel}: the develop-phase template throws when run — ${out.slice(6)}`);
@@ -2354,7 +2566,7 @@ check('jev dedupe eval: corpus balanced, exit 3 without a key, exit 1 when a new
 
 check('jev dedupe eval — live, against api.typesafe.ai', () => {
   if (process.env.JEV_LIVE !== '1') skip('set JEV_LIVE=1 (and a TYPESAFE_API_KEY) to measure the dedupe thresholds live');
-  if (!require(path.join(ROOT, 'scripts/jev.js')).isEnabled()) skip('no TYPESAFE_API_KEY — nothing to measure');
+  if (!require(path.join(ROOT, 'plugins/harness-loops/scripts/jev.js')).isEnabled()) skip('no TYPESAFE_API_KEY — nothing to measure');
   const r = runNode([path.join(ROOT, 'benchmarks/jev_dedupe_eval.js')], process.env);
   const verdict = (r.out.match(/^VERDICT: .*$/m) || [''])[0];
   if (r.code !== 0) throw new Error(verdict || `eval exited ${r.code}: ${r.err.trim()}`);
@@ -2394,7 +2606,7 @@ esac
   };
   const run = (name, { reviewer = 'rev-1', preflight = 'true', env = {} } = {}) => {
     const cwd = repo(name);
-    const r = require('node:child_process').spawnSync('node', [path.join(ROOT, 'scripts/develop-phase-pi.js'), '--task', 't', '--max-iter', '1', '--no-jev', '--no-tmux', '--preflight', preflight], {
+    const r = require('node:child_process').spawnSync('node', [path.join(ROOT, 'plugins/harness-loops/scripts/develop-phase-pi.js'), '--task', 't', '--max-iter', '1', '--no-jev', '--no-tmux', '--preflight', preflight], {
       cwd, encoding: 'utf8',
       env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, MODEL_LINEUP_PATH: lineup(reviewer), GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t', ...env },
     });

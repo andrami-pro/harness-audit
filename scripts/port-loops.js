@@ -385,13 +385,19 @@ function destDirsFor(target) {
 // some capability went missing somewhere, which is not actionable. "correctness-critic.md: WebSearch"
 // tells them the fact-checking critic — the one whose entire job is verifying claims against the web —
 // can no longer reach the web on this target. Same information, and only one of the two can be acted on.
-function portDir(srcDir, destDir, transform, skip = new Set()) {
+function portDir(srcDirs, destDir, transform, skip = new Set()) {
   fs.mkdirSync(destDir, { recursive: true });
-  const files = fs.readdirSync(srcDir)
-    .filter((f) => f.endsWith('.md') && !skip.has(path.basename(f, '.md'))).sort();
+  const srcOf = new Map();
+  for (const dir of srcDirs) {
+    if (!fs.existsSync(dir)) continue;
+    for (const f of fs.readdirSync(dir)) {
+      if (f.endsWith('.md') && !skip.has(path.basename(f, '.md'))) srcOf.set(f, path.join(dir, f));
+    }
+  }
+  const files = [...srcOf.keys()].sort();
   const dropped = [];
   for (const f of files) {
-    const { fm, body } = parseFrontmatter(fs.readFileSync(path.join(srcDir, f), 'utf8'));
+    const { fm, body } = parseFrontmatter(fs.readFileSync(srcOf.get(f), 'utf8'));
     // `transform` always receives (fm, body) — the OpenCode/Kilo/Pi-agent transforms only touch fm and
     // return no `.body`, so they fall back to the untouched source body below. transformCommandPi is
     // the only transform that also rewrites `.body` (Task-tool vocabulary -> subagent vocabulary).
@@ -402,6 +408,10 @@ function portDir(srcDir, destDir, transform, skip = new Set()) {
   return { count: files.length, dropped };
 }
 
+// The commands and agents live in the plugins that ship them (PRD-004): the loops and their agents in
+// harness-loops, /session-review and /dashboard-harness in harness-guards.
+const sourceDirs = (root, kind) => ['harness-loops', 'harness-guards'].map((p) => path.join(root, 'plugins', p, kind));
+
 function run(target, root) {
   const dest = destDirsFor(target);
   const dropped = [];
@@ -410,13 +420,13 @@ function run(target, root) {
   if (dest.commands) {
     const commandTransform = target === 'pi' ? transformCommandPi : transformCommandOpenCodeKilo;
     const skip = target === 'pi' ? PI_UNPORTABLE_COMMANDS : new Set();
-    const r = portDir(path.join(root, 'commands'), dest.commands, commandTransform, skip);
+    const r = portDir(sourceDirs(root, 'commands'), dest.commands, commandTransform, skip);
     commandCount = r.count;
     dropped.push(...r.dropped);
     skipped.push(...skip);
   }
   const agentTransform = target === 'pi' ? transformAgentPi : transformAgentOpenCodeKilo;
-  const agentResult = portDir(path.join(root, 'agents'), dest.agents, agentTransform);
+  const agentResult = portDir(sourceDirs(root, 'agents'), dest.agents, agentTransform);
   dropped.push(...agentResult.dropped);
   return { commandCount, agentCount: agentResult.count, dropped, skipped };
 }

@@ -5,8 +5,8 @@
 // model tier for a subagent by habit — usually the default, usually the most expensive. Both are
 // discrete choices over a short text, which is the one thing a System One model does in under a
 // second for a fraction of a cent. This hook asks Jev two questions about the prompt just submitted:
-// which installed skill fits it (choice over the inventory scripts/loop-stats.js already builds for
-// the dashboard), and which tier a subagent for it deserves (haiku / sonnet / opus). The answers ride
+// which installed skill fits it (choice over the inventory scripts/skill-inventory.js builds for the
+// dashboard too), and which tier a subagent for it deserves (haiku / sonnet / opus). The answers ride
 // `additionalContext`, so the model sees a suggestion and the transcript keeps it. It NEVER decides:
 // no `decision`, no `permissionDecision`, no rewriting of the prompt.
 //
@@ -49,7 +49,7 @@ function skillOptions(cwd) {
     const st = fs.statSync(file);
     if (Date.now() - st.mtimeMs < CACHE_MS) return JSON.parse(fs.readFileSync(file, 'utf8'));
   } catch { /* no cache, or stale */ }
-  const { inventorySkills } = require('../loop-stats.js');
+  const { inventorySkills } = require('../skill-inventory.js');
   const { skills } = inventorySkills(cwd);
   const options = {};
   for (const s of skills) {

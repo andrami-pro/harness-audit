@@ -2,18 +2,29 @@
 
 A Claude Code **plugin** (and portable **Agent Skill**) that audits a project's agent harness against four pillars — harness-in-code, multi-agent role separation, automatic verification, and loop design — and produces an **executable rubric** (`harness-rubric.md`) plus a stack-tailored remediation plan with stop conditions. The audit is not a static report a human reads and executes; it is a convergence target an autonomous implement-and-verify loop runs against. Its core principle: *the model is the horse, the harness is the saddle* — models change every few months, the harness stays.
 
-Installed as a plugin, it also **protects** your sessions with four write-time guards — three security guards and one loop-hygiene guard (see below).
+The repository is one marketplace with three plugins, and each installs alone:
+
+| Plugin | Job | Ships |
+|---|---|---|
+| `harness-audit` | Diagnose | the audit skill, `rubric-template.md`, `verifier-protocol.md`, the model line-up resolver |
+| `harness-loops` | Build | `/orchestrate`, `/review-loop`, `/iterate`, `/skill-loop`, the seven critic/scorer/optimizer agents, `loop-gate.js`, the Pi develop-phase runner, TypeSafe Jev (opt-in) |
+| `harness-guards` | Protect and observe | four write-time guards (three security, one loop-hygiene), loop telemetry, `/dashboard-harness`, `/session-review` |
 
 ## Install
 
-### Option 1 — Claude Code plugin (recommended: audit + protection)
+### Option 1 — Claude Code plugins (recommended)
 
 ```
 /plugin marketplace add andrami-pro/harness-audit
-/plugin install harness-audit@harness-audit
+/plugin install harness-audit@harness-audit     # diagnose
+/plugin install harness-loops@harness-audit     # build
+/plugin install harness-guards@harness-audit    # protect and observe
 ```
 
-This loads the skill **and** four guards that run on every session:
+**Upgrading from 2.x:** `harness-audit` used to ship all three jobs. It now ships the audit only; install
+`harness-loops` and `harness-guards` to keep the loops, guards and dashboard you had.
+
+`harness-guards` installs four guards that run on every session:
 
 | Hook | What it blocks |
 |---|---|
@@ -22,9 +33,10 @@ This loads the skill **and** four guards that run on every session:
 | `block-no-verify` | `git commit/push --no-verify` — the pre-commit gate cannot be silently bypassed |
 | `repeat-tool-guard` | Nothing — it is advisory. After 3, 5 and 8 consecutive byte-identical tool calls (same tool, same canonical arguments) it injects an escalating reminder to re-read the last result and change approach or conclude; it never denies a call, and a human prompt resets the count |
 
-The guards are deliberately conservative (short, high-precision pattern lists — when in doubt they allow). The repeat guard is advisory by design: a polling loop that repeats a call on purpose still gets the nudge, and the model decides. To disable them, uninstall the plugin and use the skill-only install below.
+The guards are deliberately conservative (short, high-precision pattern lists — when in doubt they allow). The repeat guard is advisory by design: a polling loop that repeats a call on purpose still gets the nudge, and the model decides. To disable them, uninstall `harness-guards`.
 
-Three more hooks ride the same install. None of them blocks anything:
+Three more hooks, none of which blocks anything. `loop-telemetry` comes with `harness-guards`; the two Jev
+hooks come with `harness-loops`:
 
 | Hook | Event | What it does |
 |---|---|---|
@@ -36,8 +48,8 @@ Three more hooks ride the same install. None of them blocks anything:
 
 ```bash
 git clone https://github.com/andrami-pro/harness-audit.git /tmp/harness-audit
-cp -R /tmp/harness-audit/skills/harness-audit ~/.claude/skills/harness-audit   # global
-# or: cp -R /tmp/harness-audit/skills/harness-audit .claude/skills/harness-audit  # per project
+cp -R /tmp/harness-audit/plugins/harness-audit/skills/harness-audit ~/.claude/skills/harness-audit   # global
+# or: cp -R /tmp/harness-audit/plugins/harness-audit/skills/harness-audit .claude/skills/harness-audit  # per project
 ```
 
 ### Option 3 — other coding agents (Cursor, Kilo Code, Antigravity, …)
@@ -695,21 +707,36 @@ prompt text — and the honest setting for such a machine is no key at all.
 
 ## Repo layout
 
+Paths elsewhere in this README (`scripts/…`, `bin/…`) are relative to the plugin that ships the file.
+
 ```
-.claude-plugin/     plugin + marketplace manifests
-skills/harness-audit/   SKILL.md + rubric-template.md + verifier-protocol.md (the portable part)
-hooks/ + scripts/hooks/ three security guards + the repeat-tool guard + telemetry + the Jev router/nudge (plugin install only)
-scripts/loop-gate.js    the deterministic seam inside a loop — see below
-scripts/jev.js          the one door to TypeSafe Jev, and the one switch (TYPESAFE_API_KEY) — see §Jev
-scripts/develop-phase-pi.js  the develop-phase loop for Pi: seats from the line-up, verdict/exit code read by code
-scripts/dp-tmux.sh       opens the loop's tmux live view (§tmux) — never touches an existing session/pane
-scripts/dp-tail.sh       follows whichever seat is currently active; the live view's bottom pane
-bin/jev-setup           store the key, ping the API, report status
-scripts/check-doc-budgets.js  word-ceiling gate for standing docs (docs/doc-budgets.json)
-scripts/validate.js     this package's own preflight gate — run `node scripts/validate.js` before releasing
-install.sh              multi-IDE skill installer
-WHITEPAPER.md           full rationale, benchmarks provenance, and theory
+.claude-plugin/marketplace.json   the marketplace: three plugins, each with its own folder
+plugins/harness-audit/
+  skills/harness-audit/           SKILL.md + rubric-template.md + verifier-protocol.md (the portable part)
+  scripts/model-lineup.js         line-up resolution and the D25 family gates; lineup-ui.js, lineup-advise.js
+  scripts/check-doc-budgets.js    word-ceiling gate for standing docs (docs/doc-budgets.json)
+  bin/lineup, bin/lineup-advise
+plugins/harness-loops/
+  commands/, agents/              the four loops and the seven seats they dispatch
+  scripts/loop-gate.js            the deterministic seam inside a loop — see below
+  scripts/jev.js                  the one door to TypeSafe Jev, and the one switch (TYPESAFE_API_KEY) — see §Jev
+  scripts/develop-phase-pi.js     the develop-phase loop for Pi: seats from the line-up, verdict/exit code read by code
+  scripts/dp-tmux.sh, dp-tail.sh  the loop's tmux live view (§tmux) — never touches an existing session/pane
+  hooks/ + scripts/hooks/         the Jev router and nudge
+  bin/jev-setup                   store the key, ping the API, report status
+plugins/harness-guards/
+  commands/                       /dashboard-harness, /session-review
+  scripts/loop-stats.js           the zero-token dashboard; bin/loop-stats
+  hooks/ + scripts/hooks/         three security guards + the repeat-tool guard + telemetry
+scripts/validate.js               the repository's own preflight gate — run `node scripts/validate.js` before releasing
+scripts/port-loops.js             ports the loops to OpenCode, Kilo and Pi (install.sh calls it)
+install.sh                        multi-IDE installer
+WHITEPAPER.md                     full rationale, benchmarks provenance, and theory
 ```
+
+`model-lineup.js` ships in all three plugins and `skill-inventory.js` in two, byte for byte: an installed
+plugin cannot reach a sibling's files. Edit the copy in the first plugin that ships it and copy it over;
+`validate.js` fails on drift.
 
 ## Learn more
 
