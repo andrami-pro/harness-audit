@@ -29,8 +29,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const ROOT = path.resolve(__dirname, '..');
-const { dedupe, DEDUPE_THRESHOLD, DEDUPE_BLOCKER_THRESHOLD } = require(path.join(ROOT, 'scripts/loop-gate.js'));
-const jev = require(path.join(ROOT, 'scripts/jev.js'));
+const { dedupe, DEDUPE_THRESHOLD, DEDUPE_BLOCKER_THRESHOLD } = require(path.join(ROOT, 'plugins/harness-loops/scripts/loop-gate.js'));
+const jev = require(path.join(ROOT, 'plugins/harness-loops/scripts/jev.js'));
 
 const THRESHOLDS = [0.5, 0.65, 0.75, 0.85, 0.9, 0.95];
 const SEVERITIES = ['blocker', 'major', 'minor'];
@@ -159,7 +159,7 @@ async function main() {
     process.exit(2);
   }
   if (!jev.isEnabled()) {
-    process.stdout.write('NOT MEASURED — Jev is off (no TYPESAFE_API_KEY). Run bin/jev-setup first.\n');
+    process.stdout.write('NOT MEASURED — Jev is off (no TYPESAFE_API_KEY). Run plugins/harness-loops/bin/jev-setup first.\n');
     process.exit(3);
   }
   const e = await evaluate(corpus);

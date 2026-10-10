@@ -121,8 +121,23 @@ round) and the `critic` field (`correctness` | `domain` | `safety` | `style`) �
 these, and the gate rejects them if they try.
 
 A finding is **new** if it does not restate a finding from the previous round: same seat, same file,
-same defect. Judge by meaning, not by string equality. A finding the fixer failed to resolve stays
-open — it is not new, but it is also not gone.
+same defect. From round 2 on, that call is the gate's, not yours — write the round's aggregated
+findings (ids and `critic` assigned) to `raw/<round>-aggregate.json` and run:
+
+```text
+This target does not install the plugin's loop-gate.js. Compare this round's findings with the previous
+round's by hand — same seat, same file, same defect, judged by meaning — and count the new blockers and
+majors yourself. Record in the report that the dedupe was ungated.
+```
+
+Read the `NEW:` line — those counts are the stop arithmetic in §5. When the first line says
+`DEDUPE: jev`, every pair was judged by meaning in code. When it says `DEDUPE: exact-only`, only
+verbatim restatements were caught: judge the pairs the `UNJUDGED:` line counts yourself, by meaning,
+and say in the report that the round's dedupe was ungated. **If that command is not available**,
+compare by hand — same seat, same file, same defect — and report the round as ungated.
+
+Everything under `CARRIED:` is a restatement, and a restatement the fixer failed to resolve stays
+open — it is not new, but it is also not gone. Round 1 skips the dedupe: everything is new.
 
 ## 4. Fix round
 
@@ -144,7 +159,7 @@ missing.
 
 | Condition | Action |
 |---|---|
-| A round adds no new blocker and no new major | STOP · `stoppedBy: "no-new-findings"` |
+| The `NEW:` line reports `blocker 0 major 0` (round 1: no blocker or major at all) | STOP · `stoppedBy: "no-new-findings"` |
 | 3 rounds done and blockers or majors keep arriving | STOP · `stoppedBy: "round-ceiling"` |
 
 There is no fourth round. When you hit the ceiling without converging, report the open findings to

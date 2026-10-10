@@ -2,9 +2,11 @@
 # harness-audit installer — copies the skill folder to the directory your
 # coding agent reads, then bootstraps the Graphify code graph the loops query
 # instead of grepping the repo cold. The plugin path (Claude Code) needs no
-# installer for the loops/agents themselves:
+# installer for the loops/agents themselves — three plugins, each installs alone:
 #   /plugin marketplace add andrami-pro/harness-audit
-#   /plugin install harness-audit@harness-audit
+#   /plugin install harness-audit@harness-audit     # diagnose: the audit skill
+#   /plugin install harness-loops@harness-audit     # build: loops, critics, loop-gate
+#   /plugin install harness-guards@harness-audit    # protect + observe: guards, dashboard
 #
 # Usage:
 #   ./install.sh --target claude       # project-level  .claude/skills/
@@ -67,7 +69,10 @@
 set -eu
 
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
-SRC_DIR="$ROOT_DIR/skills/harness-audit"
+AUDIT_DIR="$ROOT_DIR/plugins/harness-audit"
+LOOPS_DIR="$ROOT_DIR/plugins/harness-loops"
+GUARDS_DIR="$ROOT_DIR/plugins/harness-guards"
+SRC_DIR="$AUDIT_DIR/skills/harness-audit"
 TARGET=""
 SKIP_GRAPHIFY=0
 ASSUME_YES=0
@@ -124,6 +129,16 @@ if [ -n "$DEST" ]; then
     *) echo "  The skill follows the open Agent Skills standard (agentskills.io)." ;;
   esac
   echo "  Note: the security hooks only load via the Claude Code plugin install, not via skill copy."
+  # The develop-phase wrapper the skill writes into a project calls the global loop by an absolute path.
+  # The harness-loops plugin keeps that copy current at every session start; without the plugin, this is it.
+  case "$TARGET" in
+    claude|claude-user)
+      WF_DEST="${HARNESS_WORKFLOWS_DIR:-$HOME/.claude/harness}"
+      mkdir -p "$WF_DEST"
+      cp "$LOOPS_DIR"/workflows/*.js "$WF_DEST"/
+      echo "✓ global develop-phase loop copied to $WF_DEST — re-run after pulling to update it"
+      ;;
+  esac
 fi
 
 # ── Graphify bootstrap (D21) ──────────────────────────────────────────────
@@ -290,7 +305,7 @@ esac
 # defaults (whatever model: each agent already ships with) are untouched.
 if [ "$LINEUP_REQUESTED" -eq 1 ]; then
   echo ""
-  RESOLVER="$ROOT_DIR/scripts/model-lineup.js"
+  RESOLVER="$AUDIT_DIR/scripts/model-lineup.js"
   [ -f "$RESOLVER" ] || { echo "error: $RESOLVER not found (run from the repo root)" >&2; exit 1; }
   command -v node >/dev/null 2>&1 || { echo "error: --lineup needs Node >= 18" >&2; exit 1; }
 
@@ -392,14 +407,14 @@ if [ "$LINEUP_REQUESTED" -eq 1 ]; then
         ;;
       *)
         mkdir -p "$CMD_DEST" "$AGENT_DEST"
-        cp -R "$ROOT_DIR"/commands/. "$CMD_DEST"/
+        cp -R "$LOOPS_DIR"/commands/. "$GUARDS_DIR"/commands/. "$CMD_DEST"/
         # Agents are copied one by one, and an existing project file that DIFFERS is kept rather than
         # overwritten. README §domain-critic tells you to customize that seat by dropping a file of the
         # same name into .claude/agents/ — and the `cp -R agents/.` that used to be here deleted it
         # without a word, inside the one command a user runs in order to pin their own models. Measured
         # against a planted fixture, not reasoned about: the custom body was gone after one run.
         KEPT=0
-        for a in "$ROOT_DIR"/agents/*.md; do
+        for a in "$LOOPS_DIR"/agents/*.md; do
           [ -f "$a" ] || continue
           AGENT_FILE="$AGENT_DEST/$(basename "$a")"
           if [ -f "$AGENT_FILE" ] && ! cmp -s "$a" "$AGENT_FILE"; then
@@ -409,7 +424,7 @@ if [ "$LINEUP_REQUESTED" -eq 1 ]; then
           fi
           cp "$a" "$AGENT_FILE"
         done
-        [ "$KEPT" -gt 0 ] && echo "  ($KEPT customized agent(s) preserved — diff against $ROOT_DIR/agents/ to pick up the newer version by hand)"
+        [ "$KEPT" -gt 0 ] && echo "  ($KEPT customized agent(s) preserved — diff against $LOOPS_DIR/agents/ to pick up the newer version by hand)"
         # The commands call `node "${CLAUDE_PLUGIN_ROOT:-.claude}/scripts/loop-gate.js"`. That variable
         # is set only inside the Claude Code plugin runtime, so a copied-commands install falls back to
         # `.claude/scripts` — and until this copy existed, that path held nothing: /orchestrate and
@@ -417,7 +432,9 @@ if [ "$LINEUP_REQUESTED" -eq 1 ]; then
         # models. Copying the scripts beside the commands is what removes that trade-off.
         SCRIPT_DEST="$(dirname "$CMD_DEST")/scripts"
         mkdir -p "$SCRIPT_DEST"
-        for s in "$ROOT_DIR"/scripts/*.js; do [ -f "$s" ] && cp "$s" "$SCRIPT_DEST"/; done
+        # Every plugin's top-level scripts, flattened: the shared modules (model-lineup.js,
+        # skill-inventory.js) ship identical in each plugin that needs them, so the copies agree.
+        for s in "$AUDIT_DIR"/scripts/*.js "$LOOPS_DIR"/scripts/*.js "$GUARDS_DIR"/scripts/*.js; do [ -f "$s" ] && cp "$s" "$SCRIPT_DEST"/; done
         echo "✓ scripts/ copied to $SCRIPT_DEST — the loop gate resolves without the plugin runtime"
         if [ "$TARGET" = "claude-user" ]; then
           echo "⚠ user-level install: the commands fall back to the PROJECT's ./.claude/scripts, not to"
@@ -500,11 +517,11 @@ fi
 # Without a key every Jev path is a no-op and nothing leaves the machine. --yes never answers this
 # for you: consenting to send prompts and findings to a third party is not a CI default.
 if [ "$SKIP_JEV" -eq 0 ] && [ "$ASSUME_YES" -eq 0 ] && [ -t 0 ] && command -v node >/dev/null 2>&1; then
-  if ! node "$ROOT_DIR/scripts/jev-setup.js" --status >/dev/null 2>&1; then
+  if ! node "$LOOPS_DIR/scripts/jev-setup.js" --status >/dev/null 2>&1; then
     echo ""
     echo "TypeSafe Jev (optional): a fast classifier that dedupes panel findings between rounds and"
     echo "suggests a skill/model tier per prompt. Sends finding text and prompt text to api.typesafe.ai"
-    echo "(US-hosted, EU SCCs in their DPA, no training on inputs). README §Jev has the details."
-    node "$ROOT_DIR/scripts/jev-setup.js" || true
+    echo "(US-hosted, EU SCCs in their DPA, no training on inputs). plugins/harness-loops/README.md §Jev has the details."
+    node "$LOOPS_DIR/scripts/jev-setup.js" || true
   fi
 fi

@@ -172,13 +172,28 @@ table does not support its number is a finding of its own, and one the human sho
 Arithmetic is the one part of a gate that never needed judgment, and until now it was being done by
 whichever model was holding the chair.
 
+From round 2 on, run the same dedupe `/orchestrate` runs, over the round's aggregated findings
+(ids and `critic` assigned), before deciding whether a fix round is due:
+
+```text
+This target does not install the plugin's loop-gate.js. Compare this round's findings with the previous
+round's by hand — same seat, same file, same defect, judged by meaning — and count the new blockers and
+majors yourself. Record in the report that the dedupe was ungated.
+```
+
+`NEW:` is what §4 reads. `DEDUPE: jev` means every pair was judged by meaning in code;
+`DEDUPE: exact-only` means only verbatim restatements were caught — judge the `UNJUDGED:` pairs
+yourself and say in the report that the dedupe was ungated. **If that command is not available**,
+compare by hand and report it as ungated. This feeds the fix-round decision only: the gate in §5 is
+the scorecard's `SCORE:` and `BLOCKERS:`, and dedupe never touches those two numbers.
+
 `blockers` counts failed blocker-class **criteria**. A `blocker`-severity finding from one of the four
 critics is a defect in the artifacts, not a failed rubric criterion — it goes in the fix round, and it
 gates through the rubric row it violates. If it violates none, the rubric has a hole: say so.
 
 ## 4. Fix round
 
-If the round produced **any new blocker or major**, or the gate did not open → apply fixes.
+If the `NEW:` line reports any blocker or major (round 1: any at all), or the gate did not open → apply fixes.
 
 Delegate to the project's `implementer` subagent if it defines one (`.pi/agents/implementer.md`);
 otherwise apply them yourself. Either way, apply **all** of the round's findings — blocker, major and

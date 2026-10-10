@@ -1,7 +1,7 @@
 ---
 id: PRD-004
 title: Three plugins in one marketplace, a global develop-phase, and waves
-status: draft
+status: in-progress
 created: 2026-10-10
 updated: 2026-10-10
 ---
@@ -119,17 +119,27 @@ the ones that do not fit), then replace the file with the wrapper. Pilot: `notio
 
 ## 7. Open questions
 
-- **A stable `scriptPath`.** The plugin cache path carries the version. Candidate: a `SessionStart` hook
-  keeps `~/.claude/harness/develop-phase.js` linked to `${CLAUDE_PLUGIN_ROOT}`. Verify `~` expansion and
-  whether plugins can ship a `workflows/` folder that `Workflow({name})` resolves.
+- **A stable `scriptPath`.** Resolved 2026-10-10 by a zero-agent probe: `workflow({scriptPath})` does **not**
+  expand `~` ("Workflow script file not found: ~/…"); absolute paths work, and relative ones resolve against the
+  session cwd. Named lookup reads a registry loaded at session start (a workflow written mid-session is not
+  found). Plugins can ship `workflows/` (documented, namespaced `/<plugin>:<name>`), but whether `workflow()`
+  resolves `harness-loops:develop-phase` is unverified until a session runs with the plugin installed. Shipped:
+  the `sync-workflows` SessionStart hook copies the loop to `~/.claude/harness/` when it differs, the wrapper
+  calls that copy by absolute path and falls back to the plugin name on "not found".
+  Corrected the same day by the first live run (elsa-agents): a plain session refuses a `scriptPath` outside
+  its readable directories ("scriptPath must be a script path this tool returned, or a file you can already
+  read"); the probe had passed only because its session could read `~/.claude`. The hook now also writes a
+  git-ignored copy into `.claude/harness/` of every project with a wrapper, and the wrapper reads it first.
 - **Pi parity.** `scripts/develop-phase-pi.js` needs the same three gains or a documented gap.
 - **Workflow size.** A wave of four tickets is already more than ten agents; document the `/config` setting.
 
 ## 8. Order
 
 1. Split into three plugins without behaviour change; `scripts/validate.js` proves each plugin installs
-   alone.
-2. Global develop-phase plus wrapper; migrate the pilot.
+   alone. **Done** (branch `feat/three-plugins`).
+2. Global develop-phase plus wrapper; migrate the pilot. **Done**: the loop is
+   `plugins/harness-loops/workflows/develop-phase.js`; the pilot's wrapper is on its branch
+   `s/develop-phase-wrapper`, not yet integrated nor run live.
 3. TDD and the Spec axis.
 4. develop-spec (waves); pilot on one PRD.
 5. Migrate the remaining projects; READMEs at most 150 lines each, plus a root "which plugin do I need?" table.

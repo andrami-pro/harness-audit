@@ -125,7 +125,7 @@ the directory does not exist: report them, do not fabricate decisions or inciden
 
 ```markdown
 ## R<N> — Decisions have a lifecycle, and every implemented one says what it beat  (⚠ aspirational)
-Check: `test -d docs/decisions/implemented && grep -rL "## Alternatives considered" docs/decisions/implemented/ | wc -l` → 0
+Check: `D=$(ls -d docs/decisions/implemented docs/adr 2>/dev/null | head -1); [ -n "$D" ] && grep -rL "## Alternatives considered" "$D" --include='*.md' | wc -l` → 0
 State: FAIL (actual: 3 implemented notes without an "Alternatives considered" section)
 Pillar: 4 · Fix cost: low
 
