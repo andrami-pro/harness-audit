@@ -214,7 +214,9 @@ function isolationReport(name, dir) {
 //     "harness-loops alone: scripts/hooks/prompt-router.js loads ../loop-stats.js, which this plugin
 //      does not ship"
 //   agents/scorer.md moved from harness-loops to harness-guards ....................................
-//     "harness-loops alone: agents = [...], expected [...]"
+//     "harness-loops alone: agents = [correctness-critic, …, style-critic], expected [… scorer, …]"
+//   secret-scan.js renamed to secret-scan2.js in harness-guards' hooks.json only ...................
+//     "harness-guards alone: hooks = [… secret-scan2], expected [… secret-scan] · PreToolUse … exited"
 check('each plugin is self-contained: copied alone, every path it names resolves inside it and every hook runs', () => {
   const union = { skills: [], commands: [], agents: [], hooks: [] };
   const lines = PLUGINS.map((name) => {
@@ -233,6 +235,8 @@ check('each plugin is self-contained: copied alone, every path it names resolves
   return `${lines.join(' · ')} — union ${totals}`;
 });
 
+// Negative control (2026-10-10, reverted): one line appended to harness-guards' model-lineup.js — exit 1,
+// "plugins/harness-guards/scripts/model-lineup.js drifted from plugins/harness-audit/scripts/model-lineup.js".
 check('a module two plugins need ships byte-identical in each of them', () => {
   for (const [rel, [owner, ...copies]] of Object.entries(SHARED)) {
     const canonical = read(`plugins/${owner}/${rel}`);
