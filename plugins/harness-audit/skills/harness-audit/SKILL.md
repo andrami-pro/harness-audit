@@ -118,6 +118,7 @@ Also detect: package manager (`pnpm-lock.yaml` → pnpm, `yarn.lock` → yarn, `
 | Skills (personas) | A skills folder for domain personas (PM, dev, UX, etc.) | `ls .claude/skills/*/SKILL.md 2>/dev/null` |
 | Multi-harness portability | Same role conventions discoverable for Codex/Cursor (AGENTS.md mentions roles abstractly) | `grep -i "orchestrat\|implement\|review" AGENTS.md` |
 | Model line-up independence (D25, P2-8) | If a `model-lineup.json` exists (global or project), the reviewer role's model does not share a family with the implementer role's model | `node "${CLAUDE_PLUGIN_ROOT}/scripts/model-lineup.js" resolve --target claude --global ~/.agents/model-lineup.json --project .agents/model-lineup.json; echo $?` — `0` = independent, `2` = HARD violation (not confirmable); no lineup file at all is N/A, not FAIL. The script ships with the plugin, not with the audited repo, so the `${CLAUDE_PLUGIN_ROOT}` prefix is mandatory — a bare relative path exits 1 and reads exactly like "no lineup" |
+| develop-phase is a wrapper, not a fork (PRD-004) | `.claude/workflows/develop-phase.js` holds only the project config and calls the global loop; a forked copy never receives a loop improvement | `grep -c 'workflow(ref' .claude/workflows/develop-phase.js` → 1 (0 = a fork: Step 0 migrates it) |
 
 #### Pillar 3 — Automatic verification
 
