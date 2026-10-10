@@ -2569,8 +2569,8 @@ check('develop-phase loop honours every wrapper config key a fork used to hard-c
       const off = await run({ ...CFG, commit: false }, ok);
       const red = await run(CFG, (l) => (l === 'preflight' ? { ...pf, exitCode: 1, failedCheck: 'test' } : ok(l)));
       console.log(JSON.stringify({
-        lang: /in French/.test(r.by('commit').prompt) && /No Co-Authored-By line\./.test(r.by('commit').prompt),
         approved: r.out.approved && r.out.handoff.status === 'complete',
+        lang: /in French/.test((r.by('commit') || {}).prompt) && /No Co-Authored-By line\./.test((r.by('commit') || {}).prompt),
         bridge: r.by('review').prompt.includes('scripts/revue-externe.sh openrouter/xiaomi/mimo-v2.6-pro'),
         preflight: r.by('preflight').prompt.includes('pnpm preflight; echo'),
         types: [r.by('scout').agentType, r.by('impl').agentType, r.by('analyst').agentType ?? null],
@@ -2585,8 +2585,8 @@ check('develop-phase loop honours every wrapper config key a fork used to hard-c
   if (out.startsWith('THREW')) throw new Error(`the loop throws under the pilot's config — ${out.slice(6)}`);
   const r = JSON.parse(out);
   const want = {
-    lang: [true, "lang 'fr' did not reach the commit prompt — the message is a deliverable in the project's language"],
     approved: [true, "the project's bridge answered APROBADO and the loop read it as a rejection"],
+    lang: [true, "lang 'fr' did not reach the commit prompt — the message is a deliverable in the project's language"],
     bridge: [true, 'externalReview did not replace the bridge path'],
     preflight: [true, "the project's preflight command did not reach the preflight seat"],
     types: [['Explore', 'implementer', null], 'agentTypes did not reach the seats (or leaked to one it does not name)'],
