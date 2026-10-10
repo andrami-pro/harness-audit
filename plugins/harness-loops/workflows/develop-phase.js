@@ -32,6 +32,8 @@ export const meta = {
 //   commit          true: commit on the current branch when approved and the gate is green
 //   commitRules     extra rules for the commit message
 //   integrate       the command that integrates a committed branch, named in nextStep
+//   doneStep        what the human does with an approved, green, uncommitted change (default: git add -p && git
+//                   commit) — a project whose code git does not track names its own way to keep the change
 const cfg = args && typeof args === 'object' ? args : { task: typeof args === 'string' ? args : undefined }
 const task = cfg.task ?? 'implement the active task in TASKS.md or equivalent'
 const maxIter = cfg.maxIter ?? 5
@@ -283,7 +285,7 @@ const integrate = cfg.integrate ? `, then ${cfg.integrate}` : ''
 return {
   task, iterations: iteration, approved, preflightPassed, commit, handoff,
   nextStep: LABEL + (approved && preflightPassed
-    ? (commit?.committed ? `committed ${commit.hash}${integrate}` : `git add -p && git commit${integrate}`)
+    ? (commit?.committed ? `committed ${commit.hash}${integrate}` : `${cfg.doneStep ?? 'git add -p && git commit'}${integrate}`)
     : approved && preflight?.exitCode === 0 ? 'Preflight skipped checks — supply what they need and re-run; a SKIP is not a PASS'
     : approved ? 'Preflight failed — fix before commit'
     : `Did not converge — review remaining [FAIL] after ${maxIter} iter and report to the human`),

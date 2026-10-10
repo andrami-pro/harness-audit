@@ -2568,6 +2568,7 @@ check('develop-phase loop honours every wrapper config key a fork used to hard-c
       const r = await run(CFG, ok);
       const off = await run({ ...CFG, commit: false }, ok);
       const red = await run(CFG, (l) => (l === 'preflight' ? { ...pf, exitCode: 1, failedCheck: 'test' } : ok(l)));
+      const noGit = await run({ ...CFG, commit: false, integrate: undefined, doneStep: 'keep the backups in data-ouputs/' }, ok);
       console.log(JSON.stringify({
         approved: r.out.approved && r.out.handoff.status === 'complete',
         lang: /in French/.test((r.by('commit') || {}).prompt) && /No Co-Authored-By line\./.test((r.by('commit') || {}).prompt),
@@ -2578,6 +2579,7 @@ check('develop-phase loop honours every wrapper config key a fork used to hard-c
         context: r.by('scout').prompt.includes('STATUS.md, docs/client-context/'),
         integrate: r.out.nextStep.includes('committed abc123, then scripts/integrer.sh'),
         noCommit: [off.calls.some((c) => c.label === 'commit'), red.calls.some((c) => c.label === 'commit')],
+        doneStep: noGit.out.nextStep.endsWith('keep the backups in data-ouputs/') && !/git add/.test(noGit.out.nextStep),
       }));
     })().catch((e) => console.log('THREW ' + e.message));
   };
@@ -2594,11 +2596,12 @@ check('develop-phase loop honours every wrapper config key a fork used to hard-c
     context: [true, "context did not reach the scout's reading list"],
     integrate: [true, 'integrate is missing from nextStep after a commit'],
     noCommit: [[false, false], 'the commit seat ran with commit:false or after a red preflight'],
+    doneStep: [true, 'doneStep did not replace the git advice for a project whose code git does not track'],
   };
   for (const [k, [v, why]] of Object.entries(want)) {
     if (JSON.stringify(r[k]) !== JSON.stringify(v)) throw new Error(`${why} (got ${JSON.stringify(r[k])})`);
   }
-  return 'lang · bridge verdict in the project\'s language · externalReview · preflight · agentTypes · forbidden · context · commit only when green · integrate';
+  return 'lang · bridge verdict in the project\'s language · externalReview · preflight · agentTypes · forbidden · context · commit only when green · integrate · doneStep';
 });
 
 // The wrapper is the one file the audit writes into every project, and the only route to the loop.
