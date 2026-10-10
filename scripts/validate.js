@@ -42,6 +42,12 @@ const walk = (dir) => {
 // ships the file; the helpers below read the shipped set across all three.
 const PLUGINS = ['harness-audit', 'harness-loops', 'harness-guards'];
 const LOOPS = 'plugins/harness-loops';
+// Where each disclosure lives since the READMEs were split (PRD-004 step 5): the root README is for a newcomer,
+// each plugin README for its own job, docs/ for the detail no README has room for.
+const READMES = ['README.md', ...PLUGINS.map((p) => `plugins/${p}/README.md`)];
+const AUDIT_README = 'plugins/harness-audit/README.md';
+const LOOPS_README = 'plugins/harness-loops/README.md';
+const COMPAT_DOC = 'docs/compatibility.md';
 const commandsMd = () => PLUGINS.flatMap((p) => globMd(`plugins/${p}/commands`)).sort();
 const agentsMd = () => PLUGINS.flatMap((p) => globMd(`plugins/${p}/agents`)).sort();
 const commandPath = (name) => commandsMd().find((f) => path.basename(f) === `${name}.md`) || `commands/${name}.md`;
@@ -295,7 +301,7 @@ check('verifier-protocol has the negative-control self-test', () => {
 });
 
 check('no stale model lineup (Haiku must not be the preflight tier)', () => {
-  const files = ['plugins/harness-audit/skills/harness-audit/SKILL.md', 'WHITEPAPER.md', 'README.md', ...commandsMd(), ...agentsMd()];
+  const files = ['plugins/harness-audit/skills/harness-audit/SKILL.md', 'WHITEPAPER.md', ...READMES, 'docs/loops.md', COMPAT_DOC, ...commandsMd(), ...agentsMd()];
   for (const rel of files) {
     const hits = read(rel).split('\n')
       .map((l, i) => ({ l, n: i + 1 }))
@@ -388,8 +394,35 @@ check('exactly 6 commands — 5 loops and 1 observer — each with description +
 //
 // Negative control (2026-07-12, reverted): dropped the "Stops when" column from the header row —
 // exit 1, "README missing the five-loops catalog table header".
+// A README is read by someone deciding whether to install; past 150 lines it stops being read (PRD-004 §8).
+// The detail lives in docs/, linked. Every relative link in a README or in docs/ has to land on a file.
+//
+// Negative controls (2026-10-10, each applied, observed, reverted — all exit 1):
+//   80 lines of filler appended to plugins/harness-loops/README.md .................................
+//     "plugins/harness-loops/README.md is 209 lines — the limit is 150"
+//   the link to docs/compatibility.md pointed at docs/compat.md ......................................
+//     "README.md links to docs/compat.md, which does not exist"
+check('every README is at most 150 lines, the root says which plugin to install, and no relative link is broken', () => {
+  for (const rel of READMES) {
+    const n = read(rel).split('\n').length;
+    if (n > 150) throw new Error(`${rel} is ${n} lines — the limit is 150`);
+  }
+  if (!/## Which plugin do I need\?/.test(read('README.md'))) throw new Error('the root README lost its "Which plugin do I need?" table');
+  const docs = [...READMES, 'docs/loops.md', COMPAT_DOC, 'docs/lineup-advisor.md'];
+  let links = 0;
+  for (const rel of docs) {
+    for (const m of read(rel).matchAll(/\]\(([^)#\s]+)(#[^)]*)?\)/g)) {
+      if (/^[a-z]+:/i.test(m[1])) continue;
+      links++;
+      const target = path.normalize(path.join(path.dirname(rel), m[1]));
+      if (!fs.existsSync(path.join(ROOT, target))) throw new Error(`${rel} links to ${target}, which does not exist`);
+    }
+  }
+  return `${READMES.map((r) => `${path.basename(path.dirname(r)) === '.' ? 'root' : path.basename(path.dirname(r))} ${read(r).split('\n').length}`).join(' · ')} lines · ${links} relative links resolve`;
+});
+
 check('README documents the loop catalog (table header present)', () => {
-  const t = read('README.md');
+  const t = read(LOOPS_README);
   if (!/\|\s*Your situation\s*\|\s*Loop\s*\|\s*Command\s*\|\s*Cost\s*\|\s*Stops when\s*\|/.test(t)) {
     throw new Error('README missing the five-loops catalog table header');
   }
@@ -402,7 +435,7 @@ check('README documents the loop catalog (table header present)', () => {
 // Negative control (2026-07-12, reverted): replaced the section body with generic toolchain prose —
 // exit 1, "Prerequisites section does not mention Graphify".
 check('README documents Graphify as a prerequisite', () => {
-  const t = read('README.md');
+  const t = read(LOOPS_README);
   if (!/### Prerequisites/.test(t)) throw new Error('README missing a Prerequisites section');
   const section = t.split('### Prerequisites')[1].split(/\n### /)[0];
   if (!/graphify/i.test(section)) throw new Error('Prerequisites section does not mention Graphify');
@@ -1289,7 +1322,7 @@ check('lineup-advise produces a report from pinned fixtures and honours privacy 
 // sentence — exit 1, "README never explains the independence guardrail in the vocabulary
 // model-lineup.js actually uses (family / D25a)".
 check("README documents the default model line-up and why `model:` can't just be deleted", () => {
-  const t = read('README.md');
+  const t = read(AUDIT_README);
   if (!/## The default model line-up/i.test(t)) throw new Error('README lost the model-line-up disclosure section');
   const section = t.split(/## The default model line-up[^\n]*\n/i)[1].split(/\n## /)[0];
 
@@ -1679,7 +1712,7 @@ check('port-loops.js transforms every real command/agent into valid target front
 //     "README never discloses that the model: alias is unresolved on Pi too"
 check('README discloses every guardrail the port destroys', () => {
   const port = require(path.join(ROOT, 'scripts/port-loops.js'));
-  const t = read('README.md');
+  const t = read(COMPAT_DOC);
 
   // Not "is the string present anywhere" — the disclosure has to sit in the section a reader lands on
   // from the install instructions, or it is a caveat hidden from the person who needs it.
@@ -2101,7 +2134,7 @@ check('rubric-template and SKILL.md both carry the four Pillar-4 criteria, and t
 //     "pi declares no lost capability — the table would pass vacuously"
 check('README and install.sh both disclose every capability the port table destroys', () => {
   const port = require(path.join(ROOT, 'scripts/port-loops.js'));
-  const t = read('README.md');
+  const t = read(COMPAT_DOC);
   if (!/## Compatibility across harnesses/.test(t)) throw new Error('README lost the compatibility matrix section');
   const compatFull = t.split('## Compatibility across harnesses')[1].split(/\n## /)[0];
   // The MATRIX ROWS ARE STRIPPED before matching, and that is the whole point of this check rather
@@ -2392,7 +2425,7 @@ check('the panel loops route round-2 dedupe through loop-gate and degrade honest
 });
 
 check('README discloses Jev: the env var, the endpoint, what leaves the machine, and the off-by-default guarantee', () => {
-  const t = read('README.md');
+  const t = read(LOOPS_README);
   for (const must of ['TYPESAFE_API_KEY', 'api.typesafe.ai', 'bin/jev-setup', 'exact-only', 'prompt-router', 'jev-nudge']) {
     if (!t.includes(must)) throw new Error(`README never mentions ${must}`);
   }

@@ -521,7 +521,7 @@ if [ "$SKIP_JEV" -eq 0 ] && [ "$ASSUME_YES" -eq 0 ] && [ -t 0 ] && command -v no
     echo ""
     echo "TypeSafe Jev (optional): a fast classifier that dedupes panel findings between rounds and"
     echo "suggests a skill/model tier per prompt. Sends finding text and prompt text to api.typesafe.ai"
-    echo "(US-hosted, EU SCCs in their DPA, no training on inputs). README §Jev has the details."
+    echo "(US-hosted, EU SCCs in their DPA, no training on inputs). plugins/harness-loops/README.md §Jev has the details."
     node "$LOOPS_DIR/scripts/jev-setup.js" || true
   fi
 fi

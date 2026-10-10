@@ -17,7 +17,7 @@ RUN_DIR="${1:?usage: dp-tmux.sh <runDir> [sessionName]}"
 SESSION="${2:-dp-$(basename "$RUN_DIR" | tail -c 8)}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-command -v tmux >/dev/null 2>&1 || { echo "dp-tmux: tmux not installed — no live view (see README §tmux)" >&2; exit 0; }
+command -v tmux >/dev/null 2>&1 || { echo "dp-tmux: tmux not installed — no live view (see docs/loops.md, §Live view)" >&2; exit 0; }
 mkdir -p "$RUN_DIR"
 : > "$RUN_DIR/bus.log" 2>/dev/null || true
 
