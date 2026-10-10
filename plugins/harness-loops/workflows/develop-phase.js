@@ -27,7 +27,7 @@ export const meta = {
 //   prd             where the active PRD is
 //   preflight       the project's gate command (default 'npm run preflight')
 //   forbidden       commands the implementer must never run (deploys, remote migrations, …)
-//   implementerRules, reviewerCriteria   extra lines for those two prompts
+//   analystRules, implementerRules, reviewerCriteria   extra lines for those three prompts
 //   externalReview  the bridge a provider-qualified reviewer runs through (default scripts/external-review.sh)
 //   commit          true: commit on the current branch when approved and the gate is green
 //   commitRules     extra rules for the commit message
@@ -53,7 +53,10 @@ const TYPES = cfg.agentTypes ?? {}
 const seat = (name, extra) => ({ model: MODELS[name], ...(TYPES[name] ? { agentType: TYPES[name] } : {}), ...extra })
 
 const prdHint = cfg.prd ?? (cfg.phase ? `docs/prd/prd-phase-${cfg.phase}-*.md` : 'the active phase in TASKS.md or equivalent')
-const readFirst = list(cfg.context).length ? list(cfg.context).join(', ') : `memory/, ${prdHint}, TASKS.md or equivalent`
+// A project's context list and a per-run PRD both reach the seats: the PRD names this run's spec.
+const readFirst = list(cfg.context).length
+  ? [...list(cfg.context), ...(cfg.prd ? [cfg.prd] : [])].join(', ')
+  : `memory/, ${prdHint}, TASKS.md or equivalent`
 const PREFLIGHT_CMD = cfg.preflight ?? 'npm run preflight'
 const BRIDGE = cfg.externalReview ?? 'scripts/external-review.sh'
 
@@ -119,7 +122,7 @@ Return a plan of at most 300 words:
 2. Tests to add or adjust (the reviewer demands regression coverage when existing logic changes).
 3. Risks, and what NOT to touch (out of the PRD's scope). Every risk you name is binding on the implementer.
 If the brief is not enough or an ambiguity blocks the work, the FIRST line is "BLOCKER: <reason>" and nothing else.
-No full code: the implementer writes it.`,
+No full code: the implementer writes it.${list(cfg.analystRules).map((r) => `\n${r}`).join('')}`,
       seat('analyst', { label: 'analyst', phase: 'Plan' })
     ) ?? ''
     if (!plan) log('⚠ Analyst returned nothing — the implementer works from the brief alone')

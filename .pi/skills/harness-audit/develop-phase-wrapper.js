@@ -25,7 +25,9 @@ const GLOBAL = [
   { scriptPath: '__HOME__/.claude/harness/develop-phase.js' },
   'harness-loops:develop-phase',
 ]
-const runArgs = args && typeof args === 'object' ? args : typeof args === 'string' ? { task: args } : {}
+// A run launched by hand may pass its args as a JSON string; anything else that is a string is the task.
+const parsed = typeof args === 'string' && /^\s*\{/.test(args) ? (() => { try { return JSON.parse(args) } catch { return null } })() : null
+const runArgs = parsed ?? (args && typeof args === 'object' ? args : typeof args === 'string' ? { task: args } : {})
 const merged = { ...CONFIG, ...runArgs, models: { ...CONFIG.models, ...(runArgs.models ?? {}) } }
 for (const ref of GLOBAL) {
   try {

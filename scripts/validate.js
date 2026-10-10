@@ -2602,6 +2602,7 @@ check('develop-phase loop honours every wrapper config key a fork used to hard-c
       const off = await run({ ...CFG, commit: false }, ok);
       const red = await run(CFG, (l) => (l === 'preflight' ? { ...pf, exitCode: 1, failedCheck: 'test' } : ok(l)));
       const noGit = await run({ ...CFG, commit: false, integrate: undefined, doneStep: 'keep the backups in data-ouputs/' }, ok);
+      const withPrd = await run({ ...CFG, prd: 'docs/prds/PRD-007-x.md', analystRules: ['Name the negative guard.'] }, ok);
       console.log(JSON.stringify({
         approved: r.out.approved && r.out.handoff.status === 'complete',
         lang: /in French/.test((r.by('commit') || {}).prompt) && /No Co-Authored-By line\./.test((r.by('commit') || {}).prompt),
@@ -2614,6 +2615,8 @@ check('develop-phase loop honours every wrapper config key a fork used to hard-c
         integrate: r.out.nextStep.includes('committed abc123, then scripts/integrer.sh'),
         noCommit: [off.calls.some((c) => c.label === 'commit'), red.calls.some((c) => c.label === 'commit')],
         doneStep: noGit.out.nextStep.endsWith('keep the backups in data-ouputs/') && !/git add/.test(noGit.out.nextStep),
+        prdWithContext: withPrd.by('scout').prompt.includes('docs/client-context/, docs/prds/PRD-007-x.md'),
+        analystRules: withPrd.by('analyst').prompt.includes('Name the negative guard.'),
       }));
     })().catch((e) => console.log('THREW ' + e.message));
   };
@@ -2632,6 +2635,8 @@ check('develop-phase loop honours every wrapper config key a fork used to hard-c
     integrate: [true, 'integrate is missing from nextStep after a commit'],
     noCommit: [[false, false], 'the commit seat ran with commit:false or after a red preflight'],
     doneStep: [true, 'doneStep did not replace the git advice for a project whose code git does not track'],
+    prdWithContext: [true, "a per-run prd was dropped because the project sets context — the seats never saw this run's spec"],
+    analystRules: [true, 'analystRules did not reach the analyst'],
   };
   for (const [k, [v, why]] of Object.entries(want)) {
     if (JSON.stringify(r[k]) !== JSON.stringify(v)) throw new Error(`${why} (got ${JSON.stringify(r[k])})`);
@@ -2668,6 +2673,7 @@ check('develop-phase wrapper: config + per-run args reach the loop, a missing co
     (async () => {
       const direct = await run({ task: 'T', models: { reviewer: 'openrouter/x/y' } }, (ref, a) => a);
       const str = await run('just a task', (ref, a) => a);
+      const json = await run('{"task": "from json", "maxIter": 2}', (ref, a) => a);
       const fallback = await run({ task: 'T' }, (ref, a, n) => (n === 1 ? notFound(ref) : { via: ref }));
       const unreadable = (ref) => { throw new Error(`workflow({scriptPath: '${ref.scriptPath}'}): scriptPath must be a script path this tool returned, or a file you can already read (the working directory or a directory you have added)`); };
       const outside = await run({ task: 'T' }, (ref, a, n) => (n < 3 ? (n === 1 ? notFound(ref) : unreadable(ref)) : { via: ref }));
@@ -2677,6 +2683,7 @@ check('develop-phase wrapper: config + per-run args reach the loop, a missing co
         merged: [direct.out.lang, direct.out.preflight, direct.out.task, direct.out.models.reviewer, direct.out.models.implementer, direct.out.forbidden[0]],
         path: direct.tried,
         str: str.out.task,
+        json: [json.out.task, json.out.maxIter],
         fallback: [fallback.out && fallback.out.via && fallback.out.via.scriptPath, fallback.tried.length],
         outside: [outside.out && outside.out.via, outside.tried.length],
         none: none.out && none.out.handoff.status,
@@ -2691,6 +2698,7 @@ check('develop-phase wrapper: config + per-run args reach the loop, a missing co
     merged: [['fr', 'pnpm preflight', 'T', 'openrouter/x/y', 'opus', 'wrangler deploy'], 'config and per-run args are not merged (run args win, models merge key by key)'],
     path: [['.claude/harness/develop-phase.js'], "the first route is not the project's own copy — the only one every session can read"],
     str: ['just a task', 'a string arg did not become the task'],
+    json: [['from json', 2], 'args passed as a JSON string were read as the task instead of as args'],
     fallback: [['/home/u/.claude/harness/develop-phase.js', 2], 'a missing project copy did not fall back to the copy under $HOME'],
     outside: [['harness-loops:develop-phase', 3], 'a copy the session may not read did not fall back to the plugin workflow'],
     none: ['blocked', 'with neither route the wrapper did not return a blocked handoff'],
