@@ -40,7 +40,10 @@ const path = require('node:path');
 // why was this decided" from the graph, STATUS.md and docs, and never proposes work. It is in the
 // line-up for one reason — a role that answers questions all day at implementer prices is the
 // cheapest thing in the harness to get wrong, and it is the natural home for a free-tier model.
-const ROLES = ['architect', 'orchestrator', 'implementer', 'reviewer', 'preflight', 'scorer', 'critic', 'judge', 'explainer'];
+// 'scout' is develop-phase's first seat: read-only, it gathers context (graph, STATUS, PRD) into a
+// short brief so the analyst and the implementer start from it instead of re-exploring the repo at
+// their own prices. High volume, low difficulty — it wants a long context and a low price, not depth.
+const ROLES = ['scout', 'architect', 'orchestrator', 'implementer', 'reviewer', 'preflight', 'scorer', 'critic', 'judge', 'explainer'];
 
 // Targets whose harness accepts a non-Anthropic `provider` (Pi, Kilo, OpenCode per D25). Every
 // other target — Claude Code chief among them — only understands bare Anthropic model ids, so a

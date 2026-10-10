@@ -195,13 +195,14 @@ const PI_COMMAND_DROPPED_FIELDS = ['allowed-tools', 'disable-model-invocation'];
 // has the same inline `: ` — are unaffected and are left unquoted.
 const yamlQuote = (v) => JSON.stringify(String(v));
 
-// session-review does NOT port to Pi, and this is the honest half of the port rather than a gap in it.
+// session-review and dashboard do NOT port to Pi, and this is the honest half of the port rather
+// than a gap in it.
 // Its step 1 shells out to `node "${CLAUDE_PLUGIN_ROOT}/scripts/loop-stats.js"` — a variable that only
 // exists inside the Claude Code plugin runtime, pointing at a script `--target pi` does not install —
 // and its data source is the transcripts Claude Code writes (its own description says so), not Pi's
 // sessions, which live elsewhere in a different format. Ported, it would be a template that looks like a
 // working loop and dies on its first command. That is precisely the failure mode this port refuses.
-const PI_UNPORTABLE_COMMANDS = new Set(['session-review']);
+const PI_UNPORTABLE_COMMANDS = new Set(['session-review', 'dashboard-harness']);
 
 // Task-tool-specific body text, replaced with the pi-subagents `subagent` tool's own vocabulary — every
 // pair below is a literal substring verified against commands/*.md, 2026-07-13. A pair that matches
@@ -244,6 +245,10 @@ const PI_COMMAND_BODY_SUBSTITUTIONS = [
     '```text\nThis target does not install the plugin\'s loop-gate.js. Check the run directory by hand:\nlist docs/harness-dev/loop-runs/<run-slug>/ and read the round-<n>.json files it holds. Rounds must\nbe the contiguous sequence 1..n; a gap, an unreadable file, or an aggregate JSON already present is\nAMBIGUOUS_RUN_STATE — stop and hand it to the human rather than reconciling it yourself.\n```'],
   ['```bash\nnode "${CLAUDE_PLUGIN_ROOT:-.claude}/scripts/loop-gate.js" check-findings <file> --root . --seat <seat>\n```',
     '```text\nThis target does not install the plugin\'s loop-gate.js. Check each seat\'s JSON by hand against the\ncontract in its agent file: the fixed severity ladder (blocker|major|minor), a "file" that exists in\nthe repo, a "line" inside that file (0 = file-wide), a non-empty summary and fix, and no "id" or\n"critic" the seat assigned itself. This is a real loss: the checks are mechanical, and a chair doing\nthem by eye is the party the gate existed to be independent of.\n```'],
+  // orchestrate.md, review-loop.md: the round-2+ dedupe is the same script again. Degraded to the
+  // hand-check the chair used to do before the gate owned it, and disclosed as ungated.
+  ['```bash\nnode "${CLAUDE_PLUGIN_ROOT:-.claude}/scripts/loop-gate.js" dedupe docs/harness-dev/loop-runs/<run-slug>/round-<n-1>.json docs/harness-dev/loop-runs/<run-slug>/raw/<round>-aggregate.json --out docs/harness-dev/loop-runs/<run-slug>/dedupe-<n>.json\n```',
+    '```text\nThis target does not install the plugin\'s loop-gate.js. Compare this round\'s findings with the previous\nround\'s by hand — same seat, same file, same defect, judged by meaning — and count the new blockers and\nmajors yourself. Record in the report that the dedupe was ungated.\n```'],
   // iterate.md: the builder seat\'s end-of-round handoff goes through the same script. Same loss, same
   // degradation: the shape check becomes a hand-check the chair performs on a seat it is also driving.
   ['```bash\nnode "${CLAUDE_PLUGIN_ROOT:-.claude}/scripts/loop-gate.js" check-handoff <file> --seat builder\n```',
@@ -293,7 +298,8 @@ const CAP_LOOP_GATE = {
     "  shell out to the plugin's scripts/loop-gate.js, which refuses a seat's findings when they anchor at",
     '  a file that does not exist or a line past the end of one, recomputes the score from the criteria',
     "  table, refuses a builder's handoff that names no evidence, and refuses to guess the state of a",
-    '  half-written run. This target installs no scripts/, so those',
+    '  half-written run, and (with a TypeSafe key) judges which round-2+ findings restate the previous',
+    "  round's. This target installs no scripts/, so those",
     '  steps are ported as hand-checks the chair performs on itself — which is the party the gate was',
     '  independent of. The rounds still run; the arithmetic and the anchor checks are no longer verified.',
   ],

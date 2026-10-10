@@ -38,6 +38,7 @@ const walk = (dir) => {
     .flatMap((e) => (e.isDirectory() ? walk(path.join(dir, e.name)) : [path.join(dir, e.name)]))
     .sort();
 };
+const slugOfPath = (p) => p.replace(/[/.]/g, '-');
 const hasFrontmatterField = (rel, field) => {
   const s = read(rel);
   if (!/^---\n/.test(s)) throw new Error(`${rel} missing frontmatter`);
@@ -141,21 +142,24 @@ check('every frontmatter survives a STRICT YAML parser (GitHub, Pi), not just a 
   return `${files.length} frontmatter block(s) strict-YAML safe`;
 });
 
-// Pins the command count the README's loop catalog promises (5: skill-loop, orchestrate, review-loop,
-// iterate, session-review — Loop 1 is a pattern, not a command, by design). A 6th command shipped without
-// updating the README catalog would drift silently; so would a command that lost its argument-hint, which
-// is the piece `/command` autocomplete and the SlashCommand tool both read to know how to call it.
+// Pins the command count the README's catalog promises: 5 loops that have a command (skill-loop,
+// orchestrate, review-loop, iterate, session-review — Loop 1 is a pattern, not a command, by design)
+// plus 1 observer (dashboard, which iterates on nothing and costs no tokens). A 7th command shipped
+// without updating the README catalog would drift silently; so would a command that lost its
+// argument-hint, which is the piece `/command` autocomplete and the SlashCommand tool both read.
 //
-// The cap is the anti-proliferation gate: five commands for the five loops that have one (Loop 1 is a
-// pattern, not a command), and a sixth file has to argue for itself in the PRD before it argues for
-// itself here. F10 raised the cap from 4 to 5 for session-review.
+// The cap is the anti-proliferation gate, and it is a gate precisely because raising it is not free:
+// a new file has to argue for itself in a PRD before it argues for itself here. F10 raised it from 4
+// to 5 for session-review; PRD-003 §4 raises it from 5 to 6 for dashboard, on the grounds that the
+// observer is not a loop and that folding it into session-review would put a free report behind a
+// model pass that is deliberately run once a fortnight.
 //
-// Negative control (2026-07-12, both reverted): argument-hint stripped from commands/iterate.md — exit 1,
-// "commands/iterate.md frontmatter missing argument-hint"; a 6th command copied in — exit 1,
-// "commands/*.md = 6, expected exactly 5".
-check('exactly 5 loop commands, each with description + argument-hint', () => {
+// Negative controls (2026-07-12, both reverted): argument-hint stripped from commands/iterate.md —
+// exit 1, "commands/iterate.md frontmatter missing argument-hint"; an extra command copied in —
+// exit 1, "commands/*.md = 7, expected exactly 6" (2026-09-06, reverted).
+check('exactly 6 commands — 5 loops and 1 observer — each with description + argument-hint', () => {
   const files = globMd('commands');
-  if (files.length !== 5) throw new Error(`commands/*.md = ${files.length}, expected exactly 5`);
+  if (files.length !== 6) throw new Error(`commands/*.md = ${files.length}, expected exactly 6`);
   for (const rel of files) {
     hasFrontmatterField(rel, 'description');
     hasFrontmatterField(rel, 'argument-hint');
@@ -257,16 +261,27 @@ check('hooks.json valid + every referenced script exists and parses', () => {
 //     "README's install sentence does not count four guards — hooks.json installs 4"
 check('README discloses every PreToolUse guard hooks.json installs', () => {
   const h = JSON.parse(read('hooks/hooks.json'));
-  const guards = new Set((h.hooks.PreToolUse || []).flatMap((g) => g.hooks.map((x) => {
+  const scriptsOf = (event) => (h.hooks[event] || []).flatMap((g) => g.hooks.map((x) => {
     const m = /scripts\/hooks\/([\w-]+)\.js/.exec(x.command);
     return m ? m[1] : null;
-  })).filter(Boolean));
+  })).filter(Boolean);
+  const guards = new Set(scriptsOf('PreToolUse'));
   if (guards.size < 3) throw new Error(`expected ≥3 PreToolUse guards in hooks.json, found ${guards.size}`);
   const t = read('README.md');
   const install = t.split('### Option 2')[0];
   for (const g of guards) {
     if (!new RegExp(`^\\|\\s*\`${g}\``, 'm').test(install)) {
       throw new Error(`README never discloses the PreToolUse guard '${g}' — it runs on every tool call and the install section does not say so`);
+    }
+  }
+  // The same rule for every other event: a hook that runs on each prompt or each session start and
+  // is named nowhere in the install section is a hook nobody consented to, guard or not.
+  for (const event of Object.keys(h.hooks)) {
+    if (event === 'PreToolUse') continue;
+    for (const g of new Set(scriptsOf(event))) {
+      if (!new RegExp(`^\\|\\s*\`${g}\``, 'm').test(install)) {
+        throw new Error(`README never discloses the ${event} hook '${g}' in the install section`);
+      }
     }
   }
   const WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven'];
@@ -482,6 +497,364 @@ check('loop-stats degrades gracefully on the broken telemetry fixture', () => {
   if (d.totals.runs !== 1) throw new Error(`totals.runs = ${d.totals.runs}, expected 1 — only the clean turn should survive`);
 
   return `${d.warnings} warnings · ${d.totals.runs} run survived`;
+});
+
+// `--project` takes a path as readily as a slug. The two are not interchangeable in one case that
+// bites daily: Claude Code slugs the *realpath* of the cwd, so a project reached through a symlinked
+// parent (~/Documents/pro-projects -> ~/projects/pro-projects here) has its telemetry under the
+// realpath slug while every record inside still reports the symlink path as its cwd. Passing the
+// path the user actually types must find the directory anyway, and a miss must name what was tried.
+//
+// Negative controls (2026-09-06, each applied, observed, reverted — all exit 1):
+//   realpathSync dropped from slugCandidates .... symlinked-path candidates = 1, expected 2
+//   candidate loop replaced by args.project ..... path form throws "no telemetry under ..."
+check('loop-stats resolves --project from a slug, a path and a symlinked path', () => {
+  const script = path.join(ROOT, 'scripts/loop-stats.js');
+  const { slugCandidates } = require(script);
+
+  const plain = slugCandidates('/workspace/demo');
+  if (plain.length !== 1 || plain[0] !== '-workspace-demo') throw new Error(`path slug = ${JSON.stringify(plain)}`);
+  const asSlug = slugCandidates('-workspace-demo');
+  if (asSlug.length !== 1 || asSlug[0] !== '-workspace-demo') throw new Error('a slug must pass through untouched');
+
+  const real = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'harness-real-')));
+  const linkDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'harness-link-')));
+  const link = path.join(linkDir, 'via-symlink');
+  fs.symlinkSync(real, link);
+  const both = slugCandidates(link);
+  if (both.length !== 2) throw new Error(`symlinked-path candidates = ${both.length}, expected 2`);
+  if (both[0] !== slugOfPath(real)) throw new Error('realpath slug must be tried first');
+  if (both[1] !== slugOfPath(link)) throw new Error('the literal path must stay as a fallback candidate');
+
+  // A path form must reach the same fixture the slug form reaches.
+  const root = path.join(ROOT, 'scripts/fixtures/telemetry');
+  const viaSlug = execFileSync('node', [script, '--root', root, '--project', 'demo', '--json'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  if (JSON.parse(viaSlug).totals.runs !== 8) throw new Error('slug form regressed');
+
+  // And a miss must print the candidates, not just the first one.
+  let stderr = '';
+  try {
+    execFileSync('node', [script, '--root', root, '--project', '/nonexistent/project-x', '--json'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    throw new Error('a missing project must exit non-zero');
+  } catch (e) {
+    stderr = String(e.stderr || '');
+    if (!/tried: /.test(stderr)) throw new Error(`error must name the candidates tried, got: ${stderr.split('\n')[0]}`);
+    if (!/available:/.test(stderr)) throw new Error('error must still list the available slugs');
+  }
+  return 'slug · path · symlinked path all resolve';
+});
+
+// --from-json re-renders a saved aggregate without re-walking the transcripts; --json-out saves it.
+// The pair is what lets /dashboard and /session-review share one parse instead of paying for two.
+//
+// Negative control (2026-09-06, applied, observed, reverted): --from-json branch removed from main()
+// so the flag fell through to a live aggregate — exit 1, "no telemetry under ... tried: -tmp-...".
+check('loop-stats round-trips its aggregate through --json-out / --from-json', () => {
+  const script = path.join(ROOT, 'scripts/loop-stats.js');
+  const root = path.join(ROOT, 'scripts/fixtures/telemetry');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-json-'));
+  const out = path.join(tmp, 'demo.json');
+
+  execFileSync('node', [script, '--root', root, '--project', 'demo', '--json-out', out], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  const saved = JSON.parse(fs.readFileSync(out, 'utf8'));
+  if (saved.totals.runs !== 8) throw new Error(`--json-out wrote totals.runs = ${saved.totals.runs}, expected 8`);
+
+  // Rendered from the file alone: --root points nowhere, so a live parse would abort.
+  const rendered = execFileSync('node', [script, '--root', path.join(tmp, 'no-such-root'), '--from-json', out],
+    { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  if (!/LOOP-STATS/.test(rendered)) throw new Error('--from-json did not render the saved aggregate');
+  return '--json-out → --from-json renders without touching transcripts';
+});
+
+// The signals fixture pins every transcript shape the operator blocks read. It exists because those
+// shapes are internal and undocumented: a Claude Code release that renames `compactMetadata` or
+// stops writing hook attachments must break CI here rather than quietly zero a column.
+//
+// Three of its records exist only to be NOT counted, which is the half of the fixture that matters:
+// a prompt that mentions destructive-guard by name, a failed grep whose OUTPUT quotes a guard's
+// blocked message (this repo greps its own transcripts, so a matcher that is not anchored at the
+// start of the result invents fires out of its own logs), and a `Round 1.` turn a loop wrote to its
+// own subagent — byte-identical to a keystroke, and only its shape gives it away.
+//
+// Negative controls (2026-09-06, each applied by hand, observed, reverted — all exit 1):
+//   GUARD_FIRE unanchored (/harness-audit .../ without ^) ... destructive-guard fires = 1, expected 0
+//   looksAgentAuthored disabled ............................ droppedAgentShaped = 0, expected 1
+//   dedup window 60s → 0s .................................. dedupedRecords = 0, expected 1
+//   Task-only spawn lookup (the pre-P0 code) ............... reviewer row absent — agent lands as "subagent"
+//   hook attachments keyed per record instead of per toolUseID  otherHooks[0].runs = 3, expected 2
+check('loop-stats mines tools, guards and hygiene from the signals fixture', () => {
+  const script = path.join(ROOT, 'scripts/loop-stats.js');
+  const raw = execFileSync('node', [script, '--root', path.join(ROOT, 'scripts/fixtures/telemetry'),
+    '--project', 'demo-signals', '--json'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  const d = JSON.parse(raw);
+  if (d.warnings !== 0) throw new Error(`${d.warnings} line(s) became unreadable`);
+
+  // tools: five Bash calls, four of which failed — three the same way, one blocked by a guard.
+  const bash = d.tools.byName.find((r) => r.name === 'Bash');
+  if (!bash || bash.calls !== 6 || bash.errors !== 5) throw new Error(`Bash = ${JSON.stringify(bash)}, expected 6 calls / 5 errors`);
+  if (d.tools.totalCalls !== 10) throw new Error(`totalCalls = ${d.tools.totalCalls}, expected 10`);
+  if (d.tools.errorClusters.length !== 1) throw new Error(`errorClusters = ${d.tools.errorClusters.length}, expected 1`);
+  const [cluster] = d.tools.errorClusters;
+  if (cluster.count !== 3 || cluster.tool !== 'Bash') throw new Error(`cluster = ${cluster.count}×${cluster.tool}, expected 3×Bash`);
+  // A blocked call and a refused call are the guard and the human, never a crash to cluster.
+  if (/no-verify|doesn't want to proceed/.test(cluster.sample)) throw new Error('a guard fire or a denial leaked into the crash clusters');
+
+  if (d.tools.denials.count !== 1) throw new Error(`denials = ${d.tools.denials.count}, expected 1`);
+  if (d.tools.denials.reasons[0].reason !== 'use the helper, do not inline it') {
+    throw new Error(`denial reason = ${JSON.stringify(d.tools.denials.reasons[0].reason)}`);
+  }
+  if (d.tools.denials.reasons[0].tool !== 'Edit') throw new Error('the denial must name the tool it refused');
+  if (d.tools.subagents.byType.reviewer !== 1) throw new Error('Agent spawn lost — subagent_type never reached the count');
+  if (d.tools.planMode.exitPlanMode !== 1 || d.tools.planMode.sessionsWithPlanMode !== 1) throw new Error('plan mode not detected');
+  if (d.tools.apiErrors !== 1) throw new Error(`apiErrors = ${d.tools.apiErrors}, expected 1`);
+
+  // The Agent spawn also has to name the row its tokens land in.
+  if (!d.agents.some((a) => a.agentType === 'reviewer')) throw new Error('Agent-spawned subagent lost its role — check the Task|Agent join');
+
+  // guards: one real fire, and one guard named in prose that must stay at zero.
+  const guards = Object.fromEntries(d.guards.pluginGuards.map((g) => [g.name, g.fires]));
+  if (guards['block-no-verify'] !== 1) throw new Error(`block-no-verify fires = ${guards['block-no-verify']}, expected 1`);
+  if (guards['destructive-guard'] !== 0) throw new Error('a guard merely named — in a prompt, or inside a failed grep of the logs — was counted as a fire');
+  if (d.guards.otherHooks.length !== 1) throw new Error(`otherHooks = ${d.guards.otherHooks.length}, expected 1 (two attachments, one hook)`);
+  if (d.guards.otherHooks[0].runs !== 2 || d.guards.otherHooks[0].nonZeroExit !== 1) {
+    throw new Error(`hook runs/nonZero = ${d.guards.otherHooks[0].runs}/${d.guards.otherHooks[0].nonZeroExit}, expected 2/1`);
+  }
+
+  // hygiene: 10 user turns, minus one agent-shaped and one duplicate, is 8 events.
+  const h = d.hygiene;
+  if (d.prompts.total !== 10) throw new Error(`prompts.total = ${d.prompts.total}, expected 10`);
+  if (h.humanPrompts !== 8) throw new Error(`humanPrompts = ${h.humanPrompts}, expected 8`);
+  if (h.droppedAgentShaped !== 1) throw new Error(`droppedAgentShaped = ${h.droppedAgentShaped}, expected 1`);
+  if (h.dedupedRecords !== 1) throw new Error(`dedupedRecords = ${h.dedupedRecords}, expected 1`);
+  if (h.continuations.count !== 3 || h.continuations.afterAgentTurn !== 3) {
+    throw new Error(`continuations = ${h.continuations.count}/${h.continuations.afterAgentTurn}, expected 3/3`);
+  }
+  if (h.corrections.count !== 1 || h.corrections.proxy !== true) throw new Error('the correction count must be 1 and must carry proxy: true');
+  if (h.interrupts !== 1) throw new Error(`interrupts = ${h.interrupts}, expected 1`);
+  if (h.compactions.count !== 1 || h.compactions.auto !== 1 || h.compactions.avgPreTokens !== 500000) {
+    throw new Error(`compactions = ${JSON.stringify(h.compactions)}`);
+  }
+  if (h.modelSwitches.count !== 2 || h.modelSwitches.targets['opus[1m]'] !== 2) throw new Error('model switches lost — the wrapper tags arrive in either order');
+  if (h.slashCommands['/grilling'] !== 1) throw new Error('a skill-backed slash command must be counted even when <command-message> comes first');
+  if (h.skillCalls.grilling !== 1) throw new Error('Skill tool invocation lost');
+
+  // The clean fixture must stay clean: new parsers may not invent signals where there are none.
+  const old = JSON.parse(execFileSync('node', [script, '--root', path.join(ROOT, 'scripts/fixtures/telemetry'),
+    '--project', 'demo', '--json'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }));
+  if (old.prompts.total !== 3) throw new Error(`the signal parsers moved prompts.total to ${old.prompts.total}`);
+  if (old.hygiene.continuations.count !== 0 || old.hygiene.interrupts !== 0) throw new Error('hygiene invented a signal on the clean fixture');
+  if (old.guards.pluginGuards.some((g) => g.fires)) throw new Error('a guard fired on a fixture with no blocked call');
+
+  return `${d.tools.totalCalls} calls · 1 cluster ×3 · 1 denial · 1 guard fire · ${h.humanPrompts} human prompts`;
+});
+
+// The half of the dashboard that says what to do about itself: what is installed against what ran,
+// what the last /session-review proposed against what the repo now contains, and the rules that turn
+// both into cards. HOME is pointed at an empty directory so the user-level skill roots and the
+// installed-plugin manifest cannot make this check depend on the machine it runs on.
+//
+// The assertion that matters most is the set of rules that stayed SILENT. A rule engine that fires
+// on everything is the horoscope this repo keeps refusing to ship, and the thresholds are the only
+// thing standing between the two: 3 continuations is below the floor of 5, 1 denial is below 3,
+// 2 model switches are below 5. All three are present in the fixture, and none of them may fire.
+//
+// Negative controls (2026-09-06, each applied by hand, observed, reverted — all exit 1):
+//   continue-token threshold 5 → 2 .................... cards gained continue-token
+//   grepContract made case-sensitive .................. humanizer card = pending, expected promoted
+//   DISPATCH/HABIT cards given state 'pending' ........ latest.pending = 4, expected 2
+//   parseReviewCards regex loosened to /^▸/ ........... 5 cards parsed from a 4-card report
+//   usedNotInstalled counting typed /names again ...... usedNotInstalled = [model], expected []
+check('loop-stats reads the skill inventory, the review lifecycle, and fires cards only on evidence', () => {
+  const script = path.join(ROOT, 'scripts/loop-stats.js');
+  const root = path.join(ROOT, 'scripts/fixtures/telemetry');
+  const repo = path.join(ROOT, 'scripts/fixtures/repo');
+  const emptyHome = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-home-'));
+  const run = (args) => JSON.parse(execFileSync('node', [script, ...args], {
+    encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, HOME: emptyHome },
+  }));
+
+  const d = run(['--root', root, '--project', 'demo-signals', '--repo', repo, '--json']);
+
+  // inventory: two project skills, one of them invoked in the transcript.
+  if (d.skills.bySource.project !== 2) throw new Error(`project skills = ${d.skills.bySource.project}, expected 2`);
+  const grilling = d.skills.used.find((u) => u.name === 'grilling');
+  if (!grilling || grilling.viaSkillTool !== 1 || grilling.viaSlash !== 1) {
+    throw new Error(`grilling = ${JSON.stringify(grilling)}, expected 1 via the Skill tool and 1 typed`);
+  }
+  // advice: the unused project skill is an uninstall candidate with the 'unused' reason and its own
+  // word count; the used one is kept; a typed built-in (/model) is neither. Outcomes: grilling was
+  // followed by a bare «continua», which is counted, and by nothing that looks like a correction.
+  // caught: the receipt is a list of events, each one traceable. The repo fixture holds one promoted
+  // review card, one A/B row, one verified and one falsified prediction; the signals transcript holds
+  // one guard fire (block-no-verify) and no rejected workflow. 1+1+1+1+1 = 5, plus the fixture's
+  // LEARNINGS.md entries. The advisory repeat-tool-guard never counts as a catch.
+  const cg = d.caught;
+  if (!cg) throw new Error('caught missing');
+  if (cg.guardFires.length !== 1 || cg.guardFires[0].name !== 'block-no-verify' || cg.guardFires[0].fires !== 1) throw new Error(`caught.guardFires = ${JSON.stringify(cg.guardFires)}`);
+  if (cg.promoted.length !== 1) throw new Error(`caught.promoted = ${cg.promoted.length}, expected 1`);
+  if (cg.ab.length !== 1 || cg.predictions.verified !== 1 || cg.predictions.falsified !== 1) throw new Error(`caught savings drifted: ${JSON.stringify({ ab: cg.ab.length, p: cg.predictions })}`);
+  if (cg.total !== 5 + cg.learnings) throw new Error(`caught.total = ${cg.total}, expected ${5 + cg.learnings}`);
+  if (!d.cards.some((c) => c.rule === 'harness-caught')) throw new Error('harness-caught card did not fire on a fixture with 5 events');
+  const adv = d.skills.advice;
+  if (!adv || JSON.stringify(adv.keep) !== '["grilling"]') throw new Error(`advice.keep = ${JSON.stringify(adv && adv.keep)}`);
+  if (adv.uninstall.length !== 1 || adv.uninstall[0].name !== 'unused-one') throw new Error(`advice.uninstall = ${JSON.stringify(adv.uninstall)}`);
+  if (adv.uninstall[0].reasons[0].code !== 'unused' || adv.uninstall[0].words !== 17) throw new Error(`uninstall reason drifted: ${JSON.stringify(adv.uninstall[0].reasons)}`);
+  if (adv.improve.length !== 0) throw new Error(`advice.improve fired on one use: ${JSON.stringify(adv.improve)}`);
+  const oc = d.hygiene.skillOutcomes.grilling;
+  if (!oc || oc.uses !== 1 || oc.continued !== 1 || oc.corrected !== 0) throw new Error(`skillOutcomes.grilling = ${JSON.stringify(oc)}`);
+  if (JSON.stringify(d.skills.installedNotUsed.project) !== JSON.stringify(['unused-one'])) {
+    throw new Error(`installedNotUsed.project = ${JSON.stringify(d.skills.installedNotUsed.project)}`);
+  }
+  // A typed /model is a built-in, not a skill someone deleted.
+  if (d.skills.usedNotInstalled.length !== 0) throw new Error(`usedNotInstalled = ${JSON.stringify(d.skills.usedNotInstalled)}, expected []`);
+  if (!d.skills.roles.includes('reviewer')) throw new Error('.claude/agents roles not read');
+
+  // lifecycle: four cards, one promoted by a term that IS in the contract, one pending because its
+  // term is not, one skill card pending because nothing of that name is installed, one n/a.
+  const rv = d.reviews;
+  if (!rv || !rv.latest) throw new Error('the session-review report was not found');
+  if (rv.latest.cards.length !== 4) throw new Error(`cards parsed = ${rv.latest.cards.length}, expected 4`);
+  const byState = rv.latest.cards.map((c) => `${c.type}:${c.state}`);
+  const want = ['AGENTS.md RULE:promoted', 'AGENTS.md RULE:pending', 'SKILL CANDIDATE:pending', 'HABIT:n/a'];
+  if (JSON.stringify(byState) !== JSON.stringify(want)) throw new Error(`states = ${JSON.stringify(byState)}`);
+  if (!/^AGENTS\.md:\d+$/.test(rv.latest.cards[0].evidence)) throw new Error(`promotion evidence = ${rv.latest.cards[0].evidence}, expected AGENTS.md:<line>`);
+  if (rv.latest.promoted !== 1 || rv.latest.pending !== 2) throw new Error(`promoted/pending = ${rv.latest.promoted}/${rv.latest.pending}, expected 1/2`);
+
+  // cards: exactly the three the evidence supports, and not one of the three below threshold.
+  const fired = d.cards.map((c) => c.rule).sort();
+  const expected = ['harness-caught', 'repeated-crash', 'review-pending', 'review-stale'];
+  if (JSON.stringify(fired) !== JSON.stringify(expected)) throw new Error(`cards = ${JSON.stringify(fired)}, expected ${JSON.stringify(expected)}`);
+  for (const belowThreshold of ['continue-token', 'denials-as-rules', 'manual-model-switch', 'skill-shelfware']) {
+    if (!d.rulesSilent.includes(belowThreshold)) throw new Error(`${belowThreshold} fired below its threshold`);
+  }
+  for (const c of d.cards) {
+    if (!c.evidence || !c.doesNotProve || !c.source) throw new Error(`card ${c.rule} is missing evidence, its limits, or its source field`);
+  }
+
+  // Without --repo there is no contract to grep and no report to read: absent, not empty.
+  const noRepo = run(['--root', root, '--project', 'demo-signals', '--json']);
+  if (noRepo.reviews !== null) throw new Error('reviews must be null when no repo carries a report');
+  if (noRepo.cards.some((c) => c.rule === 'review-pending')) throw new Error('a lifecycle card fired with no lifecycle to read');
+
+  // And a project with the same repo but a clean transcript fires only the lifecycle cards: a card
+  // needs evidence in the window, not merely a repo that has one.
+  const clean = run(['--root', root, '--project', 'demo', '--repo', repo, '--json']);
+  if (clean.cards.some((c) => c.rule === 'repeated-crash')) throw new Error('a crash card fired on a transcript with no failures');
+
+  return `${d.skills.installed} skills · ${rv.latest.cards.length} review cards (${rv.latest.promoted} promoted) · ${d.cards.length} cards · ${d.rulesSilent.length} silent`;
+});
+
+// /dashboard's whole claim is that it costs nothing: the script counts, the command prints. A version
+// of it that opened a .jsonl "for more context" would be a token-hungry command wearing a free one's
+// description, and the failure would be invisible — the report would still render.
+//
+// It also has to survive the two installs. Under the plugin, ${CLAUDE_PLUGIN_ROOT} resolves; under
+// `install.sh --target claude`, which copies scripts/ next to the commands, only the :-.claude
+// fallback does. A command that hardcodes either one is broken in the other.
+//
+// Negative controls (2026-09-06, each applied, observed, reverted — all exit 1):
+//   ${CLAUDE_PLUGIN_ROOT} without the :-.claude fallback ... "must use the ${CLAUDE_PLUGIN_ROOT:-.claude} form"
+//   disable-model-invocation removed ...................... "must be manual-only"
+//   a Read of a .jsonl added to the body .................. "must not read transcripts itself"
+check('dashboard-harness runs the script and never parses transcripts itself', () => {
+  const rel = 'commands/dashboard-harness.md';
+  mustExist(rel);
+  hasFrontmatterField(rel, 'description');
+  hasFrontmatterField(rel, 'argument-hint');
+  const body = read(rel);
+
+  if (!/\$\{CLAUDE_PLUGIN_ROOT:-\.claude\}\/scripts\/loop-stats\.js/.test(body)) {
+    throw new Error('dashboard must use the ${CLAUDE_PLUGIN_ROOT:-.claude} form — the bare variable is undefined under install.sh --target claude, and a bare relative path resolves against the user\'s cwd');
+  }
+  if (!/^disable-model-invocation:\s*true\s*$/m.test(body.split('---')[1] || '')) {
+    throw new Error('dashboard must be manual-only: half of what it renders is about the human');
+  }
+  if (!/allowed-tools:.*Bash\(node:\*\)/.test(body)) throw new Error('dashboard must be allowed to run the script');
+  // The command may name .jsonl when it explains why it does NOT read one; what it may not do is
+  // instruct a read of one.
+  if (/\b(Read|Grep|Glob)\b[^\n]{0,80}\.jsonl/.test(body)) {
+    throw new Error('dashboard must not read transcripts itself — the script counts, the command prints');
+  }
+  if (!/do not (parse|read) a `?\.jsonl/i.test(body)) {
+    throw new Error('dashboard must say, in the body, that it does not parse transcripts — the rule is load-bearing and invisible when broken');
+  }
+
+  // PRD-003 is what the raised command cap points at; a cap raised without its argument is just a
+  // bigger cap.
+  const prd = read('docs/prds/PRD-003-operator-dashboard.md');
+  if (!/Why a sixth command/.test(prd)) throw new Error('PRD-003 must carry the argument for the sixth command');
+  return 'manual-only · plugin-root fallback · counts nothing itself';
+});
+
+// --all walks every project on the machine, and the property that matters is what it does with the
+// one it cannot read: a corrupt slug is a row in failedProjects, never an abort. The telemetry
+// fixture root carries a deliberately broken project for exactly this, so the assertion is not
+// hypothetical.
+//
+// --brief is the other half of the same bargain: /session-review pays for a context window, so the
+// script hands it the judgment fields and withholds the accounting. A field nobody reads is vapour,
+// and a key set that drifts silently is how the brief stops being brief.
+//
+// Negative controls (2026-09-06, each applied by hand, observed, reverted — all exit 1):
+//   aggregate() called outside the try/catch in aggregateAll ... the whole run aborts on demo-broken
+//   'agents' added to BRIEF_KEYS ............................... brief carries the accounting again
+//   --repo forwarded into each project of --all ................ every project reports one repo's cards
+check('loop-stats aggregates every project under --all, and --brief withholds the accounting', () => {
+  const script = path.join(ROOT, 'scripts/loop-stats.js');
+  const root = path.join(ROOT, 'scripts/fixtures/telemetry');
+  const emptyHome = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-all-'));
+  const run = (args) => JSON.parse(execFileSync('node', [script, ...args], {
+    encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, HOME: emptyHome },
+  }));
+
+  const all = run(['--root', root, '--all', '--json']);
+  if (all.mode !== 'all') throw new Error('--all must mark its own aggregate');
+  const names = all.projects.map((p) => p.project).sort();
+  if (JSON.stringify(names) !== JSON.stringify(['demo', 'demo-broken', 'demo-signals'])) {
+    throw new Error(`--all projects = ${JSON.stringify(names)}`);
+  }
+  // The broken project is READ, not skipped: its two unreadable lines are warnings on its own row.
+  if (all.failedProjects.length !== 0) throw new Error(`failedProjects = ${JSON.stringify(all.failedProjects)}, expected none`);
+  const broken = all.projects.find((p) => p.project === 'demo-broken');
+  if (broken.warnings !== 2) throw new Error(`demo-broken warnings = ${broken.warnings}, expected 2 — a project that degraded must say so on its own row`);
+  if (all.totals.projects !== 3) throw new Error(`totals.projects = ${all.totals.projects}`);
+  const grilling = all.skills.find((sk) => sk.name === 'grilling');
+  if (!grilling || grilling.count !== 1 || grilling.projects !== 1) throw new Error(`cross-project skills = ${JSON.stringify(all.skills)}`);
+  // Cross-project prompts are deliberately absent: eight identical words mean different things in
+  // two repositories, and a "top prompt" pooled across them is a category error.
+  if (all.prompts !== undefined) throw new Error('--all must not pool recurring prompts across projects');
+
+  // --brief: exactly the judgment fields, and none of the accounting.
+  const mod = require(script);
+  const brief = run(['--root', root, '--project', 'demo-signals', '--repo', path.join(ROOT, 'scripts/fixtures/repo'), '--json', '--brief']);
+  const keys = Object.keys(brief).sort();
+  const want = mod.BRIEF_KEYS.slice().sort();
+  if (JSON.stringify(keys) !== JSON.stringify(want)) throw new Error(`brief keys = ${JSON.stringify(keys)}, expected ${JSON.stringify(want)}`);
+  for (const accounting of ['agents', 'totals', 'timeline', 'workflows', 'savings', 'lineup', 'loopRuns']) {
+    if (brief[accounting] !== undefined) throw new Error(`--brief carries ${accounting}, which a judgment pass never reads`);
+  }
+  // …but it must still carry the fields §1 of the command promises.
+  for (const promised of [brief.tools.denials, brief.tools.errorClusters, brief.cards, brief.reviews,
+    brief.skills.installedNotUsed, brief.prompts.top]) {
+    if (promised === undefined) throw new Error('--brief dropped a field /session-review section 1 promises');
+  }
+  if (brief.hygiene.droppedAgentShaped === undefined || brief.hygiene.dedupedRecords === undefined) {
+    throw new Error('--brief must carry the two counts section 2 tells the model to report');
+  }
+
+  // The card line format is a parser contract, and the command has to keep writing it.
+  const cmd = read('commands/session-review.md');
+  // The flag has to be on the invocation, not merely explained in the prose next to it.
+  const invocation = (cmd.match(/^.*loop-stats\.js.*$/m) || [''])[0];
+  if (!/--brief/.test(invocation)) throw new Error('/session-review must pass --brief on the command line — without it the loop pays for the accounting too');
+  if (!/▸ LIFECYCLE/.test(cmd)) throw new Error('/session-review must emit the LIFECYCLE card the dashboard reads back');
+  if (!/loop-stats.{0,40}pars/is.test(cmd)) throw new Error('/session-review must say that its card lines are parsed back, or the next author will restyle them');
+  const parsed = mod.parseReviewCards('▸ **HABIT**             10 turns are only «continua» ×10\n▸ not a card\n');
+  if (parsed.length !== 1 || parsed[0].type !== 'HABIT' || parsed[0].count !== 10) {
+    throw new Error(`the card parser drifted from the format the command writes: ${JSON.stringify(parsed)}`);
+  }
+
+  return `${all.projects.length} projects · ${all.failedProjects.length} unreadable · brief = ${keys.length} keys`;
 });
 
 // D25a — the HARD guardrail is the one piece of F11 that must never have a confirmable escape
@@ -1136,7 +1509,10 @@ check('README discloses every guardrail the port destroys', () => {
   }
   // A loop the port WITHHOLDS is a disclosure too — and the one most easily mistaken for a bug.
   for (const name of port.PI_UNPORTABLE_COMMANDS) {
-    if (!new RegExp(`\`?/${name}\`? does not port to Pi`, 'i').test(compat)) {
+    // One sentence may cover both withheld commands ("/session-review and /dashboard do not port to
+    // Pi"), which is how a reader wants to read it. The name still has to appear immediately before
+    // the claim, so a user searching for their command lands on the disclosure either way.
+    if (!new RegExp(`\`?/${name}\`?[^.\n]{0,40}\\bdoe?s? not port to Pi`, 'i').test(compat)) {
       throw new Error(`README never states that /${name} does not port to Pi — a user who types it and gets nothing has no way to know that is by design`);
     }
   }
@@ -1631,6 +2007,415 @@ check('install.sh --lineup stamps the project roles and never clobbers a customi
 
   fs.rmSync(tmp, { recursive: true, force: true });
   return `implementer=${impl} · reviewer=${rev} (${famOf(impl)} ≠ ${famOf(rev)}) · custom agent preserved · frontmatter-less file left alone`;
+});
+
+// ── TypeSafe Jev ──────────────────────────────────────────────────────────────────────────────────
+// Every Jev path is off unless a key is present, and the tests must be true on a machine that has
+// one: each child process below runs with HOME pointed at an empty dir and TYPESAFE_API_KEY removed,
+// so a developer's real key is never what the gate measured. JEV_MOCK_FILE stands in for the API.
+const jevEnv = (extra = {}) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'jev-home-'));
+  const env = { ...process.env, HOME: home, ...extra };
+  delete env.TYPESAFE_API_KEY;
+  if (!('JEV_MOCK_FILE' in extra)) delete env.JEV_MOCK_FILE;
+  return { env, home };
+};
+const jevMock = (name) => path.join(ROOT, 'scripts/fixtures/jev', name);
+const runNode = (args, env, input) => {
+  try {
+    return { code: 0, out: execFileSync('node', args, { env, input, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }), err: '' };
+  } catch (e) { return { code: e.status, out: e.stdout || '', err: e.stderr || '' }; }
+};
+
+// Negative control (2026-09-22, applied, observed, reverted — exit 1):
+//   readKey() stops honouring the `off` sentinel in secrets.env ....................................
+//     "TYPESAFE_API_KEY=off in secrets.env did not pause the client"
+check('jev client is a no-op without a key, reads the secrets file, and honours JEV_MOCK_FILE', () => {
+  mustExist('scripts/jev.js');
+  const script = path.join(ROOT, 'scripts/jev.js');
+  execFileSync('node', ['--check', script], { stdio: 'pipe' });
+  const probe = (env) => runNode(['-e', `
+    const j = require(${JSON.stringify(script)});
+    j.noul('x', 'y', { waits: [] }).then((p) => console.log('P', p), (e) => console.log('E', e.code || e.message));
+  `], env);
+  const off = probe(jevEnv().env);
+  if (!/^E JEV_DISABLED/m.test(off.out)) throw new Error(`without a key the client answered: ${off.out.trim() || off.err.trim()}`);
+  const { env, home } = jevEnv();
+  fs.mkdirSync(path.join(home, '.agents'));
+  fs.writeFileSync(path.join(home, '.agents', 'secrets.env'), 'TYPESAFE_API_KEY=off\n');
+  if (!/^E JEV_DISABLED/m.test(probe(env).out)) throw new Error('TYPESAFE_API_KEY=off in secrets.env did not pause the client');
+  const st = runNode(['-e', `console.log(JSON.stringify(require(${JSON.stringify(script)}).status()))`], { ...env, TYPESAFE_API_KEY: 'k' });
+  if (!/"source":"env"/.test(st.out)) throw new Error(`env key not reported as source env: ${st.out}`);
+  const mock = probe(jevEnv({ JEV_MOCK_FILE: jevMock('mock-noul.json') }).env);
+  if (!/^P 0\.97/m.test(mock.out)) throw new Error(`mock did not answer 0.97: ${mock.out.trim() || mock.err.trim()}`);
+  const fail = probe(jevEnv({ JEV_MOCK_FILE: jevMock('mock-fail.json') }).env);
+  if (!/^E timeout/m.test(fail.out)) throw new Error(`mock-fail did not surface as a timeout: ${fail.out.trim()}`);
+  return 'disabled without a key · `off` sentinel honoured · env > secrets · mock answers and fails on demand';
+});
+
+// The dedupe replaces a sentence addressed to the chair with arithmetic. The controls that matter:
+// a blocker at p=0.90 is NEW (its bar is 0.95), a minor at 0.91 is carried, an exact restatement is
+// carried without any request, a different file is never paired, and without a key the output
+// says exact-only and counts what is left for the chair — never silently new, never silently gone.
+//
+// Negative control (2026-09-22, applied, observed, reverted — exit 1):
+//   DEDUPE_BLOCKER_THRESHOLD lowered to 0.85 ........................................................
+//     "mock NEW line wrong — a blocker at p=0.90 must stay new" — and the eval check went red with it,
+//     because the eval reads the same constant instead of keeping its own copy.
+check('loop-gate dedupe counts NEW arithmetically, never hides a blocker, and degrades to exact-only', () => {
+  const script = path.join(ROOT, 'scripts/loop-gate.js');
+  const prev = path.join(ROOT, 'scripts/fixtures/findings/dedupe-prev.json');
+  const cur = path.join(ROOT, 'scripts/fixtures/findings/dedupe-current.json');
+  const off = runNode([script, 'dedupe', prev, cur], jevEnv().env);
+  if (off.code !== 0) throw new Error(`no-key run exited ${off.code}: ${off.err.trim()}`);
+  if (!/^DEDUPE: exact-only \(no TYPESAFE_API_KEY\)/m.test(off.out)) throw new Error(`no-key run did not announce exact-only: ${off.out}`);
+  if (!/^NEW: blocker 1 major 2 minor 1/m.test(off.out)) throw new Error(`no-key NEW line wrong: ${off.out}`);
+  if (!/^UNJUDGED: 2 pair/m.test(off.out)) throw new Error('no-key run did not count the pairs left for the chair');
+
+  const out = path.join(jevEnv().home, 'dedupe.json');
+  const on = runNode([script, 'dedupe', prev, cur, '--out', out], jevEnv({ JEV_MOCK_FILE: jevMock('mock-dedupe.json') }).env);
+  if (on.code !== 0) throw new Error(`mock run exited ${on.code}: ${on.err.trim()}`);
+  if (!/^DEDUPE: jev \(2 pair\(s\), 1 request/m.test(on.out)) throw new Error(`mock run header wrong: ${on.out}`);
+  if (!/^NEW: blocker 1 major 2 minor 0/m.test(on.out)) throw new Error(`mock NEW line wrong — a blocker at p=0.90 must stay new: ${on.out}`);
+  if (!/^CARRIED: blocker 0 major 1 minor 1/m.test(on.out)) throw new Error(`mock CARRIED line wrong: ${on.out}`);
+  if (!/R2-F1 major restates R1-F1 \(p=1\.00, exact\)/.test(on.out)) throw new Error('the exact restatement is not printed under CARRIED');
+  const report = JSON.parse(fs.readFileSync(out, 'utf8'));
+  const byId = Object.fromEntries(report.findings.map((f) => [f.id, f]));
+  if (byId['R2-F3'].new !== true || byId['R2-F3'].p !== 0.9) throw new Error('blocker R2-F3 at p=0.90 was deduped — the blocker bar is 0.95');
+  if (byId['R2-F2'].new !== false || byId['R2-F2'].restates !== 'R1-F1') throw new Error('minor R2-F2 at p=0.91 was not carried');
+  if (byId['R2-F4'].via !== 'no-candidate') throw new Error('a different file was paired');
+
+  const broken = runNode([script, 'dedupe', prev, cur], jevEnv({ JEV_MOCK_FILE: jevMock('mock-fail.json') }).env);
+  if (broken.code !== 0 || !/^DEDUPE: exact-only \(jev unavailable: timeout/m.test(broken.out)) throw new Error(`API failure did not degrade to exact-only with its reason: ${broken.out} ${broken.err}`);
+  const bad = runNode([script, 'dedupe', prev, path.join(ROOT, 'scripts/fixtures/findings/valid-findings.json')], jevEnv().env);
+  if (bad.code !== 2 || !/missing "id"/.test(bad.err)) throw new Error('an un-aggregated findings array (no id/critic) was accepted — dedupe runs after the chair assigns ids');
+  return 'exact-only without a key · blocker at 0.90 stays new · minor at 0.91 carried · API failure announced · un-aggregated input refused (exit 2)';
+});
+
+// Negative control (2026-09-22, applied, observed, reverted — exit 1):
+//   the router's race timer lifted from BUDGET_MS to 5000 ..........................................
+//     "a slow API held the prompt for 4040ms — the budget is 1500"
+check('prompt-router emits one advisory UserPromptSubmit context under budget and never decides', () => {
+  const script = path.join(ROOT, 'scripts/hooks/prompt-router.js');
+  mustExist('scripts/hooks/prompt-router.js');
+  execFileSync('node', ['--check', script], { stdio: 'pipe' });
+  const fx = (name) => read(path.join('scripts/fixtures/hooks', name));
+  const withSkill = (extra) => {
+    const e = jevEnv(extra);
+    fs.mkdirSync(path.join(e.home, '.claude', 'skills', 'harness-audit'), { recursive: true });
+    fs.writeFileSync(path.join(e.home, '.claude', 'skills', 'harness-audit', 'SKILL.md'), '---\nname: harness-audit\ndescription: audit a harness\n---\n');
+    fs.mkdirSync(path.join(e.home, '.claude', 'skills', 'harness-audit:harness-audit'), { recursive: true });
+    fs.writeFileSync(path.join(e.home, '.claude', 'skills', 'harness-audit:harness-audit', 'SKILL.md'), '---\nname: x\ndescription: audit a harness\n---\n');
+    return { ...e.env, PROMPT_ROUTER_DIR: path.join(e.home, 'router-cache') };
+  };
+  if (runNode([script], jevEnv().env, fx('user-prompt-submit-jev.json')).out !== '') throw new Error('the router spoke without a key');
+  const mockEnv = withSkill({ JEV_MOCK_FILE: jevMock('mock-router.json') });
+  if (runNode([script], mockEnv, fx('user-prompt-submit-slash.json')).out !== '') throw new Error('the router spoke on a slash command — the human already chose');
+  if (runNode([script], mockEnv, fx('other-event.json')).out !== '') throw new Error('a non-UserPromptSubmit payload produced output');
+  const r = runNode([script], mockEnv, fx('user-prompt-submit-jev.json'));
+  let o;
+  try { o = JSON.parse(r.out); } catch { throw new Error(`stdout is not JSON: ${r.out.slice(0, 80)} ${r.err.slice(0, 120)}`); }
+  const h = o.hookSpecificOutput;
+  if (!h || h.hookEventName !== 'UserPromptSubmit') throw new Error('hookEventName is not UserPromptSubmit');
+  if (!/likely skill `harness-audit:harness-audit` \(p=0\.71\)/.test(h.additionalContext)) throw new Error(`skill suggestion missing: ${h.additionalContext}`);
+  if (!/subagent tier sonnet \(p=0\.62\)/.test(h.additionalContext)) throw new Error(`tier suggestion missing: ${h.additionalContext}`);
+  for (const k of Object.keys(o)) if (k !== 'hookSpecificOutput') throw new Error(`unknown top-level key ${k}`);
+  if ('decision' in o || 'permissionDecision' in h) throw new Error('the router decided — it is advisory only');
+  const t0 = Date.now();
+  const slow = runNode([script], withSkill({ JEV_MOCK_FILE: jevMock('mock-slow.json') }), fx('user-prompt-submit-jev.json'));
+  const ms = Date.now() - t0;
+  if (slow.code !== 0 || slow.out !== '') throw new Error(`a slow API produced output or a non-zero exit: ${slow.out}`);
+  if (ms > 2500) throw new Error(`a slow API held the prompt for ${ms}ms — the budget is 1500`);
+  return `silent without key / on slash / on other events · skill + tier suggested from mock · slow API dropped in ${ms}ms · never decides`;
+});
+
+check('jev-nudge fires once a day and only while Jev is off; jev-setup reports status by exit code', () => {
+  const nudge = path.join(ROOT, 'scripts/hooks/jev-nudge.js');
+  const setup = path.join(ROOT, 'scripts/jev-setup.js');
+  for (const f of ['scripts/hooks/jev-nudge.js', 'scripts/jev-setup.js', 'bin/jev-setup']) mustExist(f);
+  execFileSync('node', ['--check', nudge], { stdio: 'pipe' });
+  execFileSync('node', ['--check', setup], { stdio: 'pipe' });
+  const start = read('scripts/fixtures/hooks/session-start.json');
+  const e = jevEnv();
+  const env = { ...e.env, JEV_NUDGE_DIR: path.join(e.home, 'nudge') };
+  const first = runNode([nudge], env, start);
+  let o;
+  try { o = JSON.parse(first.out); } catch { throw new Error(`first start did not nudge: ${first.out.slice(0, 80)}`); }
+  if (o.hookSpecificOutput.hookEventName !== 'SessionStart' || !/bin\/jev-setup/.test(o.hookSpecificOutput.additionalContext)) throw new Error('the nudge does not name bin/jev-setup');
+  if (runNode([nudge], env, start).out !== '') throw new Error('the nudge fired twice in one day');
+  if (runNode([nudge], { ...env, TYPESAFE_API_KEY: 'k', JEV_NUDGE_DIR: path.join(e.home, 'nudge2') }, start).out !== '') throw new Error('the nudge fired with a key present');
+  if (runNode([nudge], env, read('scripts/fixtures/hooks/other-event.json')).out !== '') throw new Error('a non-SessionStart payload produced output');
+  if (runNode([setup, '--status'], e.env).code !== 3) throw new Error('jev-setup --status without a key must exit 3');
+  if (runNode([setup, '--status'], { ...e.env, TYPESAFE_API_KEY: 'k' }).code !== 0) throw new Error('jev-setup --status with a key must exit 0');
+  const h = JSON.parse(read('hooks/hooks.json')).hooks;
+  if (!JSON.stringify(h.SessionStart || []).includes('jev-nudge.js')) throw new Error('hooks.json does not install jev-nudge on SessionStart');
+  if (!JSON.stringify(h.UserPromptSubmit || []).includes('prompt-router.js')) throw new Error('hooks.json does not install prompt-router on UserPromptSubmit');
+  const inst = read('install.sh');
+  if (!/--skip-jev/.test(inst) || !/jev-setup\.js" --status/.test(inst)) throw new Error('install.sh never asks about a Jev key (or cannot be told not to)');
+  if (!/"\$ASSUME_YES" -eq 0 \] && \[ -t 0 \]/.test(inst)) throw new Error('install.sh may ask for a Jev key non-interactively or under --yes — consent is never a CI default');
+  return 'nudge once/day · silent with a key · setup exit 3/0 · both hooks wired · install.sh asks only on a TTY';
+});
+
+check('the panel loops route round-2 dedupe through loop-gate and degrade honestly', () => {
+  for (const cmd of ['orchestrate', 'review-loop']) {
+    const src = read(`commands/${cmd}.md`);
+    if (!/loop-gate\.js" dedupe/.test(src)) throw new Error(`${cmd} never runs loop-gate.js dedupe — "new vs restated" is back in the chair's hands`);
+    if (!/`NEW:`/.test(src) || !/exact-only/.test(src) || !/UNJUDGED/.test(src)) throw new Error(`${cmd} does not tell the chair how to read DEDUPE/NEW/UNJUDGED`);
+    if (/Judge by meaning, not by string equality\./.test(src)) throw new Error(`${cmd} still asks the chair to judge restatements by meaning as the primary path`);
+  }
+  const pi = read('scripts/port-loops.js');
+  if (!/loop-gate\.js" dedupe/.test(pi)) throw new Error('port-loops.js has no Pi substitution for the dedupe block — the ported command would call a script Pi never installs');
+  return 'orchestrate + review-loop call dedupe from round 2, read NEW:, disclose exact-only · Pi port degrades it to a hand-check';
+});
+
+check('README discloses Jev: the env var, the endpoint, what leaves the machine, and the off-by-default guarantee', () => {
+  const t = read('README.md');
+  for (const must of ['TYPESAFE_API_KEY', 'api.typesafe.ai', 'bin/jev-setup', 'exact-only', 'prompt-router', 'jev-nudge']) {
+    if (!t.includes(must)) throw new Error(`README never mentions ${must}`);
+  }
+  if (!/## Jev/.test(t)) throw new Error('README has no §Jev');
+  const sec = t.split(/^## Jev/m)[1].split(/^## /m)[0];
+  if (!/transcript/i.test(sec) || !/never/i.test(sec)) throw new Error('§Jev does not say transcripts never leave the machine');
+  if (!/United States|US-hosted|hosted in the US/.test(sec) || !/SCC/.test(sec)) throw new Error('§Jev does not state where the data goes and under which transfer clauses');
+  return '§Jev present · env var, endpoint, setup command, degradation mode, both hooks, data flow and residency disclosed';
+});
+
+// The only check here that touches the network, and it is opt-in twice: a key AND JEV_LIVE=1.
+check('jev live smoke — one noul round trip to api.typesafe.ai', () => {
+  const script = path.join(ROOT, 'scripts/jev.js');
+  if (process.env.JEV_LIVE !== '1') skip('set JEV_LIVE=1 (and a TYPESAFE_API_KEY) to run the live round trip');
+  if (!require(script).isEnabled()) skip('no TYPESAFE_API_KEY — nothing to ping');
+  const r = runNode([path.join(ROOT, 'scripts/jev-setup.js'), '--ping'], process.env);
+  if (r.code !== 0 || !/^OK/.test(r.out)) throw new Error(`ping failed: ${r.out.trim()} ${r.err.trim()}`);
+  return r.out.trim();
+});
+
+// The develop-phase template is code the skill writes INTO other projects, so a bug in it ships to
+// every repo the audit touches. Two lived there: the reviewer's verdict was `includes('APPROVED')`,
+// and the preflight's was `includes('pass') || includes('exit:0')` over a seat's prose — which reads
+// "3 passed, 2 failed", "bypass", and a SKIP followed by the gate's closing PASS banner as green.
+// This check runs the template itself with stub seats, so it asserts behaviour, not spelling.
+//
+// Negative controls (2026-09-22, each applied, observed, reverted — all exit 1):
+//   reviewer verdict back to includes('APPROVED') .................................................
+//     "'not APPROVED' in a [FAIL] line approved the change — the verdict is the last line, whole"
+//   preflightPassed = exitCode === 0 (skipped ignored) .............................................
+//     "exit 0 with a SKIP passed — a skipped check is not a passed one"
+//   Pi mirror only, back to a substring test on the log ............................................
+//     "a clean exit 0 did not pass" — predicted the SKIP message; it failed one case earlier, because a
+//     clean gate whose log never says the word is red to a substring test too. The mirror is checked.
+check('develop-phase template decides from the verdict line and the exit code, and a SKIP is not a PASS', () => {
+  const harness = `
+    const fs = require('fs');
+    const md = fs.readFileSync(process.argv[1], 'utf8');
+    const block = (md.match(/\`\`\`js\\n([\\s\\S]*?)\`\`\`/g) || []).find((b) => /name: 'develop-phase'/.test(b));
+    if (!block) { console.log('NO_TEMPLATE'); process.exit(0); }
+    const src = block.replace(/^\`\`\`js\\n/, '').replace(/\`\`\`$/, '').replace(/^export /m, '');
+    const AsyncFn = Object.getPrototypeOf(async function () {}).constructor;
+    const run = (review, pf) => new AsyncFn('args', 'agent', 'log', 'phase', src)(
+      { maxIter: 1 },
+      async (_p, o) => (o.label === 'preflight' ? pf : String(o.label).startsWith('review') ? review : 'impl'),
+      () => {}, () => {});
+    const pf = (exitCode, skipped = [], tail = '') => ({ exitCode, skipped, failedCheck: exitCode ? 'test' : null, tail });
+    (async () => {
+      const out = {};
+      out.pass = await run('[PASS] a — x\\nAPPROVED', pf(0));
+      out.skip = await run('[PASS] a — x\\n**APPROVED**', pf(0, ['SKIP: token absent'], 'SKIP: token absent\\nPASS'));
+      out.fail = await run('[PASS] a — x\\nAPPROVED', pf(1, [], 'Tests: 3 passed, 2 failed'));
+      out.prose = await run('[FAIL] b — not APPROVED yet\\nREJECTED', pf(0));
+      console.log(JSON.stringify(Object.fromEntries(Object.entries(out).map(([k, r]) => [k, [r.approved, r.preflightPassed, r.handoff.status]]))));
+    })().catch((e) => console.log('THREW ' + e.message));
+  `;
+  const seen = [];
+  for (const rel of ['skills/harness-audit/SKILL.md', '.pi/skills/harness-audit/SKILL.md']) {
+    const out = execFileSync('node', ['-e', harness, path.join(ROOT, rel)], { encoding: 'utf8' }).trim();
+    if (out === 'NO_TEMPLATE') throw new Error(`${rel} has no develop-phase template`);
+    if (out.startsWith('THREW')) throw new Error(`${rel}: the develop-phase template throws when run — ${out.slice(6)}`);
+    const r = JSON.parse(out);
+    const want = { pass: [true, true, 'complete'], skip: [true, false, 'continue'], fail: [true, false, 'continue'], prose: [false, true, 'blocked'] };
+    for (const [k, v] of Object.entries(want)) {
+      if (JSON.stringify(r[k]) !== JSON.stringify(v)) {
+        const why = { pass: 'a clean exit 0 did not pass', skip: 'exit 0 with a SKIP passed — a skipped check is not a passed one', fail: "exit 1 with '3 passed' in the log passed — the verdict is the exit code, not a word in the output", prose: "'not APPROVED' in a [FAIL] line approved the change — the verdict is the last line, whole" }[k];
+        throw new Error(`${rel}: ${why} (got ${JSON.stringify(r[k])})`);
+      }
+    }
+    seen.push(rel.startsWith('.pi') ? 'pi mirror' : 'skill');
+  }
+  return `${seen.join(' + ')}: pass → complete · SKIP → continue · exit 1 → continue · "not APPROVED" → blocked`;
+});
+
+// The template also carries the seats around the loop: a scout and an analyst before the implementer, and a
+// reviewer that may be another vendor's model reached through scripts/external-review.sh. Each is a way for
+// the gate to go quiet wrong: a blocker that the implementer ignores, a reviewer that shares the
+// implementer's family, an external review whose verdict is never read, or a dead seat that hangs the run.
+// The check runs the template with stub seats and asserts what each case actually did.
+//
+// Negative controls (2026-09-26, each applied to the skill template, observed, reverted — all exit 1):
+//   the familyOf() guard commented out ...............................................................
+//     "a reviewer of the implementer's own family ran — D25a is enforced at run time, no seat may start"
+//   the analyst's `BLOCKER:` prefix compared against `BLOCKED:` .......................................
+//     "the implementer ran after the analyst reported a blocker — it must stop before any implementer token"
+check('develop-phase template: a blocker stops before the implementer, a same-family reviewer is refused, an external verdict is read, a dead seat degrades', () => {
+  const harness = (mdPath) => {
+    const fs = require('fs');
+    const md = fs.readFileSync(mdPath, 'utf8');
+    const block = (md.match(/```js\n([\s\S]*?)```/g) || []).find((b) => /name: 'develop-phase'/.test(b));
+    if (!block) { console.log('NO_TEMPLATE'); return; }
+    const src = block.replace(/^```js\n/, '').replace(/```$/, '').replace(/^export /m, '');
+    const AsyncFn = Object.getPrototypeOf(async function () {}).constructor;
+    const pf = { exitCode: 0, skipped: [], failedCheck: null, tail: '' };
+    const run = async (args, seat) => {
+      const calls = [];
+      const agent = async (prompt, o) => { calls.push({ label: String(o.label), model: o.model, prompt }); return seat(String(o.label)); };
+      const out = await new AsyncFn('args', 'agent', 'log', 'phase', src)(args, agent, () => {}, () => {});
+      return { status: out.handoff.status, approved: out.approved, calls };
+    };
+    const ok = (l) => (l === 'preflight' ? pf : l.startsWith('review') ? '[PASS] a — x\nAPPROVED' : l === 'scout' ? 'BRIEF-TEXT' : l === 'analyst' ? 'PLAN-TEXT' : 'impl');
+    const ext = (verdict) => (l) => (l.startsWith('review') ? { output: verdict } : ok(l));
+    const EXT = 'openrouter/acme/model-x';
+    const labels = (r) => r.calls.map((c) => c.label);
+    (async () => {
+      const blocker = await run({ maxIter: 1 }, (l) => (l === 'analyst' ? 'BLOCKER: which tenant?' : ok(l)));
+      const family = await run({ maxIter: 1, reviewerModel: 'opus' }, ok);
+      const familyExt = await run({ maxIter: 1, reviewerModel: 'openrouter/anthropic/claude-opus-5.5' }, ok);
+      const yes = await run({ maxIter: 1, reviewerModel: EXT }, ext('[PASS] a — x\nAPPROVED'));
+      const no = await run({ maxIter: 1, reviewerModel: EXT }, ext('[FAIL] a — x\nREJECTED'));
+      const deadScout = await run({ maxIter: 1 }, (l) => (l === 'scout' ? null : ok(l)));
+      const deadReviewer = await run({ maxIter: 1 }, (l) => (l.startsWith('review') ? null : ok(l)));
+      const plain = await run({ maxIter: 1, preparer: false }, ok);
+      console.log(JSON.stringify({
+        blocker: [blocker.status, labels(blocker).some((l) => l.startsWith('impl'))],
+        family: [family.status, family.calls.length, familyExt.status, familyExt.calls.length],
+        external: [yes.approved, yes.calls.find((c) => c.label.startsWith('review')).prompt.includes(`scripts/external-review.sh ${EXT}`), no.approved, no.status],
+        deadScout: [deadScout.approved, deadScout.calls.find((c) => c.label.startsWith('impl')).prompt.includes('BRIEF:')],
+        deadReviewer: deadReviewer.status,
+        plain: labels(plain).filter((l) => l === 'scout' || l === 'analyst').length,
+      }));
+    })().catch((e) => console.log('THREW ' + e.message));
+  };
+  const seen = [];
+  for (const rel of ['skills/harness-audit/SKILL.md', '.pi/skills/harness-audit/SKILL.md']) {
+    const out = execFileSync('node', ['-e', `(${harness})(process.argv[1])`, path.join(ROOT, rel)], { encoding: 'utf8' }).trim();
+    if (out === 'NO_TEMPLATE') throw new Error(`${rel} has no develop-phase template`);
+    if (out.startsWith('THREW')) throw new Error(`${rel}: the develop-phase template throws when run — ${out.slice(6)}`);
+    const r = JSON.parse(out);
+    const want = {
+      blocker: [['blocked', false], 'the implementer ran after the analyst reported a blocker — it must stop before any implementer token'],
+      family: [['blocked', 0, 'blocked', 0], "a reviewer of the implementer's own family ran — D25a is enforced at run time, no seat may start"],
+      external: [[true, true, false, 'blocked'], "an external reviewer's verdict was not read from its output, or the bridge was not called with the model id"],
+      deadScout: [[true, false], 'a dead scout changed the run — it must continue and the implementer must not receive a brief that does not exist'],
+      deadReviewer: ['blocked', 'a dead reviewer seat did not end in a blocked handoff'],
+      plain: [0, 'preparer: false still ran the scout or the analyst'],
+    };
+    for (const [k, [v, why]] of Object.entries(want)) {
+      if (JSON.stringify(r[k]) !== JSON.stringify(v)) throw new Error(`${rel}: ${why} (got ${JSON.stringify(r[k])})`);
+    }
+    seen.push(rel.startsWith('.pi') ? 'pi mirror' : 'skill');
+  }
+  return `${seen.join(' + ')}: blocker → stop before implementer · same family → refused before any seat · external verdict read · dead scout degrades · dead reviewer → blocked · preparer:false skips both`;
+});
+
+// The dedupe's thresholds were chosen, not measured; the eval is what measures them. Offline this
+// asserts the eval's own arithmetic: a corpus that stays well-formed and balanced, exit 3 without a
+// key (nothing measured is not a pass), a classifier that carries everything → exit 1 naming the
+// hidden new blockers, one that carries nothing → exit 0 with the missed restatements listed.
+//
+// Negative controls (2026-09-22, each applied, observed, reverted — all exit 1):
+//   the eval's bar() stripped of the blocker rule ..................................................
+//     "at p=0.90 the eval carried a new blocker — it lost the 0.95 blocker bar loop-gate applies"
+//   two corpus cases put on the same critic + file .................................................
+//     "corpus invalid: cases[26] (c27) shares critic + file with another case"
+check('jev dedupe eval: corpus balanced, exit 3 without a key, exit 1 when a new blocker is hidden', () => {
+  const script = path.join(ROOT, 'benchmarks/jev_dedupe_eval.js');
+  mustExist('benchmarks/jev_dedupe_eval.js');
+  mustExist('benchmarks/jev-dedupe/corpus.json');
+  const { validateCorpus } = require(script);
+  const corpus = JSON.parse(read('benchmarks/jev-dedupe/corpus.json'));
+  const errors = validateCorpus(corpus);
+  if (errors.length) throw new Error(`corpus invalid: ${errors[0]}`);
+  const restated = corpus.cases.filter((c) => c.restates !== null);
+  const fresh = corpus.cases.filter((c) => c.restates === null);
+  if (restated.length < 10 || fresh.length < 10) throw new Error(`corpus too lopsided to measure both errors: ${restated.length} restated / ${fresh.length} new (need ≥10 each)`);
+  const newBlockers = fresh.filter((c) => c.current.severity === 'blocker').length;
+  if (newBlockers < 4) throw new Error(`only ${newBlockers} new blockers — the error that matters needs ≥4 chances to happen`);
+  const off = runNode([script], jevEnv().env);
+  if (off.code !== 3 || !/NOT MEASURED/.test(off.out)) throw new Error(`without a key the eval exited ${off.code}: ${off.out.trim()}`);
+  const all = runNode([script], jevEnv({ JEV_MOCK_FILE: jevMock('mock-noul.json') }).env);
+  if (all.code !== 1 || !/VERDICT: FAIL/.test(all.out) || !/c04 blocker/.test(all.out)) throw new Error(`a classifier that carries everything did not fail the eval: exit ${all.code}`);
+  // p = 0.90 everywhere sits between the two bars: every non-blocker is carried, no blocker is. If the
+  // eval ever drops the blocker bar, c04 shows up in the hidden list.
+  const mid = runNode([script], jevEnv({ JEV_MOCK_FILE: jevMock('mock-090.json') }).env);
+  if (mid.code !== 1 || !/c05 major/.test(mid.out)) throw new Error(`at p=0.90 the eval did not hide the new majors it should: exit ${mid.code}`);
+  if (/c04 blocker|c06 blocker|c12 blocker/.test(mid.out)) throw new Error('at p=0.90 the eval carried a new blocker — it lost the 0.95 blocker bar loop-gate applies');
+  const none = runNode([script], jevEnv({ JEV_MOCK_FILE: jevMock('mock-dedupe.json') }).env);
+  if (none.code !== 0 || !/VERDICT: PASS/.test(none.out) || !/MISSED at loop-gate/.test(none.out)) throw new Error(`a classifier that carries nothing did not pass with its misses listed: exit ${none.code}`);
+  return `${corpus.cases.length} cases (${restated.length} restated / ${fresh.length} new, ${newBlockers} new blockers) · off → 3 · carry-all → 1 · p=0.90 hides majors, never blockers · carry-none → 0`;
+});
+
+check('jev dedupe eval — live, against api.typesafe.ai', () => {
+  if (process.env.JEV_LIVE !== '1') skip('set JEV_LIVE=1 (and a TYPESAFE_API_KEY) to measure the dedupe thresholds live');
+  if (!require(path.join(ROOT, 'scripts/jev.js')).isEnabled()) skip('no TYPESAFE_API_KEY — nothing to measure');
+  const r = runNode([path.join(ROOT, 'benchmarks/jev_dedupe_eval.js')], process.env);
+  const verdict = (r.out.match(/^VERDICT: .*$/m) || [''])[0];
+  if (r.code !== 0) throw new Error(verdict || `eval exited ${r.code}: ${r.err.trim()}`);
+  return verdict.replace(/^VERDICT: /, '');
+});
+
+// develop-phase-pi.js holds the loop in code, so the loop is tested with a fake `pi` on PATH that answers
+// per seat (HARNESS_SEAT) — no network, no model. Four runs: a clean pass that commits, a same-family
+// line-up refused before any seat, an analyst BLOQUEO that stops before the implementer, and a gate that
+// exits 0 with a SKIP line, which must not count as a pass.
+check('develop-phase-pi: loop in code — pass commits, D25a refuses, BLOQUEO stops, SKIP is not a PASS', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dp-pi-'));
+  const bin = path.join(tmp, 'bin');
+  fs.mkdirSync(bin);
+  fs.writeFileSync(path.join(bin, 'pi'), `#!/bin/sh
+case "$HARNESS_SEAT" in
+  scout) echo "brief: sum.js:1" ;;
+  analyst) if [ -n "$FAKE_BLOCK" ]; then echo "BLOQUEO: falta decidir"; else echo "1. sum.js"; fi ;;
+  implementer-*) echo "module.exports = 2;" > sum.js; echo "sum.js cambiado" ;;
+  reviewer-*) printf '[PASS] a — x\\n**APROBADO**\\n' ;;
+  commit) echo "fix: ajusta sum" ;;
+esac
+`, { mode: 0o755 });
+  const lineup = (reviewer) => {
+    const f = path.join(tmp, `lineup-${reviewer}.json`);
+    const e = (model) => ({ provider: 'fake', model });
+    fs.writeFileSync(f, JSON.stringify({ version: 1, defaults: {}, harness: { pi: {
+      scout: e('scout-1'), architect: e('arch-1'), orchestrator: e('orch-1'), implementer: e('impl-1'), reviewer: e(reviewer),
+    } } }));
+    return f;
+  };
+  const repo = (name) => {
+    const d = path.join(tmp, name);
+    fs.mkdirSync(d);
+    execFileSync('sh', ['-c', 'git init -q && echo "module.exports = 1;" > sum.js && git add -A && git -c user.email=t@t -c user.name=t commit -qm init'], { cwd: d });
+    return d;
+  };
+  const run = (name, { reviewer = 'rev-1', preflight = 'true', env = {} } = {}) => {
+    const cwd = repo(name);
+    const r = require('node:child_process').spawnSync('node', [path.join(ROOT, 'scripts/develop-phase-pi.js'), '--task', 't', '--max-iter', '1', '--no-jev', '--no-tmux', '--preflight', preflight], {
+      cwd, encoding: 'utf8',
+      env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, MODEL_LINEUP_PATH: lineup(reviewer), GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t', ...env },
+    });
+    let out = null;
+    try { out = JSON.parse(r.stdout); } catch { /* refused runs print no JSON */ }
+    return { code: r.status, out, err: r.stderr, log: execFileSync('git', ['log', '--oneline'], { cwd, encoding: 'utf8' }).trim().split('\n') };
+  };
+  const pass = run('pass');
+  if (pass.code !== 0 || pass.out.handoff.status !== 'complete' || !pass.out.commit.committed || pass.log[0].indexOf('fix: ajusta sum') === -1) {
+    throw new Error(`clean run did not complete and commit: exit ${pass.code} ${pass.err.slice(-300)}`);
+  }
+  const fam = run('family', { reviewer: 'impl-2' });
+  if (fam.code !== 2 || fam.out || !/D25a|family/.test(fam.err)) throw new Error(`same-family reviewer not refused: exit ${fam.code}`);
+  const cl = run('claude', { reviewer: 'claude-fable-5' });
+  if (cl.code !== 2 || cl.out || !/non-Claude/.test(cl.err)) throw new Error(`a Claude seat on Pi was not refused: exit ${cl.code}`);
+  const block = run('block', { env: { FAKE_BLOCK: '1' } });
+  if (block.code !== 1 || block.out.handoff.status !== 'blocked' || block.out.iterations !== 0) throw new Error('BLOQUEO did not stop before the implementer');
+  const skipRun = run('skip', { preflight: 'echo "SKIP notion:verify"; exit 0' });
+  if (skipRun.code !== 1 || skipRun.out.preflightPassed || skipRun.out.commit || skipRun.out.handoff.status !== 'continue') throw new Error('exit 0 with a SKIP line counted as a pass');
+  fs.rmSync(tmp, { recursive: true, force: true });
+  return 'pass → complete + commit · same family → exit 2 · BLOQUEO → blocked at 0 iter · SKIP → continue, no commit';
 });
 
 const GLYPH = { pass: '✓', fail: '✗', skip: '⊘' };

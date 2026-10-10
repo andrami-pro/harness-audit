@@ -24,6 +24,14 @@ This loads the skill **and** four guards that run on every session:
 
 The guards are deliberately conservative (short, high-precision pattern lists — when in doubt they allow). The repeat guard is advisory by design: a polling loop that repeats a call on purpose still gets the nudge, and the model decides. To disable them, uninstall the plugin and use the skill-only install below.
 
+Three more hooks ride the same install. None of them blocks anything:
+
+| Hook | Event | What it does |
+|---|---|---|
+| `loop-telemetry` | `SubagentStop`, `Stop` | Appends one ndjson line per agent boundary for `/dashboard-harness`. Local file, never sent anywhere |
+| `prompt-router` | `UserPromptSubmit` | **Off unless a TypeSafe key is present.** Asks Jev which installed skill fits the prompt and which subagent tier (haiku/sonnet/opus) it deserves; injects one advisory line. Sends the first 1500 chars of the prompt and the installed skill names + descriptions — see [§Jev](#jev--the-optional-system-one-classifier) |
+| `jev-nudge` | `SessionStart` | While no key is present, says once a day that Jev is off and names `bin/jev-setup`. Silent with a key |
+
 ### Option 2 — skill only (Claude Code, no hooks)
 
 ```bash
@@ -69,7 +77,7 @@ gated loops, and `SKILL.md`'s `allowed-tools`. Read
 Pi is a different story, but not the one an earlier version of this README told: **4 of the 5 loop
 commands do port to Pi**, as Pi's own prompt templates — gated on the same third-party
 [`pi-subagents`](https://github.com/nicobailon/pi-subagents) extension the 7 agents already require.
-`/session-review` is the exception and does not port at all. Read the
+`/session-review` and `/dashboard-harness` are the exceptions and do not port at all. Read the
 [Pi section](#compatibility-across-harnesses) before reaching for this:
 
 ```bash
@@ -87,7 +95,7 @@ Just ask in natural language. The skill triggers on phrases such as:
 - "rubric" · "independent verifier" · "loop-readiness"
 - "make this repo portable across Claude Code / Codex / Cursor"
 
-It detects the stack automatically, audits the four pillars, grades loop-readiness (L0–L3) and memory maturity (M1–M5), writes an executable rubric, emits a role-differentiated develop-phase workflow (Implementer → adversarial Reviewer → Preflight, each on the model tier that fits the job), and runs an adversarial fresh-context verification of its own findings before delivering.
+It detects the stack automatically, audits the four pillars, grades loop-readiness (L0–L3) and memory maturity (M1–M5), writes an executable rubric, emits a role-differentiated develop-phase workflow (Scout → Analyst → Implementer → adversarial Reviewer → Preflight, each on the model tier that fits the job), and runs an adversarial fresh-context verification of its own findings before delivering.
 
 ## The four pillars
 
@@ -148,6 +156,46 @@ naming the corrected id. The failure it exists for is silent: a line-up reading
 and surfaces only as a dispatch that hangs and exits 1 with no mention of the model. On a machine without
 `pi` installed the check reports SKIPPED rather than failing a line-up it cannot verify.
 
+## develop-phase: scout, analyst, and a reviewer from another vendor
+
+The workflow the audit writes into a repo has two seats before the implementer, and a reviewer that need not be an
+Anthropic model:
+
+- **Scout** (cheap tier, read-only) reads the repo, code graph first when one exists, and returns a ≤ 400-word brief.
+- **Analyst** (workhorse tier) checks the brief and returns a ≤ 300-word plan. A first line `BLOCKER: …` stops the run
+  before the implementer spends a token. Scout and analyst run once, outside the loop; if either dies the run goes on
+  without it. Pass `preparer: false` for a trivial task: on a one-file task they cost more than the implementation.
+- **Reviewer** is a native alias by default. Pass `reviewerModel: "openrouter/<vendor>/<model>"` (any id `pi --list-models`
+  shows) and the audit's Step 4c copies `skills/harness-audit/external-review.sh` into the repo as
+  `scripts/external-review.sh`: `pi` runs the review with read-only tools and the workflow decides from the last line.
+  It needs `pi` on PATH and the provider key in the auth `pi` uses. The reviewer/implementer family rule (D25a) is also
+  enforced at run time: the same family returns a `blocked` handoff before any seat runs.
+
+**On Pi** the same loop is `scripts/develop-phase-pi.js` (Pi has no Workflow runtime). The loop is code, not a prompt:
+each seat is one `pi -p --mode json --no-session` call with its own tool allowlist, every model comes from the `pi`
+column of the line-up at run time (the analyst sits in `architect`, the new `scout` role feeds the brief), D25a is
+re-checked before any seat, preflight is the project's own gate run through the shell (a `SKIP` line is not a pass),
+and the commit message is the only thing a model writes in the commit step. With a TypeSafe key, Jev sizes the task
+first: `trivial` skips scout and analyst, `bounded` gives the analyst the implementer's model. From a Pi session, a
+small extension can expose it as `/develop-phase <task>`; from a shell: `node scripts/develop-phase-pi.js --task "…"
+[--no-preparer] [--no-commit] [--max-iter N] [--preflight "<cmd>"] [--no-jev] [--run-dir <path>] [--no-tmux]`.
+
+<a id="tmux"></a>
+**Live view (tmux).** `--mode json` is what lets each seat's actions show up as they happen instead of only at the
+end: `scripts/develop-phase-pi.js` translates the event stream into `<runDir>/<seat>.live.log` (tool calls, brief
+thinking, the final answer) and writes the hand-offs between seats — brief → plan → diff → verdict → preflight →
+commit — to `<runDir>/bus.log`, the one file that reads like the loop's own "conversation" with itself. Unless
+`--no-tmux`, the run also opens a detached tmux session via `scripts/dp-tmux.sh`: `bus.log` on top, the currently
+active seat's log on the bottom (`scripts/dp-tail.sh` switches panes the moment a new seat starts). It prints the
+attach command once, at start (`tmux attach -t dp-…`), and **never touches an existing tmux session, window or
+pane** — including the one running `pi` itself — so it is safe to fire from inside a `pi` session that is itself
+inside tmux. Missing tmux, or anything going wrong while starting it, is silent and never fails the run; without it
+the two log files are still there, readable with a plain `tail -f`.
+
+Where the saving comes from: the reviewer seat first, then an implementer that no longer reads the repo. Where it does not:
+a trivial task, and any plan whose limit counts tokens without weighting them by model, because the scout reads a lot on a
+cheap tier.
+
 ## Line-up advisor — rankings × price × data policy, weekly
 
 Model catalogs rot in both directions: ids die without notice (NIM served 410 for `z-ai/glm-5.2` while
@@ -202,11 +250,11 @@ different rates. Read this before assuming a layer "just works" on a harness you
 |---|---|---|---|---|
 | `AGENTS.md` + executable rubric | ✅ native | ✅ native | ✅ native | ✅ native — Pi reads `AGENTS.md` directly |
 | Skill (`SKILL.md` + templates) | ✅ native | ✅ native | ✅ native | ✅ native |
-| The 5 loop commands | ✅ native (Task tool) | ✅ native (Task tool) | ✅ native (Task tool) | ⚠️ **4 of 5** as prompt templates, via a third-party extension — `/session-review` does not port, see below |
+| The 5 loop commands + `/dashboard-harness` | ✅ native (Task tool) | ✅ native (Task tool) | ✅ native (Task tool) | ⚠️ **4 of 6** as prompt templates, via a third-party extension — `/session-review` and `/dashboard-harness` do not port, see below |
 | The 7 agents | ✅ native | ✅ native | ✅ native | ✅ via the same third-party extension |
 | Manual-only guardrail (`disable-model-invocation`) | ✅ enforced | ❌ **no equivalent — dropped** | ❌ **no equivalent — dropped** | ✅ **preserved by construction — see below** |
 | Deterministic loop gate (`loop-gate.js`) | ✅ native | ⚠️ **degraded to a hand-check** | ⚠️ **degraded to a hand-check** | ⚠️ **degraded to a hand-check** |
-| Hooks + dashboard (`loop-stats.js`) | ✅ native | 📖 documented, not automated | 📖 documented, not automated | 📖 documented, not automated |
+| Hooks + dashboard (`/dashboard-harness`, `loop-stats.js`) | ✅ native | 📖 documented, not automated | 📖 documented, not automated | 📖 documented, not automated |
 
 **Loops on Pi, in full — read this before you install:** Pi's core ships with no sub-agent support at
 all — per [pi.dev](https://pi.dev)'s own docs, *"Pi ships with powerful defaults but skips features like
@@ -223,7 +271,7 @@ by itself either. Its body is instructions telling whichever session expands it 
 — Task on Claude Code. With pi-subagents installed, Pi's parent session has the equivalent tool,
 `subagent`, and a prompt template whose body says "dispatch via `subagent`" works exactly like
 pi-subagents' own bundled `/review-loop` template (`prompts/review-loop.md` in that package) — the
-reference this port's Pi transform follows. `--target pi` ports 4 of this repo's 5 commands to
+reference this port's Pi transform follows. `--target pi` ports 4 of this repo's 6 commands to
 `.pi/prompts/` on that basis — rounds, stop conditions, findings aggregation and all. `.pi/prompts/` is
 a native discovery location: nothing has to be registered anywhere, and no `.pi/settings.json` is
 written. Type `/orchestrate`, `/skill-loop`, `/review-loop`, `/iterate` exactly as in Claude Code.
@@ -233,12 +281,12 @@ installed project and reading back which commands it actually registered — not
 first draft of this port passed its own test suite while Pi silently discarded three of the five
 templates it had written.
 
-**`/session-review` does not port to Pi, and will not.** Its first step shells out to
+**`/session-review` and `/dashboard-harness` do not port to Pi, and will not.** Both shell out to
 `node "${CLAUDE_PLUGIN_ROOT}/scripts/loop-stats.js"` — a variable that exists only inside the Claude Code
-plugin runtime, pointing at a script `--target pi` does not install — and its data source is *the
-transcripts Claude Code writes*, not Pi's sessions, which live elsewhere in a different format. Ported, it
-would be a template that looks like a working loop and dies on its first command. `--target pi` withholds
-it and says why. Run Loop 6 from Claude Code; it reads your local transcripts either way.
+plugin runtime, pointing at a script `--target pi` does not install — and both read *the transcripts
+Claude Code writes*, not Pi's sessions, which live elsewhere in a different format. Ported, each would be
+a template that looks like it works and dies on its first command. `--target pi` withholds them and says
+why. Run them from Claude Code; they read your local transcripts either way.
 
 **Pi loads project `.pi/` resources only after you TRUST the project.** Interactive Pi asks on first start
 (or use `/trust`); the non-interactive modes (`-p`, `--mode json`, `--mode rpc`) never ask and skip project
@@ -267,7 +315,7 @@ against the web. That is its entire job. Install
 frontmatter, or do not trust that seat on this target.
 
 **The `model:` line is still a Claude Code alias on Pi, the same trap as OpenCode/Kilo Code below.**
-None of the 5 commands carry a `model:` field — they run in whatever model expanded them, by design —
+None of this repo's commands carry a `model:` field — they run in whatever model expanded them, by design —
 but all 7 ported agents do, and pi-subagents cannot resolve `sonnet`/`fable`/`opus` any better than
 OpenCode or Kilo Code can. Re-run `--lineup` to stamp real provider/model ids, or edit the files by hand.
 
@@ -318,6 +366,10 @@ writing and maintaining three more integrations against APIs this repo doesn't o
 | "Deep audit of the whole app — rare, token-hungry" | 4 · Verification | `/review-loop [max-iter]` · plus the `develop-phase` workflow the audit generates per repo | high | score ≥ 90 ∧ 0 blockers (max 5) |
 | "Improve the *process* that builds the product" | 5 · Workflow improvement | `/iterate <task>` | high | score ≥ 90 ∧ optimizer out of proposals (max 5) |
 | "Improve how *I* drive the agent — fully local" | 6 · Operator | `/session-review [--since 30d]` | med-low | single pass; re-run weekly |
+
+Plus one thing that is not a loop: **`/dashboard-harness`**, the free observer the six are watched through.
+It reads your local transcripts and reports how the driving went. See
+[Watch them run](#watch-them-run--dashboard-harness).
 
 **Honesty rule for this table:** a loop only gets a row once it has at least one real, recorded run — a findings
 JSON (or, for the process loop, a settled prediction) in the operating repo's `docs/harness-dev/loop-runs/`.
@@ -430,7 +482,7 @@ Loops are not free, and the wrong one is worse than none.
 | `/review-loop` (critic fan-out × ≤ 5) | high · token-hungry | every commit. Only a large app or corpus, and rarely |
 | `/iterate` (builder + scorer + optimizer × ≤ 5) | high | bug fixes, one-file changes — a feature that converges in round 1 teaches the process nothing |
 | `/session-review` (free stats + 1 pass over top-N) | med-low | daily runs — a growth edge needs enough sessions to be an edge and not a bad afternoon |
-| `loop-stats.js` | free (local script, zero tokens) | — run it as often as you like |
+| `/dashboard-harness` · `bin/loop-stats` | free (local script, zero tokens) | — run it as often as you like |
 
 ### How loops activate
 
@@ -459,23 +511,49 @@ so a ported copy of these three loses the veto and becomes auto-dispatchable. Pi
 field either, but keeps the veto anyway — invocation there is always a typed `/name`, never a tool call
 the model can make on its own. See [Compatibility across harnesses](#compatibility-across-harnesses).
 
-### Watch them run
+### Watch them run — `/dashboard-harness`
 
-`scripts/loop-stats.js` is the dashboard for everything above — tokens per agent, activations,
-durations, learnings, and the workflow/loop-run history — read straight out of the local Claude Code
-transcripts and `docs/harness-dev/loop-runs/`. It is an observer, not a loop: it iterates on nothing,
-costs zero tokens, and never leaves your machine.
+`/dashboard-harness` is the observer the six loops are watched through. It reads the transcripts Claude Code
+already wrote on this machine and reports what they say — not just what they cost. It iterates on
+nothing, costs zero tokens, edits nothing, and never leaves your machine.
 
 ```bash
-node scripts/loop-stats.js                       # this project, all history, ANSI report to stdout
-node scripts/loop-stats.js --project <slug>       # a different project's telemetry (default: cwd)
+/dashboard-harness                       # inside Claude Code — this project, last 30 days
+/dashboard-harness --since 7d --open     # …and open the HTML report in a browser
+/dashboard-harness --lang es             # the report's own words in es or fr; quotes stay verbatim
+bin/loop-stats --project ~/code/my-app --since 30d --html   # or from any shell
+```
+
+What it audits, on top of the accounting that was always there:
+
+| Block | What it answers |
+|---|---|
+| **Cards** | The recommendations. Rule-based, zero tokens; each carries its evidence, the field it came from, and what it does not prove |
+| **Session-review lifecycle** | What Loop 6 last proposed, and whether the repo now contains it — a promoted rule is shown with the `AGENTS.md` line that proves it |
+| **Session hygiene** | Bare continuations, interrupts, compactions, `/model` switches typed by hand — every proxy labelled as one |
+| **Tools & failures** | Which tools ran, which failure kept coming back, and every call you refused with the reason you typed |
+| **Guards & hooks** | Which guards actually fired, and which hooks merely ran |
+| **Skills & commands** | Which of your installed skills were ever invoked, and which sat on the shelf |
+
+Two properties make this a report rather than a horoscope. **A rule that finds no evidence prints
+nothing** — the count of rules that stayed silent is printed instead of a reassuring card. And **no
+card edits anything**: same contract `/session-review` has with `AGENTS.md`, for the same reason.
+
+```bash
+node scripts/loop-stats.js                        # the same report, straight from a checkout
+node scripts/loop-stats.js --project <path|slug>  # another project — a path works, symlinks and all
 node scripts/loop-stats.js --root <dir>           # telemetry root (default: ~/.claude/projects)
-node scripts/loop-stats.js --repo <path>          # read loop-runs/ + LEARNINGS.md from another repo
+node scripts/loop-stats.js --repo <path>          # read loop-runs/, LEARNINGS.md, AGENTS.md elsewhere
 node scripts/loop-stats.js --since 7d             # window the report to the last N days
 node scripts/loop-stats.js --top 20               # how many recurring prompts to surface (default 3)
-node scripts/loop-stats.js --html out.html        # retro-terminal (CRT) report you can share
-node scripts/loop-stats.js --json                 # the same aggregate, machine-readable
+node scripts/loop-stats.js --html [out] --open    # CRT report; no path = ~/.cache/harness-audit/
+node scripts/loop-stats.js --all                  # every project on this machine, cost and cards
+node scripts/loop-stats.js --lang en|es|fr        # report language (default: the shell's LANG)
+node scripts/loop-stats.js --json [--brief]       # the aggregate; --brief drops the accounting
 ```
+
+The HTML report defaults to your cache, not the repository: it quotes your prompts and your denial
+reasons verbatim, and a file like that landing in `docs/` is one `git add -A` away from being public.
 
 **Reading the `est.$` column (D17):** it is list price × **measured** tokens for that run — never a
 multiplier, never a heuristic. A model absent from the price table renders `n/a` instead of a guess —
@@ -542,16 +620,91 @@ status that is not blocked — the shapes that let a claim hide. It certifies no
 clears it is what the builder reported, and `/iterate` says so wherever it quotes one. The independent
 read is the scorer's scorecard, not the handoff.
 
+From round 2 on, the same script decides which of a round's findings **restate** the previous
+round's — the call the stop rule of `/orchestrate` hangs on, and until now the one call left to the
+chair, the party holding every fix it applied:
+
+```bash
+node scripts/loop-gate.js dedupe round-<n-1>.json raw/<n>-aggregate.json --out dedupe-<n>.json
+```
+
+Same critic, same file, normalized summary identical → restated, no model involved. The pairs that
+survive that go to Jev (below) as one request, one yes-probability per pair, thresholded in code:
+0.85, and **0.95 for a blocker** — deduping away a real new blocker opens a gate on a defect nobody
+fixed, so the bar is higher on the side where the mistake costs more. The output is three lines the
+chair reads and a JSON it never has to: `DEDUPE:` (`jev` or `exact-only`), `NEW: blocker n major m
+minor k` — the stop arithmetic — and `CARRIED:` with every carried blocker and major printed by id.
+Nothing is deduped silently. Without a key, or when the API fails, the first line says `exact-only`,
+`UNJUDGED:` counts the pairs left, and the chair compares those by meaning and reports the round as
+ungated — announced, never hidden.
+
 The gate is Claude Code-only; every other target degrades it to a hand-check the chair performs on
 itself. See [Compatibility across harnesses](#compatibility-across-harnesses).
+
+## Jev — the optional System One classifier
+
+[TypeSafe's Jev](https://docs.typesafe.ai) answers three shapes only — a yes-probability, one option
+out of a map, a position on a scale — over the text you hand it, in well under a second, for a few
+cents per million input tokens. It reads no file and runs no tool. That makes it the right party for
+exactly two calls in this package that a frontier model was making by judgment and code should own:
+
+- **`loop-gate.js dedupe`** — is this round's finding a restatement of last round's? (above)
+- **`prompt-router`** — which installed skill fits this prompt, and which subagent tier does it
+  deserve? One advisory line per prompt; the model still decides.
+
+**Off by default, on by one key.** Every Jev path checks `TYPESAFE_API_KEY` — the environment, or a
+`TYPESAFE_API_KEY=` line in `~/.agents/secrets.env` (the file the line-up advisor already reads,
+mode 0600, outside every repo). No key: `isEnabled()` is false, the dedupe prints `exact-only`, the
+router and the nudge stay silent, and the loops run exactly as they did in 2.7. `TYPESAFE_API_KEY=off`
+pauses it without deleting the key. The switch is global: one machine, every project.
+
+```bash
+bin/jev-setup            # asks for the key on a TTY, stores it, pings api.typesafe.ai
+bin/jev-setup --status   # exit 0 = on, 3 = off
+bin/jev-setup --ping     # one round trip, never writes
+./install.sh --target …  # asks the same question once, interactively; --yes and --skip-jev never ask
+```
+
+**What leaves the machine, only while a key is present:**
+
+| Path | Sent to `api.typesafe.ai` |
+|---|---|
+| `dedupe` | For each pair: the two findings' `id`, `critic`, `severity`, `file`, `line`, `summary`, `fix` |
+| `prompt-router` | The first 1500 characters of the prompt you just typed; the names and 120-char descriptions of your installed skills |
+
+**Calibrate before you trust it.** The 0.85 / 0.95 thresholds were chosen, not measured.
+`node benchmarks/jev_dedupe_eval.js` measures them: it runs a labelled corpus
+(`benchmarks/jev-dedupe/corpus.json` — paraphrases, cross-language restatements, and hard negatives
+that share a file, a line or most of their words with an old finding and are still new) through the
+production `dedupe()`, then prices every threshold from that one request. The two errors are not
+symmetric, so neither is the verdict: a restatement read as new costs a redundant fix round; a new
+blocker or major read as a restatement is hidden from the stop rule, and any of those at the
+shipped thresholds exits 1. The corpus is small and synthetic — add pairs from your own
+`loop-runs/` before you call a threshold settled. `JEV_LIVE=1 node scripts/validate.js` runs it.
+
+**What never leaves, key or no key:** transcripts. `/session-review` and `/dashboard-harness` keep
+their promise — no API call, nothing leaves the machine — and `scripts/validate.js` holds them to it.
+The security guards are unchanged and never call anything.
+
+Where it goes (from TypeSafe's legal pages, read 2026-09-22 — re-check them, they are theirs to
+change): the service is hosted in the United States; their DPA incorporates the EU Standard
+Contractual Clauses (SCCs, 2021/914) and the UK addendum, with the customer as controller; they state they
+do not train on inputs; retention is "as long as necessary", zero-data-retention is an enterprise
+option. If your projects carry EU client data, the router is the path to think about — it sends
+prompt text — and the honest setting for such a machine is no key at all.
 
 ## Repo layout
 
 ```
 .claude-plugin/     plugin + marketplace manifests
 skills/harness-audit/   SKILL.md + rubric-template.md + verifier-protocol.md (the portable part)
-hooks/ + scripts/hooks/ three security guards + the repeat-tool loop-hygiene guard (plugin install only)
+hooks/ + scripts/hooks/ three security guards + the repeat-tool guard + telemetry + the Jev router/nudge (plugin install only)
 scripts/loop-gate.js    the deterministic seam inside a loop — see below
+scripts/jev.js          the one door to TypeSafe Jev, and the one switch (TYPESAFE_API_KEY) — see §Jev
+scripts/develop-phase-pi.js  the develop-phase loop for Pi: seats from the line-up, verdict/exit code read by code
+scripts/dp-tmux.sh       opens the loop's tmux live view (§tmux) — never touches an existing session/pane
+scripts/dp-tail.sh       follows whichever seat is currently active; the live view's bottom pane
+bin/jev-setup           store the key, ping the API, report status
 scripts/check-doc-budgets.js  word-ceiling gate for standing docs (docs/doc-budgets.json)
 scripts/validate.js     this package's own preflight gate — run `node scripts/validate.js` before releasing
 install.sh              multi-IDE skill installer

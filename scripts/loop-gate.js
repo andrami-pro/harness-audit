@@ -14,6 +14,7 @@
 //   node loop-gate.js check-findings <file|-> [--root <repo>] [--seat <name>]
 //   node loop-gate.js check-handoff <file|-> [--seat <name>]
 //   node loop-gate.js resume <run-dir>
+//   node loop-gate.js dedupe <prev-round.json|none> <current.json> [--out <file>] [--threshold 0.85]
 //
 // Exit codes are the contract, not the prose: 0 = usable, 2 = the caller must repair and retry,
 // 1 = this script was invoked wrong. 2 is never a reason to proceed with what you have.
@@ -390,14 +391,173 @@ function cmdResume(argv) {
   process.stdout.write(`RESUME_FROM: ${ns.length + 1}\n`);
 }
 
+// ── dedupe ────────────────────────────────────────────────────────────────────────────────────────
+// "A finding is new if it does not restate one from the previous round — judge by meaning." Until now
+// that sentence was addressed to the chair, the one party in the loop that also holds every fix it
+// applied and every reply it read, and the stop rule ("no new blocker or major") hung on its answer.
+// This moves the call into the gate. The deterministic part comes first and needs no model: a finding
+// with no same-critic, same-file predecessor is new; one whose normalized summary matches a
+// predecessor verbatim is a restatement. Only the pairs that survive both go to Jev, one request per
+// round, one noul per pair, and a probability is what comes back — thresholded here, in code.
+//
+// Two asymmetries are deliberate. A blocker needs p ≥ 0.95 to count as restated, because the cost of
+// deduping away a real new blocker is a gate that opens on a defect nobody fixed. And every carried
+// blocker or major is printed by id: nothing is deduped silently, and a chair that sees a carried
+// finding still unfixed keeps it open. Without a key, or when the request fails, the output says
+// `exact-only` and the chair does the remaining pairs by meaning, as before — announced, not hidden.
+const DEDUPE_THRESHOLD = 0.85;
+const DEDUPE_BLOCKER_THRESHOLD = 0.95;
+const DEDUPE_CHUNK = 50;
+const DEDUPE_FIELDS = ['id', 'critic', 'severity', 'file', 'line', 'summary', 'fix'];
+
+const normalizeText = (s) => String(s || '').toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ').replace(/\s+/g, ' ').trim();
+
+function checkAggregated(findings, where) {
+  if (!Array.isArray(findings)) return [`${where} is not a JSON array`];
+  const errors = [];
+  findings.forEach((f, i) => {
+    const w = `${where}[${i}]`;
+    if (!isPlainObject(f)) { errors.push(`${w} is not an object`); return; }
+    for (const k of ['id', 'critic']) if (!isNonEmptyString(f[k])) errors.push(`${w} is missing "${k}" — dedupe runs on the chair's aggregate, after ids are assigned`);
+    if (!SEVERITIES.has(f.severity)) errors.push(`${w} has severity "${f.severity}" — the ladder is fixed: blocker, major, minor`);
+    if (!isNonEmptyString(f.file)) errors.push(`${w} is missing "file"`);
+    if (!isNonEmptyString(f.summary)) errors.push(`${w} has an empty "summary"`);
+  });
+  const ids = findings.filter(isPlainObject).map((f) => f.id);
+  if (new Set(ids).size !== ids.length) errors.push(`${where} carries duplicate ids — one id per finding`);
+  return errors;
+}
+
+const pick = (f) => Object.fromEntries(DEDUPE_FIELDS.filter((k) => k in f).map((k) => [k, f[k]]));
+
+// The pairs Jev is asked about, and the answer for each. Everything decidable without a model is
+// decided before this is called, so a run with no surviving pair makes no request at all.
+async function askPairs(pairs, jev) {
+  const p = new Map();
+  for (let i = 0; i < pairs.length; i += DEDUPE_CHUNK) {
+    const chunk = pairs.slice(i, i + DEDUPE_CHUNK);
+    const previous = [...new Map(chunk.map(([, P]) => [P.id, pick(P)])).values()];
+    const current = [...new Map(chunk.map(([C]) => [C.id, pick(C)])).values()];
+    const questions = {};
+    for (const [C, P] of chunk) {
+      questions[`${C.id}~${P.id}`] = jev.noulQuestion(
+        `Does current finding ${C.id} restate previous finding ${P.id} — the same defect at the same place, `
+        + `independent of wording? Answer yes only if applying the fix for ${P.id} would also resolve ${C.id}.`,
+        { true: 'same defect, same place; one fix resolves both', false: 'a different defect, or the same file with a new problem' },
+      );
+    }
+    const r = await jev.ask({ state: { previous, current }, questions });
+    for (const [id, a] of Object.entries(r.answers)) p.set(id, Number(a.noul));
+  }
+  return p;
+}
+
+async function dedupe(previous, current, { threshold = DEDUPE_THRESHOLD, jev } = {}) {
+  const out = [];
+  const pairs = [];
+  for (const C of current) {
+    const cands = previous.filter((P) => P.critic === C.critic && P.file === C.file);
+    if (!cands.length) { out.push({ ...C, new: true, restates: null, p: 0, via: 'no-candidate' }); continue; }
+    const exact = cands.find((P) => normalizeText(P.summary) === normalizeText(C.summary));
+    if (exact) { out.push({ ...C, new: false, restates: exact.id, p: 1, via: 'exact' }); continue; }
+    const entry = { ...C, new: true, restates: null, p: 0, via: 'pending' };
+    out.push(entry);
+    for (const P of cands) pairs.push([C, P, entry]);
+  }
+
+  let mode = 'exact-only';
+  let reason = null;
+  if (pairs.length && jev && jev.isEnabled()) {
+    try {
+      const p = await askPairs(pairs, jev);
+      for (const [C, P, entry] of pairs) {
+        const v = p.get(`${C.id}~${P.id}`);
+        if (Number.isFinite(v) && v > entry.p) { entry.p = v; entry.restates = P.id; }
+      }
+      for (const entry of out) {
+        if (entry.via !== 'pending') continue;
+        const need = entry.severity === 'blocker' ? Math.max(threshold, DEDUPE_BLOCKER_THRESHOLD) : threshold;
+        entry.new = !(entry.p >= need);
+        if (entry.new) entry.restates = null;
+        entry.via = 'jev';
+      }
+      mode = 'jev';
+    } catch (e) {
+      reason = e.code === 'JEV_DISABLED' ? 'no TYPESAFE_API_KEY' : `jev unavailable: ${e.message.split('\n')[0]}`;
+    }
+  } else if (pairs.length) {
+    reason = 'no TYPESAFE_API_KEY';
+  }
+  if (mode === 'exact-only') {
+    for (const entry of out) if (entry.via === 'pending') { entry.via = 'unjudged'; entry.new = true; entry.p = 0; entry.restates = null; }
+  }
+  return { mode, reason, threshold, pairs: pairs.length, requests: mode === 'jev' ? Math.ceil(pairs.length / DEDUPE_CHUNK) : 0, findings: out };
+}
+
+const countBy = (list) => {
+  const c = { blocker: 0, major: 0, minor: 0 };
+  for (const f of list) c[f.severity] += 1;
+  return `blocker ${c.blocker} major ${c.major} minor ${c.minor}`;
+};
+
+async function cmdDedupe(argv) {
+  const { opts, positional } = parseArgs(argv, ['--out', '--threshold']);
+  const [prevFile, curFile] = positional;
+  if (!prevFile || !curFile) {
+    process.stderr.write('usage: loop-gate.js dedupe <prev-round.json|none> <current.json> [--out <file>] [--threshold 0.85]\n');
+    process.exit(1);
+  }
+  const threshold = opts['--threshold'] === undefined ? DEDUPE_THRESHOLD : Number(opts['--threshold']);
+  if (!(threshold > 0 && threshold <= 1)) { process.stderr.write('loop-gate.js: --threshold must be in (0, 1]\n'); process.exit(1); }
+
+  let previous = [];
+  let current;
+  try {
+    if (prevFile !== 'none') {
+      const parsed = readInput(prevFile);
+      previous = Array.isArray(parsed) ? parsed : isPlainObject(parsed) && Array.isArray(parsed.findings) ? parsed.findings : null;
+      if (!previous) throw Object.assign(new Error('the previous round is neither a findings array nor a round object with "findings"'), { contract: true });
+    }
+    current = readInput(curFile);
+  } catch (e) {
+    if (e.contract) reportInvalid('DEDUPE INPUT', null, [e.message], 'Expected: the previous round-<n-1>.json (or "none") and the chair\'s aggregated findings array for this round.');
+    process.stderr.write(`loop-gate.js: ${e.message}\n`);
+    process.exit(1);
+  }
+  const errors = [...checkAggregated(previous, 'previous'), ...checkAggregated(current, 'current')];
+  if (errors.length) reportInvalid('DEDUPE INPUT', null, errors, 'Expected: arrays of findings each carrying id, critic, severity, file, line, summary, fix.');
+
+  const jev = require('./jev.js');
+  const result = await dedupe(previous, current, { threshold, jev });
+  if (opts['--out']) {
+    fs.mkdirSync(path.dirname(path.resolve(opts['--out'])), { recursive: true });
+    fs.writeFileSync(opts['--out'], `${JSON.stringify(result, null, 2)}\n`);
+  }
+  const fresh = result.findings.filter((f) => f.new);
+  const carried = result.findings.filter((f) => !f.new);
+  const head = result.mode === 'jev'
+    ? `DEDUPE: jev (${result.pairs} pair(s), ${result.requests} request(s), threshold ${threshold})`
+    : `DEDUPE: exact-only (${result.reason || 'no pairs to judge'})`;
+  process.stdout.write(`${head}\n`);
+  process.stdout.write(`NEW: ${countBy(fresh)}\n`);
+  process.stdout.write(`CARRIED: ${countBy(carried)}\n`);
+  for (const f of carried.filter((x) => x.severity !== 'minor')) {
+    process.stdout.write(`  ${f.id} ${f.severity} restates ${f.restates} (p=${f.p.toFixed(2)}, ${f.via}) ${f.file}:${f.line} — ${f.summary}\n`);
+  }
+  if (result.mode !== 'jev' && result.pairs) {
+    process.stdout.write(`UNJUDGED: ${result.pairs} pair(s) left for the chair to compare by meaning — report this round's dedupe as ungated\n`);
+  }
+}
+
 function main() {
   const [cmd, ...rest] = process.argv.slice(2);
   switch (cmd) {
     case 'check-findings': return cmdCheckFindings(rest);
     case 'check-handoff': return cmdCheckHandoff(rest);
     case 'resume': return cmdResume(rest);
+    case 'dedupe': return cmdDedupe(rest).catch((e) => { process.stderr.write(`loop-gate.js: ${e.message}\n`); process.exit(1); });
     default:
-      process.stderr.write('usage: loop-gate.js <check-findings|check-handoff|resume> [...]\n');
+      process.stderr.write('usage: loop-gate.js <check-findings|check-handoff|resume|dedupe> [...]\n');
       process.exit(1);
   }
 }
@@ -405,6 +565,6 @@ function main() {
 if (require.main === module) main();
 
 module.exports = {
-  checkFinding, checkFindingList, checkScorecard, checkHandoff, scoreOf,
-  FINDING_KEYS, RESERVED_KEYS, HANDOFF_KEYS, HANDOFF_STATUSES,
+  checkFinding, checkFindingList, checkScorecard, checkHandoff, scoreOf, dedupe, normalizeText,
+  DEDUPE_THRESHOLD, DEDUPE_BLOCKER_THRESHOLD, FINDING_KEYS, RESERVED_KEYS, HANDOFF_KEYS, HANDOFF_STATUSES,
 };

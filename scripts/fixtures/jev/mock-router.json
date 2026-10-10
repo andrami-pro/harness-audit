@@ -1,0 +1,3 @@
+{ "answers": {
+    "skill": { "choice": "harness-audit:harness-audit", "probabilities": { "harness-audit:harness-audit": 0.71, "none": 0.2 }, "confidence": 0.71 },
+    "tier":  { "choice": "sonnet", "probabilities": { "haiku": 0.2, "sonnet": 0.62, "opus": 0.18 }, "confidence": 0.62 } } }

@@ -261,18 +261,26 @@ baked into this skill.
    applies identically regardless of which branch got you here: a line-up step 1 found already in place, or
    one step 2 just wrote with consent — existing or fresh, the project's own agents end up carrying it.
 7. Carry the resolved `{role: model}` map into Step 4b instead of the hardcoded Opus/Fable/Sonnet names.
+   Map roles to seats: `implementer` → Implementer, `reviewer` → Reviewer, `preflight` → Preflight. The
+   line-up has no scout or analyst role: the Analyst takes the implementer's model, and the Scout takes the
+   cheapest tier the project allows (`haiku`; use `sonnet` where the line-up retired Haiku — the D25b
+   invariant covers the `preflight` role, not this read-only seat, but a project that retired the tier
+   usually meant it everywhere).
 
 ### Step 4b — Emit the model-by-role develop-phase workflow (ALWAYS)
 
-**This step is mandatory for every audit**, regardless of project size or maturity. Write `.claude/workflows/develop-phase.js` at the repo root using the line-up resolved in Step 4a (fallback: Implementer=Opus → Reviewer=Fable → Preflight=Sonnet, the table below). Without model differentiation the loop degrades to self-critique-level accuracy; with an independent reviewer it catches materially more defects before merge. *(Provenance: the often-cited ~62% → ~89% figures are directional targets — not reproduced independently here. A reproducible A/B is planned: see `benchmarks/` (TODO) and WHITEPAPER §8.1. Until then, treat the gap as qualitative, not measured.)*
+**This step is mandatory for every audit**, regardless of project size or maturity. Write `.claude/workflows/develop-phase.js` at the repo root using the line-up resolved in Step 4a (fallback: Scout=Haiku → Analyst=Opus → Implementer=Opus → Reviewer=Fable,
+then the gate on Sonnet — the table below). Without model differentiation the loop degrades to self-critique-level accuracy; with an independent reviewer it catches materially more defects before merge. *(Provenance: the often-cited ~62% → ~89% figures are directional targets — not reproduced independently here. A reproducible A/B is planned: see `benchmarks/` (TODO) and WHITEPAPER §8.1. Until then, treat the gap as qualitative, not measured.)*
 
 **Model assignment rationale (fallback lineup absent a resolved `model-lineup.json`: Opus 4.8 / Fable 5 / Sonnet 5 — a role/cost-fit heuristic, pending the benchmark above):**
 
 | Role | Model class | Why |
 |------|-------------|-----|
 | Orchestrator | Mythos tier (e.g. Fable 5) | Designs the loop, owns the rubric, manages memory across sessions |
+| Scout | fast/cheap (e.g. Haiku 4.5) | Reads the repo and returns a ≤ 400-word brief — retrieval, not judgement. Read-only |
+| Analyst | workhorse frontier (e.g. Opus) | Verifies the brief and returns a ≤ 300-word plan; can stop the run on a blocker before the implementer spends anything. A Mythos-tier model rarely pays off in this seat: one call per task, and on the public indices we checked the quality gap over a frontier-cheap model is smaller than the price gap |
 | Implementer | workhorse frontier (e.g. Opus 4.8) | Strong code generation at sustainable cost for the 80% of the work |
-| Reviewer | Mythos tier (e.g. Fable 5) | An independent reviewer beats self-critique (directional; numbers pending the benchmark above) — and a *different family* than the implementer, on purpose (cross-family review reduces shared blind spots) |
+| Reviewer | Mythos tier (e.g. Fable 5) | An independent reviewer beats self-critique (directional; numbers pending the benchmark above) — and a *different family* than the implementer, on purpose (cross-family review reduces shared blind spots). May be a non-Anthropic model reached through the Step 4c bridge |
 | Preflight checks | mid/fast (e.g. Sonnet 5) | Command execution + result parsing — cheap, fast, reliable |
 | Complex security review | Mythos tier, extended thinking | Use only for high-criticality phases: injection testing, threat modeling |
 
@@ -283,25 +291,119 @@ baked into this skill.
 ```js
 export const meta = {
   name: 'develop-phase',
-  description: 'Implementer → Reviewer adversarial loop against harness-rubric.md, then a final Preflight gate.',
+  description: 'Scout → Analyst → Implementer → Reviewer adversarial loop against harness-rubric.md, then a final Preflight gate.',
   phases: [
-    { title: 'Implement', detail: 'Write code against the PRD + memory', model: 'opus' },
+    { title: 'Scout',     detail: 'Gather context into a short brief (read-only)', model: 'haiku' },
+    { title: 'Plan',      detail: 'Turn the brief into a short plan, or stop on a blocker', model: 'opus' },
+    { title: 'Implement', detail: 'Write code against the PRD + brief + plan', model: 'opus' },
     { title: 'Review',    detail: 'Find reasons to reject (independent verifier > self-critique)', model: 'fable' },
     { title: 'Preflight', detail: "Run the project's preflight gate", model: 'sonnet' },
   ],
 }
 
-// args: { task, phase?, maxIter? }
-const task    = args?.task    ?? 'implement the active task in TASKS.md or equivalent'
-const phaseN  = args?.phase   ?? null
-const maxIter = args?.maxIter ?? 5
+// args: { task, phase?, maxIter?, preparer?, analystModel?, reviewerModel? }
+//   preparer: false skips Scout + Plan (a trivial task: the implementer explores on its own).
+//   reviewerModel: a native alias ('fable') or a provider-qualified id ('openrouter/<vendor>/<model>'),
+//   the latter routed through scripts/external-review.sh (Step 4c) because agent() only dispatches Anthropic models.
+const task     = args?.task    ?? 'implement the active task in TASKS.md or equivalent'
+const phaseN   = args?.phase   ?? null
+const maxIter  = args?.maxIter ?? 5
+const preparer = args?.preparer !== false
+
+// Replace these defaults with the line-up resolved in Step 4a.
+const MODELS = {
+  scout: 'haiku',
+  analyst: args?.analystModel ?? 'opus',
+  implementer: 'opus',
+  reviewer: args?.reviewerModel ?? 'fable',
+  preflight: 'sonnet',
+}
 
 // Adapt this path to the project's PRD convention (detected in Step 1)
 const prdHint = phaseN
   ? `Reference PRD: docs/prd/prd-phase-${phaseN}-*.md`
   : 'Active phase: see TASKS.md or equivalent'
 
-log(`Task: "${task}" · max ${maxIter} iter · Implementer=Opus · Reviewer=Fable`)
+log(`Task: "${task}" · max ${maxIter} iter · ${preparer ? `Scout=${MODELS.scout} · Analyst=${MODELS.analyst} · ` : ''}Implementer=${MODELS.implementer} · Reviewer=${MODELS.reviewer}`)
+
+// Every early exit is a 'blocked' handoff, never an exception: the caller reads one contract.
+const stop = (summary, blocker, iterations = 0, evidence = []) => ({
+  task, iterations, approved: false, preflightPassed: false,
+  handoff: { status: 'blocked', summary, evidence, blocker },
+  nextStep: blocker,
+})
+// agent() returns null when a seat dies (network, API) or the human skips it: never interpolate that
+// "null" into the next prompt, never call .trim() on it.
+const crash = (who, iteration) => stop(
+  `The ${who} returned nothing in iteration ${iteration} (seat died or was skipped)`,
+  'Run git status before re-running: the implementer may have left half-finished changes', iteration)
+
+// D25a at run time: reviewer and implementer must not share a model family, or "independent review" is
+// self-critique. Crude on purpose (an alias, or the vendor segment of a provider-qualified id);
+// scripts/model-lineup.js is the full check.
+const familyOf = (m) => {
+  const id = String(m).replace(/^[^/]+\//, '')
+  const claude = id.match(/(?:^|\/)(?:claude-)?(opus|fable|sonnet|haiku|mythos)/)
+  return claude ? `claude-${claude[1]}` : id.split('/')[0]
+}
+if (familyOf(MODELS.reviewer) === familyOf(MODELS.implementer)) {
+  return stop('Reviewer and implementer share a model family',
+    `Both resolve to "${familyOf(MODELS.reviewer)}" — change reviewerModel to another family (D25a has no override)`)
+}
+
+// Scout and Plan run once, outside the loop. They are a cost optimisation, not a gate: if a seat dies the
+// run continues without it and the implementer explores on its own.
+let brief = '', plan = ''
+if (preparer) {
+  phase('Scout')
+  brief = await agent(
+    `You are the scout of a development loop. Read-only: do not edit or create files, run nothing that writes.
+If a code graph exists (graphify-out/graph.json), query it first (\`graphify query "<question>"\`); otherwise use Grep/Glob.
+Open raw files only afterwards, for specific lines.
+Read only what is relevant of: memory/, ${prdHint}, TASKS.md or equivalent.
+TASK: ${task}
+Return a brief of at most 400 words, no filler:
+- Relevant files: path:line + one sentence (what it does, why it matters)
+- Rules from the PRD and project docs that apply (short quotes)
+- Existing tests in that area (paths)
+- Open questions or ambiguities a human should settle
+Do not propose the solution.`,
+    { model: MODELS.scout, label: 'scout', phase: 'Scout' }
+  ) ?? ''
+  if (!brief) log('⚠ Scout returned nothing — the implementer explores on its own')
+
+  if (brief) {
+    phase('Plan')
+    plan = await agent(
+      `You are the analyst of a development loop. Read-only: edit nothing.
+You receive the task and a scout's brief. Verify in the code only what you doubt in the brief
+(open the cited files; query the code graph before grepping).
+TASK: ${task}
+BRIEF:
+${brief}
+Return a plan of at most 300 words:
+1. Ordered steps, each with the file it touches.
+2. Tests to add or adjust (the reviewer demands regression coverage when existing logic changes).
+3. Risks, and what NOT to touch (out of the PRD's scope). Every risk you name is binding on the implementer.
+If the brief is not enough or an ambiguity blocks the work, the FIRST line is "BLOCKER: <reason>" and nothing else.
+No full code: the implementer writes it.`,
+      { model: MODELS.analyst, label: 'analyst', phase: 'Plan' }
+    ) ?? ''
+    if (!plan) log('⚠ Analyst returned nothing — the implementer works from the brief alone')
+    else if (plan.trimStart().startsWith('BLOCKER:')) {
+      log('⛔ The analyst found a blocker — stopping before the implementer runs')
+      return stop('The analyst needs a decision before implementation', plan.trim(), 0, [brief])
+    }
+  }
+}
+const context = brief
+  ? `A scout and an analyst prepared the context: start from it, open the original only when something does not add up
+or to write code, and do not re-explore the repo. The plan's risks are binding.
+BRIEF:
+${brief}
+${plan ? `\nPLAN:\n${plan}\n` : ''}
+Read: harness-rubric.md, .claude/agents/implementer.md.`
+  : `Read: memory/, ${prdHint}, harness-rubric.md, .claude/agents/implementer.md.`
 
 let approved = false, lastImpl = '', lastReview = '', iteration = 0
 
@@ -316,15 +418,28 @@ while (!approved && iteration < maxIter) {
 
   lastImpl = await agent(
     `Act as the implementer defined in .claude/agents/implementer.md.
-Read: memory/, ${prdHint}, harness-rubric.md, .claude/agents/implementer.md.
+${context}
 TASK: ${task}${correctionCtx}
 When done: list created/modified files + a description of each change.`,
-    { model: 'opus', label: `impl:iter${iteration}`, phase: 'Implement' }
+    { model: MODELS.implementer, label: `impl:iter${iteration}`, phase: 'Implement' }
   )
+  if (!lastImpl) return crash('implementer', iteration)
 
   phase('Review')
-  lastReview = await agent(
-    `Act as the adversarial reviewer defined in .claude/agents/reviewer.md.
+  if (MODELS.reviewer.includes('/')) {
+    // Provider-qualified id: a cheap seat runs the bridge in ONE foreground call and relays its stdout untouched.
+    const r = await agent(
+      `Run exactly this and change nothing: scripts/external-review.sh ${MODELS.reviewer}
+Run it ONCE, in the foreground, with the maximum Bash timeout (timeout: 600000); it takes 2-4 minutes. Do not background it or poll it.
+Return in "output" the COMPLETE stdout, character for character, without summarising or commenting.
+If the command fails, return the error in "output" followed by a last line REJECTED.`,
+      { model: MODELS.scout, label: `review:iter${iteration}`, phase: 'Review',
+        schema: { type: 'object', additionalProperties: false, required: ['output'], properties: { output: { type: 'string' } } } }
+    )
+    lastReview = r?.output ?? ''
+  } else {
+    lastReview = await agent(
+      `Act as the adversarial reviewer defined in .claude/agents/reviewer.md.
 You receive ONLY artifacts — never the implementer's reasoning.
 Mandate: find reasons to REJECT. Default = FAIL until there is evidence of PASS.
 
@@ -335,25 +450,53 @@ Read harness-rubric.md and .claude/agents/reviewer.md from the repo.
 Evaluate the reviewer's mandatory criteria.
 Format: [PASS|FAIL] criterion — concrete evidence
 Last line (no extra text): APPROVED or REJECTED`,
-    { model: 'fable', label: `review:iter${iteration}`, phase: 'Review' }
-  )
+      { model: MODELS.reviewer, label: `review:iter${iteration}`, phase: 'Review' }
+    )
+  }
+  if (!lastReview) return crash('reviewer', iteration)
 
-  approved = lastReview.includes('APPROVED')
+  // The verdict is the LAST line, compared whole. A substring test reads "[FAIL] … not APPROVED"
+  // as an approval, and one stray word opens the loop.
+  approved = lastReview.trim().split('\n').pop().replace(/[*`_\s]/g, '') === 'APPROVED'
   log(approved ? `✓ APPROVED iter ${iteration}` : `✗ REJECTED — correcting`)
 }
 
 if (!approved) log(`⚠ Did not converge after ${maxIter} iter — escalate to the human`)
 
 phase('Preflight')
-// Adapt this command to the project's preflight (detected in Step 1)
+// The runtime has no shell, so a seat runs the gate — and reports FIELDS, not prose. A substring test
+// for "pass" turns "3 passed, 2 failed", "bypass", or a SKIP followed by the gate's closing PASS
+// banner into a green preflight. An exit code and a list of skipped checks cannot be misread that way.
+const PREFLIGHT_CMD = 'npm run preflight' // Adapt to the project's gate (detected in Step 1)
+const PREFLIGHT_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['exitCode', 'skipped', 'failedCheck', 'tail'],
+  properties: {
+    exitCode: { type: 'integer' },
+    skipped: { type: 'array', items: { type: 'string' } },
+    failedCheck: { type: ['string', 'null'] },
+    tail: { type: 'string' },
+  },
+}
 const preflight = await agent(
-  `Run the project's preflight gate and report the full output + exit code.
-If it fails: identify the exact check that failed.`,
-  { model: 'sonnet', label: 'preflight', phase: 'Preflight' }
+  `Run exactly this and change nothing: ${PREFLIGHT_CMD}; echo "EXIT=$?"
+Report, without interpreting:
+- exitCode: the number printed after EXIT=
+- skipped: every output line that reports a check as skipped or not run (SKIP, skipped, ⊘, "not verified"), verbatim
+- failedCheck: the check that failed, or null when exitCode is 0
+- tail: the last 60 lines of output, verbatim
+Do not fix anything.`,
+  { model: MODELS.preflight, label: 'preflight', phase: 'Preflight', schema: PREFLIGHT_SCHEMA }
 )
 
-const preflightPassed = preflight.toLowerCase().includes('pass') || preflight.includes('exit:0')
-log(`Preflight: ${preflightPassed ? 'PASS' : 'FAIL'}`)
+// A skipped check is not a passed one: exit 0 with a SKIP is NOT VERIFIED, and the handoff says so.
+const skipped = preflight?.skipped ?? []
+const preflightPassed = preflight?.exitCode === 0 && skipped.length === 0
+const preflightState = preflightPassed ? 'PASS'
+  : preflight?.exitCode === 0 ? `NOT VERIFIED (${skipped.length} skipped)`
+  : `FAIL (exit ${preflight?.exitCode ?? '?'}${preflight?.failedCheck ? ` · ${preflight.failedCheck}` : ''})`
+log(`Preflight: ${preflightState}`)
 
 // The handoff is what the seats REPORT: the reviewer's [PASS|FAIL] lines are its evidence, the open
 // [FAIL] lines are its blocker. Nothing in this runtime can re-run them, so the label says so.
@@ -362,9 +505,9 @@ const openFails = verdictLines.filter((l) => l.startsWith('[FAIL]'))
 const handoff = {
   status: approved && preflightPassed ? 'complete' : approved ? 'continue' : 'blocked',
   summary: approved
-    ? `Reviewer approved after ${iteration} iteration(s); preflight ${preflightPassed ? 'green' : 'red'}`
+    ? `Reviewer approved after ${iteration} iteration(s); preflight ${preflightState}`
     : `Reviewer still rejects after ${maxIter} iteration(s)`,
-  evidence: [...verdictLines, `preflight: ${preflightPassed ? 'PASS' : 'FAIL'}`],
+  evidence: [...verdictLines, `preflight: ${preflightState}`, ...skipped.map((l) => `preflight skipped: ${l}`)],
   ...(approved ? {} : { blocker: openFails.join(' · ') || 'reviewer returned REJECTED with no [FAIL] line' }),
 }
 const LABEL = 'Reported by the implementer/reviewer seats — not independently certified: '
@@ -373,6 +516,7 @@ return {
   task, iterations: iteration, approved, preflightPassed, handoff,
   nextStep: LABEL + (approved && preflightPassed
     ? 'git add -p && git commit'
+    : approved && preflight?.exitCode === 0 ? 'Preflight skipped checks — supply what they need and re-run; a SKIP is not a PASS'
     : approved ? 'Preflight failed — fix before commit'
     : `Did not converge — review remaining [FAIL] after ${maxIter} iter and report to the human`),
 }
@@ -384,6 +528,13 @@ nothing gates it: the workflow runtime has no shell, so the handoff is what the 
 own work, and `nextStep` carries the label that says so. A human reading "complete" reads a report,
 not a certificate.
 
+**Scout and Plan are a cost optimisation, not a gate.** They run once, before the loop; if either seat dies the
+run continues without it. They pay off on tasks that touch several files, because the implementer stops
+paying frontier prices to read the repo. On a one-file task they cost more than the implementation
+(one measured run: scout + analyst ≈ 1.3× the implementer's own cost) — pass `preparer: false` there, or
+use the fast path instead of this workflow. The analyst's `BLOCKER:` first line returns a `blocked` handoff
+before any implementer tokens are spent.
+
 **Adaptations required by stack** (from Step 1 detection):
 
 | Stack | Preflight command in the preflight agent prompt | PRD path hint |
@@ -392,6 +543,17 @@ not a certificate.
 | Python + uv | `./scripts/preflight.sh` or `uv run python scripts/preflight.py` | same |
 | Go | `make preflight` | same |
 | Any | Detect from `package.json` / `Makefile` / `justfile` / `scripts/` | same |
+
+### Step 4c — Emit the external-review bridge (only when the reviewer is not an Anthropic model)
+
+`agent()` dispatches Anthropic aliases only. When the resolved reviewer is a provider-qualified id
+(`openrouter/<vendor>/<model>`, anything `pi --list-models` shows), the workflow relays through a script:
+copy `${CLAUDE_PLUGIN_ROOT}/skills/harness-audit/external-review.sh` to `scripts/external-review.sh` in the audited
+repo (`chmod +x`) — the same "the skill writes it into the project" contract as `develop-phase.js`, so the
+workflow keeps working on a machine without the plugin. It needs `pi` on PATH and the provider's key in `pi`'s
+auth; check both and say so in the report instead of emitting a bridge that cannot run. The reviewer sees the
+diff, the rubric and its role file with read-only tools, never the implementer's reasoning, and the workflow
+still decides from the last line of its output. Skip this step when the reviewer is a native alias.
 
 If the project has no PRD folder yet, use `TASKS.md` or the equivalent task-tracking file as `prdHint`. If it has no `harness-rubric.md` yet, the reviewer is instructed to check against AGENTS.md criteria directly.
 
@@ -452,7 +614,7 @@ offers, not auto-fired mid-session.
 ```
 
 Retrospective visibility for all three levels — which loop fired, when, on what — comes free from
-`node scripts/loop-stats.js`; the announcement rule above gives it live, at dispatch time.
+`/dashboard-harness` (or `bin/loop-stats`); the announcement rule above gives it live, at dispatch time.
 
 **Critical zones by stack** (adapt to the stack detected in Step 1 — trigger B above):
 
