@@ -1,3 +1,6 @@
 
 # Private leak-gate terms — never publish (see private-terms.example.json)
 private-terms.json
+
+# Generated code graph: regenerate with `graphify update .`, never versioned
+graphify-out/
