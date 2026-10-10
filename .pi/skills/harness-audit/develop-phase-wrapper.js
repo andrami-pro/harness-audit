@@ -16,9 +16,15 @@ const CONFIG = {
   commit: false,
 }
 
-// Where the global script is: the copy harness-loops keeps at ~/.claude/harness/ (workflow() does not
-// expand `~`, so the path is absolute), then the plugin's own workflow by name.
-const GLOBAL = [{ scriptPath: '__HOME__/.claude/harness/develop-phase.js' }, 'harness-loops:develop-phase']
+// Where the global script is. workflow() only loads a file the session can already read, so first the copy
+// harness-loops keeps inside this project (.claude/harness/, ignored by git), then the one under $HOME
+// (readable when that directory is added to the session; workflow() does not expand `~`), then the plugin's
+// own workflow by name.
+const GLOBAL = [
+  { scriptPath: '.claude/harness/develop-phase.js' },
+  { scriptPath: '__HOME__/.claude/harness/develop-phase.js' },
+  'harness-loops:develop-phase',
+]
 const runArgs = args && typeof args === 'object' ? args : typeof args === 'string' ? { task: args } : {}
 const merged = { ...CONFIG, ...runArgs, models: { ...CONFIG.models, ...(runArgs.models ?? {}) } }
 for (const ref of GLOBAL) {
@@ -27,7 +33,7 @@ for (const ref of GLOBAL) {
   } catch (e) {
     // Only "not there" moves on to the next place. An error from inside the loop is the loop's, and a
     // second attempt would run the seats twice.
-    if (!/not found|no workflow with that name/i.test(String(e && e.message))) throw e
+    if (!/not found|no workflow with that name|can already read/i.test(String(e && e.message))) throw e
   }
 }
 return {
@@ -36,7 +42,7 @@ return {
     status: 'blocked',
     summary: 'The global develop-phase script was not found',
     evidence: [],
-    blocker: 'Install the harness-loops plugin and start a new session (it copies the script to ~/.claude/harness/), or run install.sh --target claude from the harness-audit repository',
+    blocker: 'Install the harness-loops plugin and start a new session in this project (it copies the loop to .claude/harness/), or run install.sh --target claude from the harness-audit repository',
   },
   nextStep: 'Install harness-loops, then re-run',
 }

@@ -2636,13 +2636,16 @@ check('develop-phase wrapper: config + per-run args reach the loop, a missing co
       const direct = await run({ task: 'T', models: { reviewer: 'openrouter/x/y' } }, (ref, a) => a);
       const str = await run('just a task', (ref, a) => a);
       const fallback = await run({ task: 'T' }, (ref, a, n) => (n === 1 ? notFound(ref) : { via: ref }));
+      const unreadable = (ref) => { throw new Error(`workflow({scriptPath: '${ref.scriptPath}'}): scriptPath must be a script path this tool returned, or a file you can already read (the working directory or a directory you have added)`); };
+      const outside = await run({ task: 'T' }, (ref, a, n) => (n < 3 ? (n === 1 ? notFound(ref) : unreadable(ref)) : { via: ref }));
       const none = await run({ task: 'T' }, notFound);
       const inner = await run({ task: 'T' }, () => { throw new Error('agent crashed inside the loop'); });
       console.log(JSON.stringify({
         merged: [direct.out.lang, direct.out.preflight, direct.out.task, direct.out.models.reviewer, direct.out.models.implementer, direct.out.forbidden[0]],
         path: direct.tried,
         str: str.out.task,
-        fallback: [fallback.out && fallback.out.via, fallback.tried.length],
+        fallback: [fallback.out && fallback.out.via && fallback.out.via.scriptPath, fallback.tried.length],
+        outside: [outside.out && outside.out.via, outside.tried.length],
         none: none.out && none.out.handoff.status,
         inner: [Boolean(inner.threw), inner.tried.length],
       }));
@@ -2653,16 +2656,17 @@ check('develop-phase wrapper: config + per-run args reach the loop, a missing co
   const r = JSON.parse(out);
   const want = {
     merged: [['fr', 'pnpm preflight', 'T', 'openrouter/x/y', 'opus', 'wrangler deploy'], 'config and per-run args are not merged (run args win, models merge key by key)'],
-    path: [['/home/u/.claude/harness/develop-phase.js'], 'the first route is not the absolute copy under $HOME'],
+    path: [['.claude/harness/develop-phase.js'], "the first route is not the project's own copy — the only one every session can read"],
     str: ['just a task', 'a string arg did not become the task'],
-    fallback: [['harness-loops:develop-phase', 2], 'a missing copy did not fall back to the plugin workflow'],
+    fallback: [['/home/u/.claude/harness/develop-phase.js', 2], 'a missing project copy did not fall back to the copy under $HOME'],
+    outside: [['harness-loops:develop-phase', 3], 'a copy the session may not read did not fall back to the plugin workflow'],
     none: ['blocked', 'with neither route the wrapper did not return a blocked handoff'],
     inner: [[true, 1], 'an error from inside the loop fell through to the next route — the seats would run twice'],
   };
   for (const [k, [v, why]] of Object.entries(want)) {
     if (JSON.stringify(r[k]) !== JSON.stringify(v)) throw new Error(`${why} (got ${JSON.stringify(r[k])})`);
   }
-  return 'placeholders documented · run args override config · absolute copy first · plugin name on not-found · blocked when neither · inner error never retried';
+  return 'placeholders documented · run args override config · project copy, then $HOME copy, then plugin name · falls through on not-found and on unreadable · blocked when none · inner error never retried';
 });
 
 check('sync-workflows keeps the stable copy equal to the shipped loop, and only rewrites it when it differs', () => {
@@ -2684,10 +2688,23 @@ check('sync-workflows keeps the stable copy equal to the shipped loop, and only 
     if (leftovers.length) throw new Error(`temp files left behind: ${leftovers.join(', ')}`);
     const out = execFileSync('node', [hook], { input: read('scripts/fixtures/hooks/other-event.json'), env, encoding: 'utf8' });
     if (out !== '') throw new Error('the hook printed something — it must stay silent');
+    // A project whose develop-phase is a wrapper gets its own copy (the one every session may read), ignored by git.
+    const proj = path.join(dir, 'proj');
+    const plain = path.join(dir, 'plain');
+    fs.mkdirSync(path.join(proj, '.claude', 'workflows'), { recursive: true });
+    fs.mkdirSync(path.join(plain, '.claude', 'workflows'), { recursive: true });
+    fs.writeFileSync(path.join(proj, '.claude', 'workflows', 'develop-phase.js'), 'for (const ref of GLOBAL) { await workflow(ref, merged) }');
+    fs.writeFileSync(path.join(plain, '.claude', 'workflows', 'develop-phase.js'), '// a fork: the loop itself');
+    for (const cwd of [proj, plain]) {
+      execFileSync('node', [hook], { input: JSON.stringify({ hook_event_name: 'SessionStart', source: 'startup', cwd }), env, stdio: 'pipe' });
+    }
+    if (fs.readFileSync(path.join(proj, '.claude', 'harness', 'develop-phase.js'), 'utf8') !== read(DEVELOP_PHASE)) throw new Error('a project with a wrapper got no copy of the loop it can read');
+    if (!/^\*$/m.test(fs.readFileSync(path.join(proj, '.claude', 'harness', '.gitignore'), 'utf8'))) throw new Error("the project copy is not ignored by git — someone's git add -A would commit it");
+    if (fs.existsSync(path.join(plain, '.claude', 'harness'))) throw new Error('a project without a wrapper got a copy it never asked for');
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
-  return 'copies on first start · leaves an identical copy alone · replaces a stale one · atomic · silent';
+  return 'copies on first start · leaves an identical copy alone · replaces a stale one · atomic · silent · project copy only behind a wrapper, git-ignored';
 });
 
 // The dedupe's thresholds were chosen, not measured; the eval is what measures them. Offline this

@@ -126,6 +126,10 @@ the ones that do not fit), then replace the file with the wrapper. Pilot: `notio
   resolves `harness-loops:develop-phase` is unverified until a session runs with the plugin installed. Shipped:
   the `sync-workflows` SessionStart hook copies the loop to `~/.claude/harness/` when it differs, the wrapper
   calls that copy by absolute path and falls back to the plugin name on "not found".
+  Corrected the same day by the first live run (elsa-agents): a plain session refuses a `scriptPath` outside
+  its readable directories ("scriptPath must be a script path this tool returned, or a file you can already
+  read"); the probe had passed only because its session could read `~/.claude`. The hook now also writes a
+  git-ignored copy into `.claude/harness/` of every project with a wrapper, and the wrapper reads it first.
 - **Pi parity.** `scripts/develop-phase-pi.js` needs the same three gains or a documented gap.
 - **Workflow size.** A wave of four tickets is already more than ten agents; document the `/config` setting.
 

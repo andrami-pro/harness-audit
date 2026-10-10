@@ -312,9 +312,12 @@ whose only content is its config:
    `implementer`/`reviewer` subagents), `prd`, `implementerRules`, `reviewerCriteria`, `externalReview`
    (a renamed bridge), `commit: true` with `commitRules`, and `integrate` (the script that merges a session
    branch). The header of the global script documents every key.
-4. Check that the global script is reachable: `~/.claude/harness/develop-phase.js` exists once
-   `harness-loops` is installed and a session has started (its SessionStart hook keeps that copy current),
-   or after `install.sh --target claude`. Say so in the report when it is missing.
+4. Check that the global script is reachable. `workflow()` only loads a file the session can already read
+   (the working directory or an added directory), so the wrapper reads `.claude/harness/develop-phase.js`
+   inside the project first: the `harness-loops` SessionStart hook writes it there, git-ignored, in every
+   project whose develop-phase is a wrapper, and keeps `~/.claude/harness/develop-phase.js` current too.
+   Without the plugin, `install.sh --target claude` places the `$HOME` copy, which a session reads only when
+   that directory is added to it. Say so in the report when neither copy is there.
 
 The `handoff` the workflow returns — `status: complete | continue | blocked`, `summary`, `evidence`,
 `blocker` when blocked — is the same contract `/iterate` gates with `loop-gate.js check-handoff`. Here
