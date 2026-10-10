@@ -399,7 +399,7 @@ check('exactly 6 commands — 5 loops and 1 observer — each with description +
 //
 // Negative controls (2026-10-10, each applied, observed, reverted — all exit 1):
 //   80 lines of filler appended to plugins/harness-loops/README.md .................................
-//     "plugins/harness-loops/README.md is 209 lines — the limit is 150"
+//     "plugins/harness-loops/README.md is 210 lines — the limit is 150"
 //   the link to docs/compatibility.md pointed at docs/compat.md ......................................
 //     "README.md links to docs/compat.md, which does not exist"
 check('every README is at most 150 lines, the root says which plugin to install, and no relative link is broken', () => {
