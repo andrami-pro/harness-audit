@@ -129,6 +129,16 @@ if [ -n "$DEST" ]; then
     *) echo "  The skill follows the open Agent Skills standard (agentskills.io)." ;;
   esac
   echo "  Note: the security hooks only load via the Claude Code plugin install, not via skill copy."
+  # The develop-phase wrapper the skill writes into a project calls the global loop by an absolute path.
+  # The harness-loops plugin keeps that copy current at every session start; without the plugin, this is it.
+  case "$TARGET" in
+    claude|claude-user)
+      WF_DEST="${HARNESS_WORKFLOWS_DIR:-$HOME/.claude/harness}"
+      mkdir -p "$WF_DEST"
+      cp "$LOOPS_DIR"/workflows/*.js "$WF_DEST"/
+      echo "✓ global develop-phase loop copied to $WF_DEST — re-run after pulling to update it"
+      ;;
+  esac
 fi
 
 # ── Graphify bootstrap (D21) ──────────────────────────────────────────────

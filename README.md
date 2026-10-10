@@ -35,14 +35,15 @@ The repository is one marketplace with three plugins, and each installs alone:
 
 The guards are deliberately conservative (short, high-precision pattern lists — when in doubt they allow). The repeat guard is advisory by design: a polling loop that repeats a call on purpose still gets the nudge, and the model decides. To disable them, uninstall `harness-guards`.
 
-Three more hooks, none of which blocks anything. `loop-telemetry` comes with `harness-guards`; the two Jev
-hooks come with `harness-loops`:
+Four more hooks, none of which blocks anything. `loop-telemetry` comes with `harness-guards`; the two Jev
+hooks and `sync-workflows` come with `harness-loops`:
 
 | Hook | Event | What it does |
 |---|---|---|
 | `loop-telemetry` | `SubagentStop`, `Stop` | Appends one ndjson line per agent boundary for `/dashboard-harness`. Local file, never sent anywhere |
 | `prompt-router` | `UserPromptSubmit` | **Off unless a TypeSafe key is present.** Asks Jev which installed skill fits the prompt and which subagent tier (haiku/sonnet/opus) it deserves; injects one advisory line. Sends the first 1500 chars of the prompt and the installed skill names + descriptions — see [§Jev](#jev--the-optional-system-one-classifier) |
 | `jev-nudge` | `SessionStart` | While no key is present, says once a day that Jev is off and names `bin/jev-setup`. Silent with a key |
+| `sync-workflows` | `SessionStart` | Copies the global `develop-phase` loop to `~/.claude/harness/` when it changed, so every project's wrapper runs the current version. Writes nothing else |
 
 ### Option 2 — skill only (Claude Code, no hooks)
 

@@ -19,6 +19,14 @@
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/hooks/jev-nudge.js\""
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/hooks/sync-workflows.js\""
+          }
+        ]
       }
     ]
   }

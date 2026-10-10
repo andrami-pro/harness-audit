@@ -77,15 +77,16 @@ check('marketplace.json valid + lists the three plugins, each at its own folder'
   return listed.join(' · ');
 });
 
-// What each plugin ships, pinned. The union is exactly what the single plugin shipped at 2.9.0 — one
-// skill, six commands, seven agents, seven hook scripts — so the split moved files and dropped none.
+// What each plugin ships, pinned. The union is what the single plugin shipped at 2.9.0 — one skill, six
+// commands, seven agents, seven hook scripts — plus sync-workflows (PRD-004 step 2), so the split moved
+// files and dropped none.
 const SPLIT = {
   'harness-audit': { skills: ['harness-audit'], commands: [], agents: [], hooks: [] },
   'harness-loops': {
     skills: [],
     commands: ['iterate', 'orchestrate', 'review-loop', 'skill-loop'],
     agents: ['correctness-critic', 'domain-critic', 'process-optimizer', 'safety-critic', 'scorer', 'skill-improver', 'style-critic'],
-    hooks: ['jev-nudge', 'prompt-router'],
+    hooks: ['jev-nudge', 'prompt-router', 'sync-workflows'],
   },
   'harness-guards': {
     skills: [],
@@ -231,7 +232,7 @@ check('each plugin is self-contained: copied alone, every path it names resolves
     }
   });
   const totals = Object.entries(union).map(([k, v]) => `${v.length} ${k}`).join(', ');
-  if (totals !== '1 skills, 6 commands, 7 agents, 7 hooks') throw new Error(`the three plugins ship ${totals}; 2.9.0 shipped 1 skills, 6 commands, 7 agents, 7 hooks`);
+  if (totals !== '1 skills, 6 commands, 7 agents, 8 hooks') throw new Error(`the three plugins ship ${totals}; expected 2.9.0's 1 skills, 6 commands, 7 agents, 7 hooks + sync-workflows`);
   return `${lines.join(' · ')} — union ${totals}`;
 });
 
@@ -2190,8 +2191,14 @@ check('install.sh --lineup stamps the project roles and never clobbers a customi
   fs.writeFileSync(path.join(agents, 'reviewer.md'), fm('reviewer', 'model: opus\n')); // same family as implementer
   fs.writeFileSync(path.join(agents, 'no-frontmatter.md'), '# not an agent\nprose\n');
 
+  const wfDir = path.join(tmp, 'harness-workflows');
   execFileSync('sh', [path.join(ROOT, 'install.sh'), '--target', 'claude', '--lineup',
-    '--skip-graphify', '--yes'], { cwd: tmp, stdio: 'pipe' });
+    '--skip-graphify', '--yes'], { cwd: tmp, stdio: 'pipe', env: { ...process.env, HARNESS_WORKFLOWS_DIR: wfDir } });
+  // The wrapper the skill writes calls the global loop by path; without the plugin, install.sh puts it there.
+  if (!fs.existsSync(path.join(wfDir, 'develop-phase.js'))
+    || read('plugins/harness-loops/workflows/develop-phase.js') !== fs.readFileSync(path.join(wfDir, 'develop-phase.js'), 'utf8')) {
+    throw new Error('install.sh --target claude did not copy the global develop-phase loop where the wrapper calls it');
+  }
 
   const modelOf = (f) => {
     const src = fs.readFileSync(path.join(agents, f), 'utf8');
@@ -2406,7 +2413,9 @@ check('jev live smoke — one noul round trip to api.typesafe.ai', () => {
   return r.out.trim();
 });
 
-// The develop-phase template is code the skill writes INTO other projects, so a bug in it ships to
+const DEVELOP_PHASE = 'plugins/harness-loops/workflows/develop-phase.js';
+
+// The develop-phase loop is code every project runs (through its wrapper), so a bug in it ships to
 // every repo the audit touches. Two lived there: the reviewer's verdict was `includes('APPROVED')`,
 // and the preflight's was `includes('pass') || includes('exit:0')` over a seat's prose — which reads
 // "3 passed, 2 failed", "bypass", and a SKIP followed by the gate's closing PASS banner as green.
@@ -2420,13 +2429,10 @@ check('jev live smoke — one noul round trip to api.typesafe.ai', () => {
 //   Pi mirror only, back to a substring test on the log ............................................
 //     "a clean exit 0 did not pass" — predicted the SKIP message; it failed one case earlier, because a
 //     clean gate whose log never says the word is red to a substring test too. The mirror is checked.
-check('develop-phase template decides from the verdict line and the exit code, and a SKIP is not a PASS', () => {
+check('develop-phase loop decides from the verdict line and the exit code, and a SKIP is not a PASS', () => {
   const harness = `
     const fs = require('fs');
-    const md = fs.readFileSync(process.argv[1], 'utf8');
-    const block = (md.match(/\`\`\`js\\n([\\s\\S]*?)\`\`\`/g) || []).find((b) => /name: 'develop-phase'/.test(b));
-    if (!block) { console.log('NO_TEMPLATE'); process.exit(0); }
-    const src = block.replace(/^\`\`\`js\\n/, '').replace(/\`\`\`$/, '').replace(/^export /m, '');
+    const src = fs.readFileSync(process.argv[1], 'utf8').replace(/^export /m, '');
     const AsyncFn = Object.getPrototypeOf(async function () {}).constructor;
     const run = (review, pf) => new AsyncFn('args', 'agent', 'log', 'phase', src)(
       { maxIter: 1 },
@@ -2443,10 +2449,9 @@ check('develop-phase template decides from the verdict line and the exit code, a
     })().catch((e) => console.log('THREW ' + e.message));
   `;
   const seen = [];
-  for (const rel of ['plugins/harness-audit/skills/harness-audit/SKILL.md', '.pi/skills/harness-audit/SKILL.md']) {
+  for (const rel of [DEVELOP_PHASE]) {
     const out = execFileSync('node', ['-e', harness, path.join(ROOT, rel)], { encoding: 'utf8' }).trim();
-    if (out === 'NO_TEMPLATE') throw new Error(`${rel} has no develop-phase template`);
-    if (out.startsWith('THREW')) throw new Error(`${rel}: the develop-phase template throws when run — ${out.slice(6)}`);
+    if (out.startsWith('THREW')) throw new Error(`${rel}: the develop-phase loop throws when run — ${out.slice(6)}`);
     const r = JSON.parse(out);
     const want = { pass: [true, true, 'complete'], skip: [true, false, 'continue'], fail: [true, false, 'continue'], prose: [false, true, 'blocked'] };
     for (const [k, v] of Object.entries(want)) {
@@ -2455,7 +2460,7 @@ check('develop-phase template decides from the verdict line and the exit code, a
         throw new Error(`${rel}: ${why} (got ${JSON.stringify(r[k])})`);
       }
     }
-    seen.push(rel.startsWith('.pi') ? 'pi mirror' : 'skill');
+    seen.push('global loop');
   }
   return `${seen.join(' + ')}: pass → complete · SKIP → continue · exit 1 → continue · "not APPROVED" → blocked`;
 });
@@ -2471,13 +2476,10 @@ check('develop-phase template decides from the verdict line and the exit code, a
 //     "a reviewer of the implementer's own family ran — D25a is enforced at run time, no seat may start"
 //   the analyst's `BLOCKER:` prefix compared against `BLOCKED:` .......................................
 //     "the implementer ran after the analyst reported a blocker — it must stop before any implementer token"
-check('develop-phase template: a blocker stops before the implementer, a same-family reviewer is refused, an external verdict is read, a dead seat degrades', () => {
+check('develop-phase loop: a blocker stops before the implementer, a same-family reviewer is refused, an external verdict is read, a dead seat degrades', () => {
   const harness = (mdPath) => {
     const fs = require('fs');
-    const md = fs.readFileSync(mdPath, 'utf8');
-    const block = (md.match(/```js\n([\s\S]*?)```/g) || []).find((b) => /name: 'develop-phase'/.test(b));
-    if (!block) { console.log('NO_TEMPLATE'); return; }
-    const src = block.replace(/^```js\n/, '').replace(/```$/, '').replace(/^export /m, '');
+    const src = fs.readFileSync(mdPath, 'utf8').replace(/^export /m, '');
     const AsyncFn = Object.getPrototypeOf(async function () {}).constructor;
     const pf = { exitCode: 0, skipped: [], failedCheck: null, tail: '' };
     const run = async (args, seat) => {
@@ -2510,10 +2512,9 @@ check('develop-phase template: a blocker stops before the implementer, a same-fa
     })().catch((e) => console.log('THREW ' + e.message));
   };
   const seen = [];
-  for (const rel of ['plugins/harness-audit/skills/harness-audit/SKILL.md', '.pi/skills/harness-audit/SKILL.md']) {
+  for (const rel of [DEVELOP_PHASE]) {
     const out = execFileSync('node', ['-e', `(${harness})(process.argv[1])`, path.join(ROOT, rel)], { encoding: 'utf8' }).trim();
-    if (out === 'NO_TEMPLATE') throw new Error(`${rel} has no develop-phase template`);
-    if (out.startsWith('THREW')) throw new Error(`${rel}: the develop-phase template throws when run — ${out.slice(6)}`);
+    if (out.startsWith('THREW')) throw new Error(`${rel}: the develop-phase loop throws when run — ${out.slice(6)}`);
     const r = JSON.parse(out);
     const want = {
       blocker: [['blocked', false], 'the implementer ran after the analyst reported a blocker — it must stop before any implementer token'],
@@ -2526,9 +2527,162 @@ check('develop-phase template: a blocker stops before the implementer, a same-fa
     for (const [k, [v, why]] of Object.entries(want)) {
       if (JSON.stringify(r[k]) !== JSON.stringify(v)) throw new Error(`${rel}: ${why} (got ${JSON.stringify(r[k])})`);
     }
-    seen.push(rel.startsWith('.pi') ? 'pi mirror' : 'skill');
+    seen.push('global loop');
   }
   return `${seen.join(' + ')}: blocker → stop before implementer · same family → refused before any seat · external verdict read · dead scout degrades · dead reviewer → blocked · preparer:false skips both`;
+});
+
+// A project no longer forks the loop: whatever it customized lives in its wrapper's config. So every key
+// a fork used to hard-code has to reach the seat it was for, or the migration silently drops it. The
+// config below is the pilot's (notion-impac-pilotage), the first fork migrated.
+//
+// Negative controls (2026-10-10, each applied, observed, reverted — all exit 1):
+//   `lang` ignored (commit prompt hard-coded to English) ............................................
+//     "lang 'fr' did not reach the commit prompt — the message is a deliverable in the project's language"
+//   APPROVE set reduced to 'APPROVED' ................................................................
+//     "the project's bridge answered APROBADO and the loop read it as a rejection"
+check('develop-phase loop honours every wrapper config key a fork used to hard-code', () => {
+  const harness = (file) => {
+    const src = require('fs').readFileSync(file, 'utf8').replace(/^export /m, '');
+    const AsyncFn = Object.getPrototypeOf(async function () {}).constructor;
+    const pf = { exitCode: 0, skipped: [], failedCheck: null, tail: '' };
+    const run = async (args, seat) => {
+      const calls = [];
+      const agent = async (prompt, o) => { calls.push({ ...o, prompt }); return seat(String(o.label)); };
+      const out = await new AsyncFn('args', 'agent', 'log', 'phase', src)(args, agent, () => {}, () => {});
+      return { out, calls, by: (p) => calls.find((c) => c.label.startsWith(p)) };
+    };
+    const ok = (l) => (l === 'preflight' ? pf : l === 'commit' ? { committed: true, hash: 'abc123', message: 'feat: x', note: '' }
+      : l.startsWith('review') ? { output: '[PASS] a — x\nAPROBADO' } : l === 'scout' ? 'BRIEF' : l === 'analyst' ? 'PLAN' : 'impl');
+    const CFG = {
+      task: 'T', maxIter: 1, lang: 'fr', preflight: 'pnpm preflight',
+      models: { scout: 'haiku', analyst: 'opus', implementer: 'opus', reviewer: 'openrouter/xiaomi/mimo-v2.6-pro' },
+      agentTypes: { scout: 'Explore', implementer: 'implementer' },
+      context: ['STATUS.md', 'docs/client-context/'],
+      forbidden: ['wrangler deploy', 'pnpm deploy*'],
+      implementerRules: ['Read ~/.agents/skills/ponytail/SKILL.md first.'],
+      externalReview: 'scripts/revue-externe.sh',
+      commit: true, commitRules: ['No Co-Authored-By line.'], integrate: 'scripts/integrer.sh',
+    };
+    (async () => {
+      const r = await run(CFG, ok);
+      const off = await run({ ...CFG, commit: false }, ok);
+      const red = await run(CFG, (l) => (l === 'preflight' ? { ...pf, exitCode: 1, failedCheck: 'test' } : ok(l)));
+      console.log(JSON.stringify({
+        lang: /in French/.test(r.by('commit').prompt) && /No Co-Authored-By line\./.test(r.by('commit').prompt),
+        approved: r.out.approved && r.out.handoff.status === 'complete',
+        bridge: r.by('review').prompt.includes('scripts/revue-externe.sh openrouter/xiaomi/mimo-v2.6-pro'),
+        preflight: r.by('preflight').prompt.includes('pnpm preflight; echo'),
+        types: [r.by('scout').agentType, r.by('impl').agentType, r.by('analyst').agentType ?? null],
+        forbidden: /FORBIDDEN, never run: wrangler deploy, pnpm deploy\*/.test(r.by('impl').prompt) && r.by('impl').prompt.includes('ponytail'),
+        context: r.by('scout').prompt.includes('STATUS.md, docs/client-context/'),
+        integrate: r.out.nextStep.includes('committed abc123, then scripts/integrer.sh'),
+        noCommit: [off.calls.some((c) => c.label === 'commit'), red.calls.some((c) => c.label === 'commit')],
+      }));
+    })().catch((e) => console.log('THREW ' + e.message));
+  };
+  const out = execFileSync('node', ['-e', `(${harness})(process.argv[1])`, path.join(ROOT, DEVELOP_PHASE)], { encoding: 'utf8' }).trim();
+  if (out.startsWith('THREW')) throw new Error(`the loop throws under the pilot's config — ${out.slice(6)}`);
+  const r = JSON.parse(out);
+  const want = {
+    lang: [true, "lang 'fr' did not reach the commit prompt — the message is a deliverable in the project's language"],
+    approved: [true, "the project's bridge answered APROBADO and the loop read it as a rejection"],
+    bridge: [true, 'externalReview did not replace the bridge path'],
+    preflight: [true, "the project's preflight command did not reach the preflight seat"],
+    types: [['Explore', 'implementer', null], 'agentTypes did not reach the seats (or leaked to one it does not name)'],
+    forbidden: [true, 'forbidden or implementerRules did not reach the implementer'],
+    context: [true, "context did not reach the scout's reading list"],
+    integrate: [true, 'integrate is missing from nextStep after a commit'],
+    noCommit: [[false, false], 'the commit seat ran with commit:false or after a red preflight'],
+  };
+  for (const [k, [v, why]] of Object.entries(want)) {
+    if (JSON.stringify(r[k]) !== JSON.stringify(v)) throw new Error(`${why} (got ${JSON.stringify(r[k])})`);
+  }
+  return 'lang · bridge verdict in the project\'s language · externalReview · preflight · agentTypes · forbidden · context · commit only when green · integrate';
+});
+
+// The wrapper is the one file the audit writes into every project, and the only route to the loop.
+// workflow() does not expand `~` (probed 2026-10-10: "Workflow script file not found: ~/…"), so the
+// wrapper names the copy by absolute path and falls back to the plugin's workflow by name. Only "not
+// there" may fall through: a loop that fails inside must not be started a second time.
+//
+// Negative control (2026-10-10, reverted): the catch made unconditional — exit 1, "an error from inside
+// the loop fell through to the next route — the seats would run twice".
+check('develop-phase wrapper: config + per-run args reach the loop, a missing copy falls back, an inner error does not', () => {
+  const tpl = read('plugins/harness-audit/skills/harness-audit/develop-phase-wrapper.js');
+  const left = tpl.match(/__[A-Z]+__/g) || [];
+  for (const ph of ['__LANG__', '__PREFLIGHT__', '__MODELS__', '__CONTEXT__', '__FORBIDDEN__', '__HOME__']) {
+    if (!left.includes(ph)) throw new Error(`the wrapper template lost its ${ph} placeholder — SKILL.md Step 4b tells the audit to fill it`);
+  }
+  const src = tpl.replace('__LANG__', 'fr').replace('__PREFLIGHT__', 'pnpm preflight')
+    .replace('__MODELS__', "{ reviewer: 'fable', implementer: 'opus' }").replace('__CONTEXT__', "['STATUS.md']")
+    .replace('__FORBIDDEN__', "['wrangler deploy']").replace('__HOME__', '/home/u').replace(/^export /m, '');
+  if (/__[A-Z]+__/.test(src)) throw new Error(`the wrapper template has an undocumented placeholder: ${src.match(/__[A-Z]+__/)[0]}`);
+  const harness = (code) => {
+    const AsyncFn = Object.getPrototypeOf(async function () {}).constructor;
+    const run = async (args, impl) => {
+      const tried = [];
+      const workflow = async (ref, a) => { tried.push(typeof ref === 'string' ? ref : ref.scriptPath); return impl(ref, a, tried.length); };
+      try { return { out: await new AsyncFn('args', 'workflow', code)(args, workflow), tried }; }
+      catch (e) { return { threw: e.message, tried }; }
+    };
+    const notFound = (ref) => { throw new Error(typeof ref === 'string' ? `workflow('${ref}'): no workflow with that name` : `Workflow script file not found: ${ref.scriptPath}`); };
+    (async () => {
+      const direct = await run({ task: 'T', models: { reviewer: 'openrouter/x/y' } }, (ref, a) => a);
+      const str = await run('just a task', (ref, a) => a);
+      const fallback = await run({ task: 'T' }, (ref, a, n) => (n === 1 ? notFound(ref) : { via: ref }));
+      const none = await run({ task: 'T' }, notFound);
+      const inner = await run({ task: 'T' }, () => { throw new Error('agent crashed inside the loop'); });
+      console.log(JSON.stringify({
+        merged: [direct.out.lang, direct.out.preflight, direct.out.task, direct.out.models.reviewer, direct.out.models.implementer, direct.out.forbidden[0]],
+        path: direct.tried,
+        str: str.out.task,
+        fallback: [fallback.out && fallback.out.via, fallback.tried.length],
+        none: none.out && none.out.handoff.status,
+        inner: [Boolean(inner.threw), inner.tried.length],
+      }));
+    })().catch((e) => console.log('THREW ' + e.message));
+  };
+  const out = execFileSync('node', ['-e', `(${harness})(${JSON.stringify(src)})`], { encoding: 'utf8' }).trim();
+  if (out.startsWith('THREW')) throw new Error(`the wrapper throws — ${out.slice(6)}`);
+  const r = JSON.parse(out);
+  const want = {
+    merged: [['fr', 'pnpm preflight', 'T', 'openrouter/x/y', 'opus', 'wrangler deploy'], 'config and per-run args are not merged (run args win, models merge key by key)'],
+    path: [['/home/u/.claude/harness/develop-phase.js'], 'the first route is not the absolute copy under $HOME'],
+    str: ['just a task', 'a string arg did not become the task'],
+    fallback: [['harness-loops:develop-phase', 2], 'a missing copy did not fall back to the plugin workflow'],
+    none: ['blocked', 'with neither route the wrapper did not return a blocked handoff'],
+    inner: [[true, 1], 'an error from inside the loop fell through to the next route — the seats would run twice'],
+  };
+  for (const [k, [v, why]] of Object.entries(want)) {
+    if (JSON.stringify(r[k]) !== JSON.stringify(v)) throw new Error(`${why} (got ${JSON.stringify(r[k])})`);
+  }
+  return 'placeholders documented · run args override config · absolute copy first · plugin name on not-found · blocked when neither · inner error never retried';
+});
+
+check('sync-workflows keeps the stable copy equal to the shipped loop, and only rewrites it when it differs', () => {
+  const hook = path.join(ROOT, 'plugins/harness-loops/scripts/hooks/sync-workflows.js');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-sync-'));
+  const env = { PATH: process.env.PATH, HOME: dir, HARNESS_WORKFLOWS_DIR: path.join(dir, 'harness') };
+  const start = read('scripts/fixtures/hooks/session-start.json');
+  const target = path.join(dir, 'harness', 'develop-phase.js');
+  try {
+    execFileSync('node', [hook], { input: start, env, stdio: 'pipe' });
+    if (fs.readFileSync(target, 'utf8') !== read(DEVELOP_PHASE)) throw new Error('first session start did not copy the loop');
+    const before = fs.statSync(target).mtimeMs;
+    execFileSync('node', [hook], { input: start, env, stdio: 'pipe' });
+    if (fs.statSync(target).mtimeMs !== before) throw new Error('an identical copy was rewritten — every session start would touch it');
+    fs.writeFileSync(target, '// stale');
+    execFileSync('node', [hook], { input: start, env, stdio: 'pipe' });
+    if (fs.readFileSync(target, 'utf8') !== read(DEVELOP_PHASE)) throw new Error('a stale copy was not replaced — a plugin update would never reach the projects');
+    const leftovers = fs.readdirSync(path.join(dir, 'harness')).filter((f) => f.endsWith('.tmp'));
+    if (leftovers.length) throw new Error(`temp files left behind: ${leftovers.join(', ')}`);
+    const out = execFileSync('node', [hook], { input: read('scripts/fixtures/hooks/other-event.json'), env, encoding: 'utf8' });
+    if (out !== '') throw new Error('the hook printed something — it must stay silent');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+  return 'copies on first start · leaves an identical copy alone · replaces a stale one · atomic · silent';
 });
 
 // The dedupe's thresholds were chosen, not measured; the eval is what measures them. Offline this
