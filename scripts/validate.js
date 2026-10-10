@@ -2572,6 +2572,7 @@ check('develop-phase loop honours every wrapper config key a fork used to hard-c
       console.log(JSON.stringify({
         approved: r.out.approved && r.out.handoff.status === 'complete',
         lang: /in French/.test((r.by('commit') || {}).prompt) && /No Co-Authored-By line\./.test((r.by('commit') || {}).prompt),
+        staging: [/git add -- </.test((r.by('commit') || {}).prompt), ((r.by('commit') || {}).prompt || '').replace(/NEVER[^\n]*/, '').includes('git add -A'), ((r.by('commit') || {}).prompt || '').includes("IMPLEMENTER'S REPORT:\nimpl")],
         bridge: r.by('review').prompt.includes('scripts/revue-externe.sh openrouter/xiaomi/mimo-v2.6-pro'),
         preflight: r.by('preflight').prompt.includes('pnpm preflight; echo'),
         types: [r.by('scout').agentType, r.by('impl').agentType, r.by('analyst').agentType ?? null],
@@ -2589,6 +2590,7 @@ check('develop-phase loop honours every wrapper config key a fork used to hard-c
   const want = {
     approved: [true, "the project's bridge answered APROBADO and the loop read it as a rejection"],
     lang: [true, "lang 'fr' did not reach the commit prompt — the message is a deliverable in the project's language"],
+    staging: [[true, false, true], "the commit seat may sweep the user's uncommitted work: it must stage the implementer's files by name, never git add -A"],
     bridge: [true, 'externalReview did not replace the bridge path'],
     preflight: [true, "the project's preflight command did not reach the preflight seat"],
     types: [['Explore', 'implementer', null], 'agentTypes did not reach the seats (or leaked to one it does not name)'],
@@ -2601,7 +2603,7 @@ check('develop-phase loop honours every wrapper config key a fork used to hard-c
   for (const [k, [v, why]] of Object.entries(want)) {
     if (JSON.stringify(r[k]) !== JSON.stringify(v)) throw new Error(`${why} (got ${JSON.stringify(r[k])})`);
   }
-  return 'lang · bridge verdict in the project\'s language · externalReview · preflight · agentTypes · forbidden · context · commit only when green · integrate · doneStep';
+  return 'lang · bridge verdict in the project\'s language · externalReview · preflight · agentTypes · forbidden · context · commit only when green, staging the run\'s files by name · integrate · doneStep';
 });
 
 // The wrapper is the one file the audit writes into every project, and the only route to the loop.

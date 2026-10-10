@@ -239,8 +239,10 @@ const preflightState = preflightPassed ? 'PASS'
   : `FAIL (exit ${preflight?.exitCode ?? '?'}${preflight?.failedCheck ? ` · ${preflight.failedCheck}` : ''})`
 log(`Preflight: ${preflightState}`)
 
-// The commit stays on the current branch: the run is launched from the session's worktree, so `git add -A`
-// holds only this run's changes. The message is a deliverable, so it is written in the project's language.
+// The commit stays on the current branch and holds only what this run changed. The run may be launched from
+// the project's main checkout, where the user keeps uncommitted work of their own: `git add -A` would sweep it
+// into the loop's commit, so the seat stages the implementer's files by name, and refuses a file whose diff
+// carries changes the task did not make. The message is a deliverable, written in the project's language.
 const COMMIT_SCHEMA = {
   type: 'object',
   additionalProperties: false,
@@ -256,12 +258,20 @@ let commit = null
 if (approved && preflightPassed && doCommit) {
   phase('Commit')
   commit = await agent(
-    `In the current worktree, without switching branches:
-1. \`git status --short\`. With no changes, committed=false and say why in note.
-2. \`git add -A && git commit -m "<message>"\`. The message is ONE line in ${language}, conventional format
+    `In the current checkout, without switching branches. The working tree may also hold the user's own
+uncommitted work: it must stay out of this commit.
+1. From the implementer's report below, list the files this run created or modified. Run \`git status --short\`.
+   If none of them has changes, committed=false and say why in note.
+2. For each of those files, read \`git diff -- <file>\` (or the whole file when it is new). If a file carries
+   changes the task did not make, commit nothing: committed=false, and name the file in note.
+3. \`git add -- <those files>\` (by name; NEVER \`git add -A\`, \`git add .\` or \`git commit -a\`), then
+   \`git commit -m "<message>"\`. The message is ONE line in ${language}, conventional format
    (feat:/fix:/chore:), ≤ 90 characters, describing what was done for: ${task}
    Never use --no-verify.${list(cfg.commitRules).map((r) => `\n   ${r}`).join('')}
-3. Return hash (git rev-parse --short HEAD), message and a short note.`,
+4. Return hash (git rev-parse --short HEAD), message and a short note naming the files committed.
+
+IMPLEMENTER'S REPORT:
+${lastImpl}`,
     { model: MODELS.commit, label: 'commit', phase: 'Commit', schema: COMMIT_SCHEMA }
   )
   log(commit?.committed ? `✓ commit ${commit.hash} — ${commit.message}` : `⚠ no commit: ${commit?.note ?? 'the seat returned nothing'}`)
