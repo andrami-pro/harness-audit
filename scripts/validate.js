@@ -2607,6 +2607,72 @@ check('develop-phase loop: a blocker stops before the implementer, a same-family
   return `${seen.join(' + ')}: blocker → stop before implementer · same family → refused before any seat · external verdict read · dead scout degrades · dead reviewer → blocked · preparer:false skips both`;
 });
 
+// The first live run of the global loop (2026-10-11, notion-impac-pilotage, ticket PRD-008/01) went wrong in a
+// way no stub had shown: a seat sees the parent conversation. The review relay seat obeyed the human's last chat
+// message ("make the commit"), committed before the review with the harness's Co-Authored-By line, and the reviewer
+// then judged an empty diff; another round, the relay refused to send code to the bridge and returned REJECTED with
+// no [FAIL] line, and the loop spun its five rounds with nothing for the implementer to fix.
+//
+// Negative controls (2026-10-11, each applied, observed, reverted — all exit 1):
+//   SEAT_RULES dropped from the review relay prompt ...................................................
+//     "a seat's prompt does not open with the isolation rules — it may obey the chat instead of the loop"
+//   the no-[FAIL] stop commented out ..................................................................
+//     "a rejection without a [FAIL] line looped — it must stop after one round, there is nothing to fix"
+//   the BRIDGE NOT RUN stop commented out ...........................................................
+//     "a bridge that did not run was looped on — it must stop and say the bridge did not run"
+check('develop-phase loop: every seat is told its prompt is its only instruction, only the commit seat commits, a review without a [FAIL] line or a bridge that did not run stops the loop', () => {
+  const harness = (file) => {
+    const fs = require('fs');
+    const src = fs.readFileSync(file, 'utf8').replace(/^export /m, '');
+    const AsyncFn = Object.getPrototypeOf(async function () {}).constructor;
+    const pf = { exitCode: 0, skipped: [], failedCheck: null, tail: '' };
+    const run = async (args, review) => {
+      const calls = [];
+      const agent = async (prompt, o) => {
+        const l = String(o.label); calls.push({ label: l, prompt });
+        if (l === 'preflight') return pf;
+        if (l === 'commit') return { committed: true, hash: 'abc1234', message: 'feat: x', note: 'a.ts' };
+        if (l.startsWith('review')) return review(l);
+        return l === 'scout' ? 'BRIEF' : l === 'analyst' ? 'PLAN' : 'impl';
+      };
+      const out = await new AsyncFn('args', 'agent', 'log', 'phase', src)(args, agent, () => {}, () => {});
+      return { out, calls, impls: calls.filter((c) => c.label.startsWith('impl')).length };
+    };
+    const EXT = 'openrouter/acme/model-x';
+    (async () => {
+      const ok = await run({ maxIter: 3, commit: true }, () => '[PASS] a — x\nAPPROVED');
+      const okExt = await run({ maxIter: 3, reviewerModel: EXT }, () => ({ output: '[PASS] a — x\nAPPROVED' }));
+      const isolated = [...ok.calls, ...okExt.calls].every((c) => c.prompt.startsWith('You are one seat of an automated develop-phase loop'));
+      const noGit = [...ok.calls, ...okExt.calls].filter((c) => c.label !== 'commit').every((c) => c.prompt.includes('Never commit, stage, stash, push or switch branches'));
+      const commitSeat = ok.calls.find((c) => c.label === 'commit');
+      const bare = await run({ maxIter: 5 }, () => 'Commit created: 963f2c9 on the branch.\nREJECTED');
+      const refused = await run({ maxIter: 5, reviewerModel: EXT }, () => ({ output: 'BRIDGE NOT RUN: it sends code to a third party\nREJECTED' }));
+      const realFail = await run({ maxIter: 2 }, () => '- [FAIL] tests — none added\nREJECTED');
+      console.log(JSON.stringify({
+        isolated, noGit, commitSeat: [!!commitSeat, !!commitSeat && !commitSeat.prompt.includes('Never commit, stage')],
+        bare: [bare.out.handoff.status, bare.impls, /without naming a \[FAIL\]/.test(bare.out.handoff.summary)],
+        refused: [refused.out.handoff.status, refused.impls, /bridge did not run/.test(refused.out.handoff.summary)],
+        realFail: [realFail.out.handoff.status, realFail.impls, realFail.out.handoff.evidence.includes('[FAIL] tests — none added')],
+      }));
+    })().catch((e) => console.log('THREW ' + e.message));
+  };
+  const out = execFileSync('node', ['-e', `(${harness})(process.argv[1])`, path.join(ROOT, DEVELOP_PHASE)], { encoding: 'utf8' }).trim();
+  if (out.startsWith('THREW')) throw new Error(`the develop-phase loop throws when run — ${out.slice(6)}`);
+  const r = JSON.parse(out);
+  const want = {
+    isolated: [true, "a seat's prompt does not open with the isolation rules — it may obey the chat instead of the loop"],
+    noGit: [true, 'a seat other than the commit seat was not told it never commits'],
+    commitSeat: [[true, true], 'the commit seat is missing, or was told never to commit'],
+    bare: [['blocked', 1, true], 'a rejection without a [FAIL] line looped — it must stop after one round, there is nothing to fix'],
+    refused: [['blocked', 1, true], 'a bridge that did not run was looped on — it must stop and say the bridge did not run'],
+    realFail: [['blocked', 2, true], 'a real [FAIL] line (even as a list item) did not keep the loop going, or did not reach the evidence'],
+  };
+  for (const [k, [v, why]] of Object.entries(want)) {
+    if (JSON.stringify(r[k]) !== JSON.stringify(v)) throw new Error(`${why} (got ${JSON.stringify(r[k])})`);
+  }
+  return 'isolation rules on every seat · only the commit seat commits · no [FAIL] → stop after 1 round · bridge not run → stop · a listed [FAIL] keeps looping';
+});
+
 // A project no longer forks the loop: whatever it customized lives in its wrapper's config. So every key
 // a fork used to hard-code has to reach the seat it was for, or the migration silently drops it. The
 // config below is the pilot's (notion-impac-pilotage), the first fork migrated.
