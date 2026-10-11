@@ -222,10 +222,13 @@ function changeSet() {
   return { text, empty: !diff.trim() && !untracked.length };
 }
 
-// The verdict is the LAST line, whole. includes() would read "[FAIL] … no APROBADO" as an approval.
+// The verdict is the last line that is a verdict and nothing else, whole. includes() would read
+// "[FAIL] … no APROBADO" as an approval; notes a reviewer adds after its verdict must not hide it.
+const APROBADOS = ['APROBADO', 'APPROVED', 'APPROUVÉ', 'APPROUVE'];
+const VERDICTOS = [...APROBADOS, 'RECHAZADO', 'REJECTED', 'REJETÉ', 'REJETE'];
 function verdictOf(review) {
-  const last = review.trim().split('\n').pop().replace(/[*`_\s]/g, '').toUpperCase();
-  return last === 'APROBADO' || last === 'APPROVED';
+  const v = review.trim().split('\n').map((l) => l.replace(/[*`_\s#:.]/g, '').toUpperCase()).reverse().find((l) => VERDICTOS.includes(l));
+  return APROBADOS.includes(v);
 }
 
 // ── preflight ────────────────────────────────────────────────────────────────────────────────────────

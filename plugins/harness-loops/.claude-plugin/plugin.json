@@ -1,7 +1,7 @@
 {
   "name": "harness-loops",
   "description": "The loops that build against a harness rubric: /orchestrate, /review-loop, /iterate and /skill-loop, the critic, scorer, optimizer and skill-improver agents, the loop-gate that checks every seat's output, the Pi develop-phase runner, and the optional TypeSafe Jev classifier (round-to-round finding dedupe and a per-prompt skill/model-tier router; off without a TYPESAFE_API_KEY).",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "author": {
     "name": "Andrés Ramírez · andrami",
     "url": "https://andrami.pro"

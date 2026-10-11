@@ -211,13 +211,17 @@ const implementerRules = [
   ...list(cfg.implementerRules),
 ].join('\n')
 
-// The verdict is the LAST line, compared whole. A substring test reads "[FAIL] … not APPROVED" as an
-// approval, and one stray word opens the loop. A project's own bridge may answer in its language.
+// The verdict is the last line that is a verdict and nothing else, compared whole. A substring test reads
+// "[FAIL] … not APPROVED" as an approval, and one stray word opens the loop. A project's own bridge may answer
+// in its language, and a reviewer may add notes after its verdict (measured 2026-10-11: "APROBADO", then
+// "### Notas (no bloqueantes)" and a NUEVO_CRITERIO line — read as no verdict when only the very last line counted).
 const APPROVE = new Set(['APPROVED', 'APROBADO', 'APPROUVÉ', 'APPROUVE'])
+const REJECT = new Set(['REJECTED', 'RECHAZADO', 'REJETÉ', 'REJETE'])
 // A rejection the implementer can act on names at least one [FAIL] line. One that names none (a relay seat that
 // reported something else, a bridge that did not run) is not a review: looping on it only burns rounds.
 const FAIL_LINE = /^\s*(?:[-*]\s*)?\[FAIL\]/
-const verdictOf = (review) => APPROVE.has(review.trim().split('\n').pop().replace(/[*`_\s]/g, ''))
+const verdictOf = (review) => APPROVE.has(review.trim().split('\n').map((l) => l.replace(/[*`_\s#:.]/g, '').toUpperCase())
+  .reverse().find((l) => APPROVE.has(l) || REJECT.has(l)))
 
 let approved = false, lastImpl = '', lastReview = '', iteration = 0
 

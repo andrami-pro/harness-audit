@@ -2520,6 +2520,8 @@ check('develop-phase loop decides from the verdict line and the exit code, and a
       out.skip = await run('[PASS] a — x\\n**APPROVED**', pf(0, ['SKIP: token absent'], 'SKIP: token absent\\nPASS'));
       out.fail = await run('[PASS] a — x\\nAPPROVED', pf(1, [], 'Tests: 3 passed, 2 failed'));
       out.prose = await run('[FAIL] b — not APPROVED yet\\nREJECTED', pf(0));
+      out.notes = await run('[PASS] a — x\\nAPROBADO\\n\\n### Notas (no bloqueantes)\\n- doc drift\\nNUEVO_CRITERIO: y', pf(0));
+      out.notesNo = await run('[FAIL] a — x\\nREJECTED\\n\\n### Notes\\n- the fix is small, then APPROVED', pf(0));
       console.log(JSON.stringify(Object.fromEntries(Object.entries(out).map(([k, r]) => [k, [r.approved, r.preflightPassed, r.handoff.status]]))));
     })().catch((e) => console.log('THREW ' + e.message));
   `;
@@ -2528,10 +2530,10 @@ check('develop-phase loop decides from the verdict line and the exit code, and a
     const out = execFileSync('node', ['-e', harness, path.join(ROOT, rel)], { encoding: 'utf8' }).trim();
     if (out.startsWith('THREW')) throw new Error(`${rel}: the develop-phase loop throws when run — ${out.slice(6)}`);
     const r = JSON.parse(out);
-    const want = { pass: [true, true, 'complete'], skip: [true, false, 'continue'], fail: [true, false, 'continue'], prose: [false, true, 'blocked'] };
+    const want = { pass: [true, true, 'complete'], skip: [true, false, 'continue'], fail: [true, false, 'continue'], prose: [false, true, 'blocked'], notes: [true, true, 'complete'], notesNo: [false, true, 'blocked'] };
     for (const [k, v] of Object.entries(want)) {
       if (JSON.stringify(r[k]) !== JSON.stringify(v)) {
-        const why = { pass: 'a clean exit 0 did not pass', skip: 'exit 0 with a SKIP passed — a skipped check is not a passed one', fail: "exit 1 with '3 passed' in the log passed — the verdict is the exit code, not a word in the output", prose: "'not APPROVED' in a [FAIL] line approved the change — the verdict is the last line, whole" }[k];
+        const why = { pass: 'a clean exit 0 did not pass', skip: 'exit 0 with a SKIP passed — a skipped check is not a passed one', fail: "exit 1 with '3 passed' in the log passed — the verdict is the exit code, not a word in the output", prose: "'not APPROVED' in a [FAIL] line approved the change — the verdict is the last line, whole", notes: 'notes after APROBADO hid the verdict — the verdict is the last verdict line, not the last line', notesNo: "a note ending in 'APPROVED' after REJECTED approved the change — only a whole verdict line counts" }[k];
         throw new Error(`${rel}: ${why} (got ${JSON.stringify(r[k])})`);
       }
     }
