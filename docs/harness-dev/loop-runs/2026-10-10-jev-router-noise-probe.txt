@@ -1,0 +1,7 @@
+# jev router noise probe — 2026-10-10
+# Same request sent twice (A, B), then the tier question alone (jev.js routeTier), on 4 corpus prompts.
+# Skill options: docs/harness-dev/loop-runs/2026-10-10-jev-router-before-fix.skills.json. Model jev-latest.
+r01 A humanizer 0.9600 haiku 0.6200 | B humanizer 0.9700 haiku 0.6000 | tier-only haiku 0.6200  | usage {"input_tokens":3920,"output_tokens":1221}
+r16 A brand-storytelling 0.5000 sonnet 0.7100 | B brand-storytelling 0.5100 sonnet 0.7500 | tier-only sonnet 0.6900  | usage {"input_tokens":4043,"output_tokens":1223}
+r27 A none 0.9500 haiku 0.9800 | B none 0.9600 haiku 0.9700 | tier-only haiku 0.9800  | usage {"input_tokens":3924,"output_tokens":1219}
+r58 A codebase-design 0.2800 opus 0.6400 | B codebase-design 0.3100 opus 0.6100 | tier-only opus 0.5500  | usage {"input_tokens":4162,"output_tokens":1220}

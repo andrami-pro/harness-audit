@@ -1,0 +1,1578 @@
+{
+  "corpus": "benchmarks/fixtures/router_corpus.jsonl",
+  "skills": "docs/harness-dev/loop-runs/2026-10-10-jev-router-before-fix.skills.json",
+  "n": 64,
+  "options": 102,
+  "errors": [],
+  "skill": {
+    "accuracyStrict": 0.78125,
+    "accuracyLax": 0.8125,
+    "perLabel": [
+      {
+        "label": "agents-sdk",
+        "n": 0,
+        "predicted": 2,
+        "precisionStrict": 0,
+        "precisionLax": 0,
+        "recallStrict": null,
+        "recallLax": null
+      },
+      {
+        "label": "brand-storytelling",
+        "n": 0,
+        "predicted": 1,
+        "precisionStrict": 0,
+        "precisionLax": 1,
+        "recallStrict": null,
+        "recallLax": null
+      },
+      {
+        "label": "caveman:caveman",
+        "n": 1,
+        "predicted": 0,
+        "precisionStrict": null,
+        "precisionLax": null,
+        "recallStrict": 0,
+        "recallLax": 0
+      },
+      {
+        "label": "caveman:caveman-setup",
+        "n": 0,
+        "predicted": 1,
+        "precisionStrict": 0,
+        "precisionLax": 0,
+        "recallStrict": null,
+        "recallLax": null
+      },
+      {
+        "label": "caveman:surgical-patch",
+        "n": 0,
+        "predicted": 1,
+        "precisionStrict": 0,
+        "precisionLax": 0,
+        "recallStrict": null,
+        "recallLax": null
+      },
+      {
+        "label": "codebase-design",
+        "n": 0,
+        "predicted": 1,
+        "precisionStrict": 0,
+        "precisionLax": 0,
+        "recallStrict": null,
+        "recallLax": null
+      },
+      {
+        "label": "diagnosing-bugs",
+        "n": 2,
+        "predicted": 2,
+        "precisionStrict": 1,
+        "precisionLax": 1,
+        "recallStrict": 1,
+        "recallLax": 1
+      },
+      {
+        "label": "framer-motion-animator",
+        "n": 1,
+        "predicted": 1,
+        "precisionStrict": 1,
+        "precisionLax": 1,
+        "recallStrict": 1,
+        "recallLax": 1
+      },
+      {
+        "label": "frontend-design",
+        "n": 0,
+        "predicted": 4,
+        "precisionStrict": 0,
+        "precisionLax": 0.25,
+        "recallStrict": null,
+        "recallLax": null
+      },
+      {
+        "label": "golden-circle-advisor",
+        "n": 1,
+        "predicted": 0,
+        "precisionStrict": null,
+        "precisionLax": null,
+        "recallStrict": 0,
+        "recallLax": 1
+      },
+      {
+        "label": "grill-with-docs",
+        "n": 1,
+        "predicted": 1,
+        "precisionStrict": 1,
+        "precisionLax": 1,
+        "recallStrict": 1,
+        "recallLax": 1
+      },
+      {
+        "label": "gtm-positioning-strategy",
+        "n": 1,
+        "predicted": 0,
+        "precisionStrict": null,
+        "precisionLax": null,
+        "recallStrict": 0,
+        "recallLax": 0
+      },
+      {
+        "label": "humanizer",
+        "n": 2,
+        "predicted": 2,
+        "precisionStrict": 1,
+        "precisionLax": 1,
+        "recallStrict": 1,
+        "recallLax": 1
+      },
+      {
+        "label": "information-architecture",
+        "n": 1,
+        "predicted": 1,
+        "precisionStrict": 1,
+        "precisionLax": 1,
+        "recallStrict": 1,
+        "recallLax": 1
+      },
+      {
+        "label": "kandelio-email-test",
+        "n": 0,
+        "predicted": 1,
+        "precisionStrict": 0,
+        "precisionLax": 0,
+        "recallStrict": null,
+        "recallLax": null
+      },
+      {
+        "label": "learning-capture",
+        "n": 0,
+        "predicted": 1,
+        "precisionStrict": 0,
+        "precisionLax": 0,
+        "recallStrict": null,
+        "recallLax": null
+      },
+      {
+        "label": "linkedin-profile-optimizer",
+        "n": 1,
+        "predicted": 1,
+        "precisionStrict": 1,
+        "precisionLax": 1,
+        "recallStrict": 1,
+        "recallLax": 1
+      },
+      {
+        "label": "no-ai-design-slop",
+        "n": 1,
+        "predicted": 1,
+        "precisionStrict": 1,
+        "precisionLax": 1,
+        "recallStrict": 1,
+        "recallLax": 1
+      },
+      {
+        "label": "none",
+        "n": 42,
+        "predicted": 33,
+        "precisionStrict": 0.9696969696969697,
+        "precisionLax": 0.9696969696969697,
+        "recallStrict": 0.7619047619047619,
+        "recallLax": 0.7857142857142857
+      },
+      {
+        "label": "prd-development",
+        "n": 2,
+        "predicted": 2,
+        "precisionStrict": 1,
+        "precisionLax": 1,
+        "recallStrict": 1,
+        "recallLax": 1
+      },
+      {
+        "label": "skill-creator",
+        "n": 3,
+        "predicted": 2,
+        "precisionStrict": 1,
+        "precisionLax": 1,
+        "recallStrict": 0.6666666666666666,
+        "recallLax": 0.6666666666666666
+      },
+      {
+        "label": "to-questionnaire",
+        "n": 1,
+        "predicted": 1,
+        "precisionStrict": 1,
+        "precisionLax": 1,
+        "recallStrict": 1,
+        "recallLax": 1
+      },
+      {
+        "label": "ui-ux-pro-max",
+        "n": 1,
+        "predicted": 1,
+        "precisionStrict": 1,
+        "precisionLax": 1,
+        "recallStrict": 1,
+        "recallLax": 1
+      },
+      {
+        "label": "ux-squad",
+        "n": 1,
+        "predicted": 1,
+        "precisionStrict": 1,
+        "precisionLax": 1,
+        "recallStrict": 1,
+        "recallLax": 1
+      },
+      {
+        "label": "web-scraping",
+        "n": 0,
+        "predicted": 1,
+        "precisionStrict": 0,
+        "precisionLax": 0,
+        "recallStrict": null,
+        "recallLax": null
+      },
+      {
+        "label": "wrangler",
+        "n": 2,
+        "predicted": 2,
+        "precisionStrict": 1,
+        "precisionLax": 1,
+        "recallStrict": 1,
+        "recallLax": 1
+      }
+    ],
+    "confusion": {
+      "humanizer": {
+        "humanizer": 2
+      },
+      "skill-creator": {
+        "none": 1,
+        "skill-creator": 2
+      },
+      "grill-with-docs": {
+        "grill-with-docs": 1
+      },
+      "prd-development": {
+        "prd-development": 2
+      },
+      "diagnosing-bugs": {
+        "diagnosing-bugs": 2
+      },
+      "ux-squad": {
+        "ux-squad": 1
+      },
+      "information-architecture": {
+        "information-architecture": 1
+      },
+      "ui-ux-pro-max": {
+        "ui-ux-pro-max": 1
+      },
+      "no-ai-design-slop": {
+        "no-ai-design-slop": 1
+      },
+      "gtm-positioning-strategy": {
+        "web-scraping": 1
+      },
+      "golden-circle-advisor": {
+        "brand-storytelling": 1
+      },
+      "linkedin-profile-optimizer": {
+        "linkedin-profile-optimizer": 1
+      },
+      "caveman:caveman": {
+        "caveman:caveman-setup": 1
+      },
+      "framer-motion-animator": {
+        "framer-motion-animator": 1
+      },
+      "to-questionnaire": {
+        "to-questionnaire": 1
+      },
+      "wrangler": {
+        "wrangler": 2
+      },
+      "none": {
+        "none": 32,
+        "learning-capture": 1,
+        "kandelio-email-test": 1,
+        "caveman:surgical-patch": 1,
+        "frontend-design": 4,
+        "agents-sdk": 2,
+        "codebase-design": 1
+      }
+    },
+    "sweepStrict": {
+      "table": [
+        {
+          "t": 0.3,
+          "kept": 60,
+          "coverage": 0.9375,
+          "precision": 0.8
+        },
+        {
+          "t": 0.4,
+          "kept": 51,
+          "coverage": 0.796875,
+          "precision": 0.8823529411764706
+        },
+        {
+          "t": 0.5,
+          "kept": 46,
+          "coverage": 0.71875,
+          "precision": 0.8913043478260869
+        },
+        {
+          "t": 0.6,
+          "kept": 34,
+          "coverage": 0.53125,
+          "precision": 0.9705882352941176
+        },
+        {
+          "t": 0.65,
+          "kept": 32,
+          "coverage": 0.5,
+          "precision": 0.96875
+        },
+        {
+          "t": 0.7,
+          "kept": 30,
+          "coverage": 0.46875,
+          "precision": 0.9666666666666667
+        },
+        {
+          "t": 0.75,
+          "kept": 22,
+          "coverage": 0.34375,
+          "precision": 1
+        },
+        {
+          "t": 0.8,
+          "kept": 19,
+          "coverage": 0.296875,
+          "precision": 1
+        },
+        {
+          "t": 0.85,
+          "kept": 15,
+          "coverage": 0.234375,
+          "precision": 1
+        },
+        {
+          "t": 0.9,
+          "kept": 13,
+          "coverage": 0.203125,
+          "precision": 1
+        },
+        {
+          "t": 0.95,
+          "kept": 12,
+          "coverage": 0.1875,
+          "precision": 1
+        },
+        {
+          "t": 0.99,
+          "kept": 4,
+          "coverage": 0.0625,
+          "precision": 1
+        }
+      ],
+      "threshold": {
+        "t": 0.6,
+        "kept": 34,
+        "coverage": 0.53125,
+        "precision": 0.9705882352941176
+      }
+    },
+    "sweepLax": {
+      "table": [
+        {
+          "t": 0.3,
+          "kept": 60,
+          "coverage": 0.9375,
+          "precision": 0.8333333333333334
+        },
+        {
+          "t": 0.4,
+          "kept": 51,
+          "coverage": 0.796875,
+          "precision": 0.9215686274509803
+        },
+        {
+          "t": 0.5,
+          "kept": 46,
+          "coverage": 0.71875,
+          "precision": 0.9347826086956522
+        },
+        {
+          "t": 0.6,
+          "kept": 34,
+          "coverage": 0.53125,
+          "precision": 0.9705882352941176
+        },
+        {
+          "t": 0.65,
+          "kept": 32,
+          "coverage": 0.5,
+          "precision": 0.96875
+        },
+        {
+          "t": 0.7,
+          "kept": 30,
+          "coverage": 0.46875,
+          "precision": 0.9666666666666667
+        },
+        {
+          "t": 0.75,
+          "kept": 22,
+          "coverage": 0.34375,
+          "precision": 1
+        },
+        {
+          "t": 0.8,
+          "kept": 19,
+          "coverage": 0.296875,
+          "precision": 1
+        },
+        {
+          "t": 0.85,
+          "kept": 15,
+          "coverage": 0.234375,
+          "precision": 1
+        },
+        {
+          "t": 0.9,
+          "kept": 13,
+          "coverage": 0.203125,
+          "precision": 1
+        },
+        {
+          "t": 0.95,
+          "kept": 12,
+          "coverage": 0.1875,
+          "precision": 1
+        },
+        {
+          "t": 0.99,
+          "kept": 4,
+          "coverage": 0.0625,
+          "precision": 1
+        }
+      ],
+      "threshold": {
+        "t": 0.4,
+        "kept": 51,
+        "coverage": 0.796875,
+        "precision": 0.9215686274509803
+      }
+    }
+  },
+  "tier": {
+    "accuracy": 0.734375,
+    "perLabel": [
+      {
+        "label": "haiku",
+        "n": 14,
+        "predicted": 16,
+        "precisionStrict": 0.6875,
+        "precisionLax": 0.6875,
+        "recallStrict": 0.7857142857142857,
+        "recallLax": 0.7857142857142857
+      },
+      {
+        "label": "sonnet",
+        "n": 17,
+        "predicted": 24,
+        "precisionStrict": 0.5833333333333334,
+        "precisionLax": 0.5833333333333334,
+        "recallStrict": 0.8235294117647058,
+        "recallLax": 0.8235294117647058
+      },
+      {
+        "label": "opus",
+        "n": 18,
+        "predicted": 13,
+        "precisionStrict": 0.8461538461538461,
+        "precisionLax": 0.8461538461538461,
+        "recallStrict": 0.6111111111111112,
+        "recallLax": 0.6111111111111112
+      },
+      {
+        "label": "fable",
+        "n": 15,
+        "predicted": 11,
+        "precisionStrict": 1,
+        "precisionLax": 1,
+        "recallStrict": 0.7333333333333333,
+        "recallLax": 0.7333333333333333
+      }
+    ],
+    "confusion": {
+      "sonnet": {
+        "haiku": 3,
+        "sonnet": 14
+      },
+      "opus": {
+        "opus": 11,
+        "haiku": 2,
+        "sonnet": 5
+      },
+      "fable": {
+        "fable": 11,
+        "opus": 2,
+        "sonnet": 2
+      },
+      "haiku": {
+        "haiku": 11,
+        "sonnet": 3
+      }
+    },
+    "sweep": {
+      "table": [
+        {
+          "t": 0.3,
+          "kept": 64,
+          "coverage": 1,
+          "precision": 0.734375
+        },
+        {
+          "t": 0.4,
+          "kept": 64,
+          "coverage": 1,
+          "precision": 0.734375
+        },
+        {
+          "t": 0.5,
+          "kept": 59,
+          "coverage": 0.921875,
+          "precision": 0.7627118644067796
+        },
+        {
+          "t": 0.6,
+          "kept": 52,
+          "coverage": 0.8125,
+          "precision": 0.8269230769230769
+        },
+        {
+          "t": 0.65,
+          "kept": 48,
+          "coverage": 0.75,
+          "precision": 0.875
+        },
+        {
+          "t": 0.7,
+          "kept": 44,
+          "coverage": 0.6875,
+          "precision": 0.9090909090909091
+        },
+        {
+          "t": 0.75,
+          "kept": 37,
+          "coverage": 0.578125,
+          "precision": 0.918918918918919
+        },
+        {
+          "t": 0.8,
+          "kept": 33,
+          "coverage": 0.515625,
+          "precision": 0.9090909090909091
+        },
+        {
+          "t": 0.85,
+          "kept": 28,
+          "coverage": 0.4375,
+          "precision": 0.8928571428571429
+        },
+        {
+          "t": 0.9,
+          "kept": 23,
+          "coverage": 0.359375,
+          "precision": 0.8695652173913043
+        },
+        {
+          "t": 0.95,
+          "kept": 14,
+          "coverage": 0.21875,
+          "precision": 0.9285714285714286
+        },
+        {
+          "t": 0.99,
+          "kept": 8,
+          "coverage": 0.125,
+          "precision": 0.875
+        }
+      ],
+      "threshold": null
+    }
+  },
+  "latency": {
+    "p50": 400,
+    "p95": 1967,
+    "overBudget": 4,
+    "budgetMs": 1500
+  },
+  "inputTokens": 253786,
+  "predictions": [
+    {
+      "id": "r01",
+      "ms": 2011,
+      "skill": {
+        "choice": "humanizer",
+        "p": 0.95,
+        "confidence": 0.95
+      },
+      "tier": {
+        "choice": "haiku",
+        "p": 0.59,
+        "confidence": 0.45
+      },
+      "inputTokens": 3920
+    },
+    {
+      "id": "r02",
+      "ms": 1967,
+      "skill": {
+        "choice": "humanizer",
+        "p": 0.97,
+        "confidence": 0.97
+      },
+      "tier": {
+        "choice": "sonnet",
+        "p": 0.99,
+        "confidence": 0.99
+      },
+      "inputTokens": 4000
+    },
+    {
+      "id": "r03",
+      "ms": 2153,
+      "skill": {
+        "choice": "none",
+        "p": 0.45,
+        "confidence": 0.44
+      },
+      "tier": {
+        "choice": "sonnet",
+        "p": 0.72,
+        "confidence": 0.63
+      },
+      "inputTokens": 3947
+    },
+    {
+      "id": "r04",
+      "ms": 2154,
+      "skill": {
+        "choice": "skill-creator",
+        "p": 0.96,
+        "confidence": 0.96
+      },
+      "tier": {
+        "choice": "opus",
+        "p": 0.58,
+        "confidence": 0.44
+      },
+      "inputTokens": 3987
+    },
+    {
+      "id": "r05",
+      "ms": 285,
+      "skill": {
+        "choice": "skill-creator",
+        "p": 0.9400000000000001,
+        "confidence": 0.94
+      },
+      "tier": {
+        "choice": "fable",
+        "p": 0.96,
+        "confidence": 0.95
+      },
+      "inputTokens": 4249
+    },
+    {
+      "id": "r06",
+      "ms": 408,
+      "skill": {
+        "choice": "grill-with-docs",
+        "p": 0.46,
+        "confidence": 0.45
+      },
+      "tier": {
+        "choice": "fable",
+        "p": 0.92,
+        "confidence": 0.89
+      },
+      "inputTokens": 3956
+    },
+    {
+      "id": "r07",
+      "ms": 485,
+      "skill": {
+        "choice": "prd-development",
+        "p": 0.98,
+        "confidence": 0.98
+      },
+      "tier": {
+        "choice": "fable",
+        "p": 0.99,
+        "confidence": 0.99
+      },
+      "inputTokens": 3935
+    },
+    {
+      "id": "r08",
+      "ms": 477,
+      "skill": {
+        "choice": "prd-development",
+        "p": 0.99,
+        "confidence": 0.99
+      },
+      "tier": {
+        "choice": "fable",
+        "p": 0.77,
+        "confidence": 0.69
+      },
+      "inputTokens": 3907
+    },
+    {
+      "id": "r09",
+      "ms": 385,
+      "skill": {
+        "choice": "diagnosing-bugs",
+        "p": 0.98,
+        "confidence": 0.98
+      },
+      "tier": {
+        "choice": "opus",
+        "p": 0.68,
+        "confidence": 0.57
+      },
+      "inputTokens": 3920
+    },
+    {
+      "id": "r10",
+      "ms": 259,
+      "skill": {
+        "choice": "diagnosing-bugs",
+        "p": 0.31,
+        "confidence": 0.3
+      },
+      "tier": {
+        "choice": "haiku",
+        "p": 0.57,
+        "confidence": 0.43
+      },
+      "inputTokens": 3928
+    },
+    {
+      "id": "r11",
+      "ms": 281,
+      "skill": {
+        "choice": "ux-squad",
+        "p": 0.85,
+        "confidence": 0.85
+      },
+      "tier": {
+        "choice": "opus",
+        "p": 0.56,
+        "confidence": 0.41
+      },
+      "inputTokens": 4109
+    },
+    {
+      "id": "r12",
+      "ms": 281,
+      "skill": {
+        "choice": "information-architecture",
+        "p": 0.5700000000000001,
+        "confidence": 0.57
+      },
+      "tier": {
+        "choice": "opus",
+        "p": 0.59,
+        "confidence": 0.45
+      },
+      "inputTokens": 4022
+    },
+    {
+      "id": "r13",
+      "ms": 294,
+      "skill": {
+        "choice": "ui-ux-pro-max",
+        "p": 0.7,
+        "confidence": 0.7
+      },
+      "tier": {
+        "choice": "sonnet",
+        "p": 0.47,
+        "confidence": 0.29
+      },
+      "inputTokens": 3928
+    },
+    {
+      "id": "r14",
+      "ms": 432,
+      "skill": {
+        "choice": "no-ai-design-slop",
+        "p": 0.42,
+        "confidence": 0.41
+      },
+      "tier": {
+        "choice": "opus",
+        "p": 0.96,
+        "confidence": 0.95
+      },
+      "inputTokens": 4046
+    },
+    {
+      "id": "r15",
+      "ms": 400,
+      "skill": {
+        "choice": "web-scraping",
+        "p": 0.34,
+        "confidence": 0.33
+      },
+      "tier": {
+        "choice": "fable",
+        "p": 0.99,
+        "confidence": 0.99
+      },
+      "inputTokens": 3971
+    },
+    {
+      "id": "r16",
+      "ms": 401,
+      "skill": {
+        "choice": "brand-storytelling",
+        "p": 0.53,
+        "confidence": 0.53
+      },
+      "tier": {
+        "choice": "sonnet",
+        "p": 0.68,
+        "confidence": 0.57
+      },
+      "inputTokens": 4043
+    },
+    {
+      "id": "r17",
+      "ms": 384,
+      "skill": {
+        "choice": "linkedin-profile-optimizer",
+        "p": 0.33,
+        "confidence": 0.32
+      },
+      "tier": {
+        "choice": "opus",
+        "p": 0.47,
+        "confidence": 0.29
+      },
+      "inputTokens": 4028
+    },
+    {
+      "id": "r18",
+      "ms": 307,
+      "skill": {
+        "choice": "caveman:caveman-setup",
+        "p": 0.51,
+        "confidence": 0.51
+      },
+      "tier": {
+        "choice": "sonnet",
+        "p": 0.93,
+        "confidence": 0.91
+      },
+      "inputTokens": 3946
+    },
+    {
+      "id": "r19",
+      "ms": 449,
+      "skill": {
+        "choice": "framer-motion-animator",
+        "p": 0.51,
+        "confidence": 0.51
+      },
+      "tier": {
+        "choice": "opus",
+        "p": 0.44,
+        "confidence": 0.25
+      },
+      "inputTokens": 3941
+    },
+    {
+      "id": "r20",
+      "ms": 443,
+      "skill": {
+        "choice": "to-questionnaire",
+        "p": 0.36,
+        "confidence": 0.35
+      },
+      "tier": {
+        "choice": "fable",
+        "p": 0.86,
+        "confidence": 0.81
+      },
+      "inputTokens": 4068
+    },
+    {
+      "id": "r21",
+      "ms": 447,
+      "skill": {
+        "choice": "wrangler",
+        "p": 0.67,
+        "confidence": 0.67
+      },
+      "tier": {
+        "choice": "sonnet",
+        "p": 0.74,
+        "confidence": 0.65
+      },
+      "inputTokens": 3938
+    },
+    {
+      "id": "r22",
+      "ms": 380,
+      "skill": {
+        "choice": "wrangler",
+        "p": 0.96,
+        "confidence": 0.96
+      },
+      "tier": {
+        "choice": "haiku",
+        "p": 0.85,
+        "confidence": 0.8
+      },
+      "inputTokens": 3926
+    },
+    {
+      "id": "r23",
+      "ms": 460,
+      "skill": {
+        "choice": "none",
+        "p": 0.99,
+        "confidence": 0.99
+      },
+      "tier": {
+        "choice": "haiku",
+        "p": 1,
+        "confidence": 1
+      },
+      "inputTokens": 3905
+    },
+    {
+      "id": "r24",
+      "ms": 454,
+      "skill": {
+        "choice": "none",
+        "p": 0.98,
+        "confidence": 0.98
+      },
+      "tier": {
+        "choice": "haiku",
+        "p": 1,
+        "confidence": 1
+      },
+      "inputTokens": 3908
+    },
+    {
+      "id": "r25",
+      "ms": 454,
+      "skill": {
+        "choice": "none",
+        "p": 0.99,
+        "confidence": 0.99
+      },
+      "tier": {
+        "choice": "haiku",
+        "p": 0.99,
+        "confidence": 0.99
+      },
+      "inputTokens": 3906
+    },
+    {
+      "id": "r26",
+      "ms": 679,
+      "skill": {
+        "choice": "none",
+        "p": 0.99,
+        "confidence": 0.99
+      },
+      "tier": {
+        "choice": "haiku",
+        "p": 0.99,
+        "confidence": 0.99
+      },
+      "inputTokens": 3911
+    },
+    {
+      "id": "r27",
+      "ms": 463,
+      "skill": {
+        "choice": "none",
+        "p": 0.96,
+        "confidence": 0.96
+      },
+      "tier": {
+        "choice": "haiku",
+        "p": 0.97,
+        "confidence": 0.96
+      },
+      "inputTokens": 3924
+    },
+    {
+      "id": "r28",
+      "ms": 457,
+      "skill": {
+        "choice": "none",
+        "p": 0.89,
+        "confidence": 0.89
+      },
+      "tier": {
+        "choice": "haiku",
+        "p": 0.9,
+        "confidence": 0.87
+      },
+      "inputTokens": 3917
+    },
+    {
+      "id": "r29",
+      "ms": 457,
+      "skill": {
+        "choice": "none",
+        "p": 0.7,
+        "confidence": 0.7
+      },
+      "tier": {
+        "choice": "haiku",
+        "p": 0.84,
+        "confidence": 0.79
+      },
+      "inputTokens": 3907
+    },
+    {
+      "id": "r30",
+      "ms": 458,
+      "skill": {
+        "choice": "none",
+        "p": 0.8,
+        "confidence": 0.8
+      },
+      "tier": {
+        "choice": "haiku",
+        "p": 0.86,
+        "confidence": 0.81
+      },
+      "inputTokens": 3915
+    },
+    {
+      "id": "r31",
+      "ms": 602,
+      "skill": {
+        "choice": "none",
+        "p": 0.5,
+        "confidence": 0.5
+      },
+      "tier": {
+        "choice": "haiku",
+        "p": 0.75,
+        "confidence": 0.67
+      },
+      "inputTokens": 3911
+    },
+    {
+      "id": "r32",
+      "ms": 604,
+      "skill": {
+        "choice": "none",
+        "p": 0.4,
+        "confidence": 0.39
+      },
+      "tier": {
+        "choice": "haiku",
+        "p": 0.91,
+        "confidence": 0.88
+      },
+      "inputTokens": 3906
+    },
+    {
+      "id": "r33",
+      "ms": 600,
+      "skill": {
+        "choice": "none",
+        "p": 0.83,
+        "confidence": 0.83
+      },
+      "tier": {
+        "choice": "sonnet",
+        "p": 0.65,
+        "confidence": 0.53
+      },
+      "inputTokens": 3928
+    },
+    {
+      "id": "r34",
+      "ms": 380,
+      "skill": {
+        "choice": "none",
+        "p": 0.74,
+        "confidence": 0.74
+      },
+      "tier": {
+        "choice": "sonnet",
+        "p": 0.61,
+        "confidence": 0.48
+      },
+      "inputTokens": 3916
+    },
+    {
+      "id": "r35",
+      "ms": 434,
+      "skill": {
+        "choice": "none",
+        "p": 0.56,
+        "confidence": 0.56
+      },
+      "tier": {
+        "choice": "sonnet",
+        "p": 0.92,
+        "confidence": 0.89
+      },
+      "inputTokens": 3913
+    },
+    {
+      "id": "r36",
+      "ms": 434,
+      "skill": {
+        "choice": "none",
+        "p": 0.78,
+        "confidence": 0.78
+      },
+      "tier": {
+        "choice": "sonnet",
+        "p": 0.97,
+        "confidence": 0.96
+      },
+      "inputTokens": 4021
+    },
+    {
+      "id": "r37",
+      "ms": 427,
+      "skill": {
+        "choice": "none",
+        "p": 0.53,
+        "confidence": 0.53
+      },
+      "tier": {
+        "choice": "sonnet",
+        "p": 0.65,
+        "confidence": 0.53
+      },
+      "inputTokens": 3917
+    },
+    {
+      "id": "r38",
+      "ms": 427,
+      "skill": {
+        "choice": "none",
+        "p": 0.71,
+        "confidence": 0.71
+      },
+      "tier": {
+        "choice": "haiku",
+        "p": 0.9,
+        "confidence": 0.87
+      },
+      "inputTokens": 3935
+    },
+    {
+      "id": "r39",
+      "ms": 334,
+      "skill": {
+        "choice": "learning-capture",
+        "p": 0.5700000000000001,
+        "confidence": 0.57
+      },
+      "tier": {
+        "choice": "sonnet",
+        "p": 0.89,
+        "confidence": 0.85
+      },
+      "inputTokens": 3965
+    },
+    {
+      "id": "r40",
+      "ms": 337,
+      "skill": {
+        "choice": "none",
+        "p": 0.7,
+        "confidence": 0.7
+      },
+      "tier": {
+        "choice": "sonnet",
+        "p": 0.85,
+        "confidence": 0.8
+      },
+      "inputTokens": 3968
+    },
+    {
+      "id": "r41",
+      "ms": 333,
+      "skill": {
+        "choice": "none",
+        "p": 0.78,
+        "confidence": 0.78
+      },
+      "tier": {
+        "choice": "sonnet",
+        "p": 0.91,
+        "confidence": 0.88
+      },
+      "inputTokens": 3950
+    },
+    {
+      "id": "r42",
+      "ms": 332,
+      "skill": {
+        "choice": "none",
+        "p": 0.84,
+        "confidence": 0.84
+      },
+      "tier": {
+        "choice": "sonnet",
+        "p": 0.82,
+        "confidence": 0.76
+      },
+      "inputTokens": 3984
+    },
+    {
+      "id": "r43",
+      "ms": 614,
+      "skill": {
+        "choice": "none",
+        "p": 0.63,
+        "confidence": 0.63
+      },
+      "tier": {
+        "choice": "sonnet",
+        "p": 0.78,
+        "confidence": 0.71
+      },
+      "inputTokens": 3933
+    },
+    {
+      "id": "r44",
+      "ms": 614,
+      "skill": {
+        "choice": "none",
+        "p": 0.79,
+        "confidence": 0.79
+      },
+      "tier": {
+        "choice": "sonnet",
+        "p": 0.64,
+        "confidence": 0.52
+      },
+      "inputTokens": 3940
+    },
+    {
+      "id": "r45",
+      "ms": 615,
+      "skill": {
+        "choice": "none",
+        "p": 0.74,
+        "confidence": 0.74
+      },
+      "tier": {
+        "choice": "sonnet",
+        "p": 0.73,
+        "confidence": 0.64
+      },
+      "inputTokens": 3926
+    },
+    {
+      "id": "r46",
+      "ms": 615,
+      "skill": {
+        "choice": "kandelio-email-test",
+        "p": 0.31,
+        "confidence": 0.3
+      },
+      "tier": {
+        "choice": "sonnet",
+        "p": 0.98,
+        "confidence": 0.97
+      },
+      "inputTokens": 4043
+    },
+    {
+      "id": "r47",
+      "ms": 383,
+      "skill": {
+        "choice": "none",
+        "p": 0.7,
+        "confidence": 0.7
+      },
+      "tier": {
+        "choice": "haiku",
+        "p": 0.55,
+        "confidence": 0.4
+      },
+      "inputTokens": 3914
+    },
+    {
+      "id": "r48",
+      "ms": 262,
+      "skill": {
+        "choice": "caveman:surgical-patch",
+        "p": 0.33,
+        "confidence": 0.32
+      },
+      "tier": {
+        "choice": "opus",
+        "p": 0.8,
+        "confidence": 0.73
+      },
+      "inputTokens": 3920
+    },
+    {
+      "id": "r49",
+      "ms": 377,
+      "skill": {
+        "choice": "frontend-design",
+        "p": 0.35000000000000003,
+        "confidence": 0.34
+      },
+      "tier": {
+        "choice": "opus",
+        "p": 0.79,
+        "confidence": 0.72
+      },
+      "inputTokens": 3915
+    },
+    {
+      "id": "r50",
+      "ms": 379,
+      "skill": {
+        "choice": "frontend-design",
+        "p": 0.19,
+        "confidence": 0.18
+      },
+      "tier": {
+        "choice": "opus",
+        "p": 0.73,
+        "confidence": 0.64
+      },
+      "inputTokens": 3946
+    },
+    {
+      "id": "r51",
+      "ms": 387,
+      "skill": {
+        "choice": "none",
+        "p": 0.62,
+        "confidence": 0.62
+      },
+      "tier": {
+        "choice": "sonnet",
+        "p": 0.5,
+        "confidence": 0.33
+      },
+      "inputTokens": 3914
+    },
+    {
+      "id": "r52",
+      "ms": 247,
+      "skill": {
+        "choice": "none",
+        "p": 0.28,
+        "confidence": 0.27
+      },
+      "tier": {
+        "choice": "sonnet",
+        "p": 0.48,
+        "confidence": 0.31
+      },
+      "inputTokens": 3922
+    },
+    {
+      "id": "r53",
+      "ms": 263,
+      "skill": {
+        "choice": "frontend-design",
+        "p": 0.53,
+        "confidence": 0.53
+      },
+      "tier": {
+        "choice": "opus",
+        "p": 0.8099999999999999,
+        "confidence": 0.75
+      },
+      "inputTokens": 3937
+    },
+    {
+      "id": "r54",
+      "ms": 260,
+      "skill": {
+        "choice": "frontend-design",
+        "p": 0.7,
+        "confidence": 0.7
+      },
+      "tier": {
+        "choice": "opus",
+        "p": 0.94,
+        "confidence": 0.92
+      },
+      "inputTokens": 4029
+    },
+    {
+      "id": "r55",
+      "ms": 257,
+      "skill": {
+        "choice": "none",
+        "p": 0.56,
+        "confidence": 0.56
+      },
+      "tier": {
+        "choice": "sonnet",
+        "p": 0.7,
+        "confidence": 0.6
+      },
+      "inputTokens": 4019
+    },
+    {
+      "id": "r56",
+      "ms": 256,
+      "skill": {
+        "choice": "none",
+        "p": 0.51,
+        "confidence": 0.51
+      },
+      "tier": {
+        "choice": "haiku",
+        "p": 0.99,
+        "confidence": 0.99
+      },
+      "inputTokens": 3907
+    },
+    {
+      "id": "r57",
+      "ms": 395,
+      "skill": {
+        "choice": "agents-sdk",
+        "p": 0.37,
+        "confidence": 0.36
+      },
+      "tier": {
+        "choice": "fable",
+        "p": 0.98,
+        "confidence": 0.97
+      },
+      "inputTokens": 3941
+    },
+    {
+      "id": "r58",
+      "ms": 387,
+      "skill": {
+        "choice": "codebase-design",
+        "p": 0.28,
+        "confidence": 0.27
+      },
+      "tier": {
+        "choice": "opus",
+        "p": 0.62,
+        "confidence": 0.49
+      },
+      "inputTokens": 4162
+    },
+    {
+      "id": "r59",
+      "ms": 375,
+      "skill": {
+        "choice": "none",
+        "p": 0.52,
+        "confidence": 0.52
+      },
+      "tier": {
+        "choice": "sonnet",
+        "p": 0.6,
+        "confidence": 0.47
+      },
+      "inputTokens": 4053
+    },
+    {
+      "id": "r60",
+      "ms": 360,
+      "skill": {
+        "choice": "agents-sdk",
+        "p": 0.32,
+        "confidence": 0.31
+      },
+      "tier": {
+        "choice": "fable",
+        "p": 0.81,
+        "confidence": 0.75
+      },
+      "inputTokens": 3964
+    },
+    {
+      "id": "r61",
+      "ms": 269,
+      "skill": {
+        "choice": "none",
+        "p": 0.42,
+        "confidence": 0.41
+      },
+      "tier": {
+        "choice": "fable",
+        "p": 0.71,
+        "confidence": 0.61
+      },
+      "inputTokens": 3972
+    },
+    {
+      "id": "r62",
+      "ms": 267,
+      "skill": {
+        "choice": "none",
+        "p": 0.65,
+        "confidence": 0.65
+      },
+      "tier": {
+        "choice": "fable",
+        "p": 0.72,
+        "confidence": 0.63
+      },
+      "inputTokens": 3918
+    },
+    {
+      "id": "r63",
+      "ms": 270,
+      "skill": {
+        "choice": "none",
+        "p": 0.8,
+        "confidence": 0.8
+      },
+      "tier": {
+        "choice": "sonnet",
+        "p": 0.46,
+        "confidence": 0.28
+      },
+      "inputTokens": 3918
+    },
+    {
+      "id": "r64",
+      "ms": 270,
+      "skill": {
+        "choice": "none",
+        "p": 0.29000000000000004,
+        "confidence": 0.28
+      },
+      "tier": {
+        "choice": "fable",
+        "p": 0.93,
+        "confidence": 0.91
+      },
+      "inputTokens": 4271
+    }
+  ]
+}

@@ -13,6 +13,9 @@
 // script path this tool returned, or a file you can already read"). ~/.claude/harness/ is neither, so the
 // wrapper reads the project copy first. That copy ignores itself (.claude/harness/.gitignore = *).
 //
+// jev.js rides along to ~/.claude/harness/ only: develop-phase's routeByJev seat runs it from a shell, which
+// reads $HOME whatever the session may load, so the project copy does not need it.
+//
 //   HARNESS_WORKFLOWS_DIR overrides the destination (tests).
 
 'use strict';
@@ -22,6 +25,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 const SRC = path.join(__dirname, '..', '..', 'workflows');
+const JEV = path.join(__dirname, '..', 'jev.js');
 
 function destDir() {
   return process.env.HARNESS_WORKFLOWS_DIR || path.join(os.homedir(), '.claude', 'harness');
@@ -36,21 +40,24 @@ function projectDir(cwd) {
   } catch { return null; }
 }
 
+function copyIfChanged(src, dest) {
+  const body = fs.readFileSync(src);
+  const target = path.join(dest, path.basename(src));
+  try { if (fs.readFileSync(target).equals(body)) return; } catch { /* absent: write it */ }
+  fs.mkdirSync(dest, { recursive: true });
+  // Write then rename: a run reading the file mid-update sees the old script or the new one, never half.
+  const tmp = `${target}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, body);
+  fs.renameSync(tmp, target);
+}
+
 function syncInto(dest) {
-  for (const f of fs.readdirSync(SRC).filter((x) => x.endsWith('.js'))) {
-    const body = fs.readFileSync(path.join(SRC, f));
-    const target = path.join(dest, f);
-    try { if (fs.readFileSync(target).equals(body)) continue; } catch { /* absent: write it */ }
-    fs.mkdirSync(dest, { recursive: true });
-    // Write then rename: a run reading the file mid-update sees the old script or the new one, never half.
-    const tmp = `${target}.${process.pid}.tmp`;
-    fs.writeFileSync(tmp, body);
-    fs.renameSync(tmp, target);
-  }
+  for (const f of fs.readdirSync(SRC).filter((x) => x.endsWith('.js'))) copyIfChanged(path.join(SRC, f), dest);
 }
 
 function sync(cwd) {
   syncInto(destDir());
+  copyIfChanged(JEV, destDir());
   const local = projectDir(cwd);
   if (!local) return;
   syncInto(local);
@@ -70,4 +77,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { sync, destDir, projectDir, SRC };
+module.exports = { sync, destDir, projectDir, SRC, JEV };

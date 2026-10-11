@@ -158,7 +158,82 @@ async function choice(state, instructions, options, opts = {}) {
   return { choice: a.choice, probabilities: a.probabilities || {}, confidence: a.confidence == null ? null : Number(a.confidence) };
 }
 
-module.exports = {
-  ENDPOINT, MODEL, KEY_NAME, SECRETS, JevDisabled,
-  readKey, status, isEnabled, ask, noul, choice, noulQuestion, choiceQuestion, postJson,
+// ── tier routing ─────────────────────────────────────────────────────────────────────────────────────
+// The line-up's four tiers, one criterion each — the words README §Jev prints. The prompt-router hook
+// asks this question about every prompt; develop-phase's routeByJev asks it about the task, through
+// `node jev.js route`, and only acts on the answer at or above ROUTE_TIER_THRESHOLD.
+const PROMPT_CHARS = 1500;
+const TIER_QUESTION = 'Which model tier does a subagent for this prompt deserve?';
+const TIERS = {
+  haiku: 'the prompt carries no task of its own (ok, go on, retry), or it is a lookup or a command to run',
+  sonnet: 'explain, answer about the state of something, write a message, give instructions, verify',
+  opus: 'build or fix code or UI',
+  fable: 'architecture, product, business, pricing or a plan',
 };
+
+// The lowest confidence above which the tiers Jev picked were right at least 9 times in 10, together:
+// 0.80, the higher of two passes (0.80 and 0.70), 91.0% over 52% of 64 prompts — benchmarks/
+// jev_router_eval.js, docs/harness-dev/loop-runs/2026-10-11-jev-router.txt. null would mean no cut-off
+// reached 0.9, and routeByJev would keep the line-up.
+const ROUTE_TIER_THRESHOLD = 0.8;
+
+// The probability Jev gives its own choice; `confidence` when the answer carries no distribution.
+const pOf = (a) => Number(a.probabilities?.[a.choice] ?? a.confidence);
+
+// Routing errors are not symmetric. Up costs money; down costs quality, and the corpus shows Jev calling
+// opus work haiku at p=0.99. So a downgrade is capped: one tier at most, and never below sonnet.
+const TIER_ORDER = ['haiku', 'sonnet', 'opus', 'fable'];
+const FLOOR = TIER_ORDER.indexOf('sonnet');
+const tierOf = (model) => (/(?:^|[-/])(haiku|sonnet|opus|fable)(?=[-.\d]|$)/.exec(String(model || '')) || [])[1] || null;
+
+// The tier the implementer takes, or null to keep the configured one, and why. Pure: the eval simulates
+// the same decision over the corpus that `jev.js route` makes for develop-phase.
+function decideTier({ configured, suggested, p, threshold }) {
+  const from = TIER_ORDER.indexOf(tierOf(configured));
+  if (from === -1) return { tier: null, reason: `the configured implementer (${configured}) is no Claude tier — nothing to route from` };
+  if (!TIER_ORDER.includes(suggested)) return { tier: null, reason: `Jev answered no known tier (${suggested})` };
+  if (threshold == null) return { tier: null, reason: 'no measured threshold: the router eval has not reached 0.9 precision' };
+  if (!(p >= threshold)) return { tier: null, reason: `p=${p} < threshold ${threshold}` };
+  let to = TIER_ORDER.indexOf(suggested);
+  const caps = [];
+  if (to < from - 1) { to = from - 1; caps.push('one tier down at most'); }
+  if (to < FLOOR) { to = FLOOR; caps.push('never below sonnet'); }
+  const capped = caps.length ? ` → ${TIER_ORDER[to]} (${caps.join(', ')})` : '';
+  if (to === from) return { tier: null, reason: `p=${p} ≥ ${threshold}: ${suggested}${capped}, the configured tier` };
+  return { tier: TIER_ORDER[to], reason: `p=${p} ≥ ${threshold}: ${suggested}${capped}` };
+}
+
+// Never throws: the caller (a seat reading stdout) gets the reason in `error` and decides.
+async function routeTier(task, { configured, ...opts } = {}) {
+  const out = { enabled: isEnabled(), suggested: null, p: null, threshold: ROUTE_TIER_THRESHOLD, tier: null, reason: null, error: null };
+  if (!out.enabled) return { ...out, error: 'Jev off (no TYPESAFE_API_KEY)' };
+  try {
+    const r = await ask({ state: { prompt: String(task).slice(0, PROMPT_CHARS) }, questions: { tier: choiceQuestion(TIER_QUESTION, TIERS) } },
+      { timeoutMs: 8000, waits: [2000], ...opts });
+    const a = r.answers.tier;
+    if (!a || !TIERS[a.choice]) return { ...out, error: `Jev answered no known tier (${a && a.choice})` };
+    const d = decideTier({ configured, suggested: a.choice, p: pOf(a), threshold: ROUTE_TIER_THRESHOLD });
+    return { ...out, suggested: a.choice, p: pOf(a), ...d };
+  } catch (e) {
+    return { ...out, error: `Jev unavailable: ${String(e.message).split('\n')[0]}` };
+  }
+}
+
+module.exports = {
+  ENDPOINT, MODEL, KEY_NAME, SECRETS, JevDisabled, PROMPT_CHARS, TIER_QUESTION, TIERS, ROUTE_TIER_THRESHOLD, TIER_ORDER,
+  readKey, status, isEnabled, ask, noul, choice, noulQuestion, choiceQuestion, postJson, pOf, tierOf, decideTier, routeTier,
+};
+
+// `node jev.js route --configured <model>` — the task on stdin, one JSON line on stdout, exit 0 whatever happened.
+if (require.main === module) {
+  const i = process.argv.indexOf('--configured');
+  if (process.argv[2] !== 'route' || i === -1 || !process.argv[i + 1]) {
+    process.stderr.write('usage: node jev.js route --configured <implementer model> < task.txt\n');
+    process.exit(1);
+  }
+  let raw = '';
+  process.stdin.on('data', (c) => { raw += c; });
+  process.stdin.on('end', () => {
+    routeTier(raw.trim(), { configured: process.argv[i + 1] }).then((r) => { process.stdout.write(`${JSON.stringify(r)}\n`); process.exit(0); });
+  });
+}

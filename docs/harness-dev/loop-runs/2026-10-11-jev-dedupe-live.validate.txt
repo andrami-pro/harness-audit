@@ -1,0 +1,6 @@
+# jev dedupe eval — first live run, 2026-10-11
+# Command: JEV_LIVE=1 node scripts/validate.js, run on 2026-10-11 against the first version of this release (router threshold still null). validate.js keeps only the verdict line of each live check; the three live lines, verbatim:
+✓ jev live smoke — one noul round trip to api.typesafe.ai — OK — api.typesafe.ai answered (p=0.88)
+✓ jev dedupe eval — live, against api.typesafe.ai — PASS — no new blocker or major hidden at 0.85/0.95. Recall 41% (the rest costs redundant fix rounds, not defects).
+✓ jev router eval — live, against api.typesafe.ai — NOT ROUTABLE — no confidence cut-off keeps tier precision ≥ 0.9. routeByJev keeps the configured line-up.
+# Summary line: 67/67 checks passed

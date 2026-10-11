@@ -1,0 +1,24 @@
+jev dedupe eval — 31 cases (17 restated, 14 new) · 34 pair(s), 1 request(s)
+separation: lowest p on a true restatement 0.25 · highest p on a new finding 0.68
+
+threshold  precision  recall   hidden new (blocker/major/minor)  wrong match
+  0.50        92%      71%     0 /  0 /  1                     4
+  0.65        91%      59%     0 /  0 /  1                     2
+  0.75       100%      53%     0 /  0 /  0                     1
+  0.85       100%      47%     0 /  0 /  0                     0 ← loop-gate
+  0.90       100%      35%     0 /  0 /  0                     0
+  0.95       100%      29%     0 /  0 /  0                     0
+(a blocker is only carried at p ≥ 0.95, at every threshold)
+
+MISSED at loop-gate thresholds — restatements read as new (costs a redundant fix, never a hidden defect):
+  c02 major   p=0.57  moved-line
+  c08 blocker p=0.65  partial-fix-remainder
+  c11 major   p=0.75  multi-candidate
+  c15 blocker p=0.59  paraphrase
+  c20 blocker p=0.61  different-fix-same-defect
+  c23 major   p=0.65  paraphrase
+  c26 blocker p=0.74  terse-restatement
+  c28 major   p=0.51  multi-candidate
+  c30 major   p=0.25  paraphrase
+
+VERDICT: PASS — no new blocker or major hidden at 0.85/0.95. Recall 47% (the rest costs redundant fix rounds, not defects).

@@ -1,0 +1,1588 @@
+{
+  "corpus": "benchmarks/fixtures/router_corpus.jsonl",
+  "skills": "docs/harness-dev/loop-runs/2026-10-10-jev-router-before-fix.skills.json",
+  "n": 64,
+  "options": 102,
+  "errors": [],
+  "skill": {
+    "accuracyStrict": 0.75,
+    "accuracyLax": 0.8125,
+    "perLabel": [
+      {
+        "label": "agents-sdk",
+        "n": 0,
+        "predicted": 1,
+        "precisionStrict": 0,
+        "precisionLax": 0,
+        "recallStrict": null,
+        "recallLax": null
+      },
+      {
+        "label": "brand-storytelling",
+        "n": 0,
+        "predicted": 1,
+        "precisionStrict": 0,
+        "precisionLax": 1,
+        "recallStrict": null,
+        "recallLax": null
+      },
+      {
+        "label": "caveman:caveman",
+        "n": 1,
+        "predicted": 0,
+        "precisionStrict": null,
+        "precisionLax": null,
+        "recallStrict": 0,
+        "recallLax": 0
+      },
+      {
+        "label": "caveman:caveman-commit",
+        "n": 0,
+        "predicted": 1,
+        "precisionStrict": 0,
+        "precisionLax": 1,
+        "recallStrict": null,
+        "recallLax": null
+      },
+      {
+        "label": "caveman:caveman-setup",
+        "n": 0,
+        "predicted": 1,
+        "precisionStrict": 0,
+        "precisionLax": 0,
+        "recallStrict": null,
+        "recallLax": null
+      },
+      {
+        "label": "caveman:investigate-first",
+        "n": 0,
+        "predicted": 1,
+        "precisionStrict": 0,
+        "precisionLax": 1,
+        "recallStrict": null,
+        "recallLax": null
+      },
+      {
+        "label": "codebase-design",
+        "n": 0,
+        "predicted": 2,
+        "precisionStrict": 0,
+        "precisionLax": 0,
+        "recallStrict": null,
+        "recallLax": null
+      },
+      {
+        "label": "diagnosing-bugs",
+        "n": 2,
+        "predicted": 1,
+        "precisionStrict": 1,
+        "precisionLax": 1,
+        "recallStrict": 0.5,
+        "recallLax": 1
+      },
+      {
+        "label": "framer-motion-animator",
+        "n": 1,
+        "predicted": 1,
+        "precisionStrict": 1,
+        "precisionLax": 1,
+        "recallStrict": 1,
+        "recallLax": 1
+      },
+      {
+        "label": "frontend-design",
+        "n": 0,
+        "predicted": 4,
+        "precisionStrict": 0,
+        "precisionLax": 0.25,
+        "recallStrict": null,
+        "recallLax": null
+      },
+      {
+        "label": "golden-circle-advisor",
+        "n": 1,
+        "predicted": 0,
+        "precisionStrict": null,
+        "precisionLax": null,
+        "recallStrict": 0,
+        "recallLax": 1
+      },
+      {
+        "label": "grill-with-docs",
+        "n": 1,
+        "predicted": 0,
+        "precisionStrict": null,
+        "precisionLax": null,
+        "recallStrict": 0,
+        "recallLax": 0
+      },
+      {
+        "label": "gtm-positioning-strategy",
+        "n": 1,
+        "predicted": 0,
+        "precisionStrict": null,
+        "precisionLax": null,
+        "recallStrict": 0,
+        "recallLax": 0
+      },
+      {
+        "label": "humanizer",
+        "n": 2,
+        "predicted": 2,
+        "precisionStrict": 1,
+        "precisionLax": 1,
+        "recallStrict": 1,
+        "recallLax": 1
+      },
+      {
+        "label": "information-architecture",
+        "n": 1,
+        "predicted": 1,
+        "precisionStrict": 1,
+        "precisionLax": 1,
+        "recallStrict": 1,
+        "recallLax": 1
+      },
+      {
+        "label": "kandelio-email-test",
+        "n": 0,
+        "predicted": 1,
+        "precisionStrict": 0,
+        "precisionLax": 0,
+        "recallStrict": null,
+        "recallLax": null
+      },
+      {
+        "label": "learning-capture",
+        "n": 0,
+        "predicted": 1,
+        "precisionStrict": 0,
+        "precisionLax": 0,
+        "recallStrict": null,
+        "recallLax": null
+      },
+      {
+        "label": "linkedin-profile-optimizer",
+        "n": 1,
+        "predicted": 1,
+        "precisionStrict": 1,
+        "precisionLax": 1,
+        "recallStrict": 1,
+        "recallLax": 1
+      },
+      {
+        "label": "no-ai-design-slop",
+        "n": 1,
+        "predicted": 1,
+        "precisionStrict": 1,
+        "precisionLax": 1,
+        "recallStrict": 1,
+        "recallLax": 1
+      },
+      {
+        "label": "none",
+        "n": 42,
+        "predicted": 34,
+        "precisionStrict": 0.9411764705882353,
+        "precisionLax": 0.9411764705882353,
+        "recallStrict": 0.7619047619047619,
+        "recallLax": 0.8095238095238095
+      },
+      {
+        "label": "prd-development",
+        "n": 2,
+        "predicted": 2,
+        "precisionStrict": 1,
+        "precisionLax": 1,
+        "recallStrict": 1,
+        "recallLax": 1
+      },
+      {
+        "label": "skill-creator",
+        "n": 3,
+        "predicted": 2,
+        "precisionStrict": 1,
+        "precisionLax": 1,
+        "recallStrict": 0.6666666666666666,
+        "recallLax": 0.6666666666666666
+      },
+      {
+        "label": "to-questionnaire",
+        "n": 1,
+        "predicted": 1,
+        "precisionStrict": 1,
+        "precisionLax": 1,
+        "recallStrict": 1,
+        "recallLax": 1
+      },
+      {
+        "label": "ui-ux-pro-max",
+        "n": 1,
+        "predicted": 1,
+        "precisionStrict": 1,
+        "precisionLax": 1,
+        "recallStrict": 1,
+        "recallLax": 1
+      },
+      {
+        "label": "ux-squad",
+        "n": 1,
+        "predicted": 1,
+        "precisionStrict": 1,
+        "precisionLax": 1,
+        "recallStrict": 1,
+        "recallLax": 1
+      },
+      {
+        "label": "web-scraping",
+        "n": 0,
+        "predicted": 1,
+        "precisionStrict": 0,
+        "precisionLax": 0,
+        "recallStrict": null,
+        "recallLax": null
+      },
+      {
+        "label": "wrangler",
+        "n": 2,
+        "predicted": 2,
+        "precisionStrict": 1,
+        "precisionLax": 1,
+        "recallStrict": 1,
+        "recallLax": 1
+      }
+    ],
+    "confusion": {
+      "humanizer": {
+        "humanizer": 2
+      },
+      "skill-creator": {
+        "none": 1,
+        "skill-creator": 2
+      },
+      "grill-with-docs": {
+        "none": 1
+      },
+      "prd-development": {
+        "prd-development": 2
+      },
+      "diagnosing-bugs": {
+        "diagnosing-bugs": 1,
+        "caveman:investigate-first": 1
+      },
+      "ux-squad": {
+        "ux-squad": 1
+      },
+      "information-architecture": {
+        "information-architecture": 1
+      },
+      "ui-ux-pro-max": {
+        "ui-ux-pro-max": 1
+      },
+      "no-ai-design-slop": {
+        "no-ai-design-slop": 1
+      },
+      "gtm-positioning-strategy": {
+        "web-scraping": 1
+      },
+      "golden-circle-advisor": {
+        "brand-storytelling": 1
+      },
+      "linkedin-profile-optimizer": {
+        "linkedin-profile-optimizer": 1
+      },
+      "caveman:caveman": {
+        "caveman:caveman-setup": 1
+      },
+      "framer-motion-animator": {
+        "framer-motion-animator": 1
+      },
+      "to-questionnaire": {
+        "to-questionnaire": 1
+      },
+      "wrangler": {
+        "wrangler": 2
+      },
+      "none": {
+        "none": 32,
+        "learning-capture": 1,
+        "kandelio-email-test": 1,
+        "caveman:caveman-commit": 1,
+        "frontend-design": 4,
+        "agents-sdk": 1,
+        "codebase-design": 2
+      }
+    },
+    "sweepStrict": {
+      "table": [
+        {
+          "t": 0.3,
+          "kept": 60,
+          "coverage": 0.9375,
+          "precision": 0.7666666666666667
+        },
+        {
+          "t": 0.4,
+          "kept": 50,
+          "coverage": 0.78125,
+          "precision": 0.86
+        },
+        {
+          "t": 0.5,
+          "kept": 44,
+          "coverage": 0.6875,
+          "precision": 0.9090909090909091
+        },
+        {
+          "t": 0.6,
+          "kept": 35,
+          "coverage": 0.546875,
+          "precision": 0.9714285714285714
+        },
+        {
+          "t": 0.65,
+          "kept": 31,
+          "coverage": 0.484375,
+          "precision": 0.967741935483871
+        },
+        {
+          "t": 0.7,
+          "kept": 28,
+          "coverage": 0.4375,
+          "precision": 0.9642857142857143
+        },
+        {
+          "t": 0.75,
+          "kept": 24,
+          "coverage": 0.375,
+          "precision": 1
+        },
+        {
+          "t": 0.8,
+          "kept": 18,
+          "coverage": 0.28125,
+          "precision": 1
+        },
+        {
+          "t": 0.85,
+          "kept": 16,
+          "coverage": 0.25,
+          "precision": 1
+        },
+        {
+          "t": 0.9,
+          "kept": 14,
+          "coverage": 0.21875,
+          "precision": 1
+        },
+        {
+          "t": 0.95,
+          "kept": 11,
+          "coverage": 0.171875,
+          "precision": 1
+        },
+        {
+          "t": 0.99,
+          "kept": 5,
+          "coverage": 0.078125,
+          "precision": 1
+        }
+      ],
+      "threshold": {
+        "t": 0.5,
+        "kept": 44,
+        "coverage": 0.6875,
+        "precision": 0.9090909090909091
+      }
+    },
+    "sweepLax": {
+      "table": [
+        {
+          "t": 0.3,
+          "kept": 60,
+          "coverage": 0.9375,
+          "precision": 0.8333333333333334
+        },
+        {
+          "t": 0.4,
+          "kept": 50,
+          "coverage": 0.78125,
+          "precision": 0.9
+        },
+        {
+          "t": 0.5,
+          "kept": 44,
+          "coverage": 0.6875,
+          "precision": 0.9545454545454546
+        },
+        {
+          "t": 0.6,
+          "kept": 35,
+          "coverage": 0.546875,
+          "precision": 0.9714285714285714
+        },
+        {
+          "t": 0.65,
+          "kept": 31,
+          "coverage": 0.484375,
+          "precision": 0.967741935483871
+        },
+        {
+          "t": 0.7,
+          "kept": 28,
+          "coverage": 0.4375,
+          "precision": 0.9642857142857143
+        },
+        {
+          "t": 0.75,
+          "kept": 24,
+          "coverage": 0.375,
+          "precision": 1
+        },
+        {
+          "t": 0.8,
+          "kept": 18,
+          "coverage": 0.28125,
+          "precision": 1
+        },
+        {
+          "t": 0.85,
+          "kept": 16,
+          "coverage": 0.25,
+          "precision": 1
+        },
+        {
+          "t": 0.9,
+          "kept": 14,
+          "coverage": 0.21875,
+          "precision": 1
+        },
+        {
+          "t": 0.95,
+          "kept": 11,
+          "coverage": 0.171875,
+          "precision": 1
+        },
+        {
+          "t": 0.99,
+          "kept": 5,
+          "coverage": 0.078125,
+          "precision": 1
+        }
+      ],
+      "threshold": {
+        "t": 0.4,
+        "kept": 50,
+        "coverage": 0.78125,
+        "precision": 0.9
+      }
+    }
+  },
+  "tier": {
+    "accuracy": 0.734375,
+    "perLabel": [
+      {
+        "label": "haiku",
+        "n": 14,
+        "predicted": 17,
+        "precisionStrict": 0.6470588235294118,
+        "precisionLax": 0.6470588235294118,
+        "recallStrict": 0.7857142857142857,
+        "recallLax": 0.7857142857142857
+      },
+      {
+        "label": "sonnet",
+        "n": 17,
+        "predicted": 23,
+        "precisionStrict": 0.6086956521739131,
+        "precisionLax": 0.6086956521739131,
+        "recallStrict": 0.8235294117647058,
+        "recallLax": 0.8235294117647058
+      },
+      {
+        "label": "opus",
+        "n": 18,
+        "predicted": 13,
+        "precisionStrict": 0.8461538461538461,
+        "precisionLax": 0.8461538461538461,
+        "recallStrict": 0.6111111111111112,
+        "recallLax": 0.6111111111111112
+      },
+      {
+        "label": "fable",
+        "n": 15,
+        "predicted": 11,
+        "precisionStrict": 1,
+        "precisionLax": 1,
+        "recallStrict": 0.7333333333333333,
+        "recallLax": 0.7333333333333333
+      }
+    ],
+    "confusion": {
+      "sonnet": {
+        "haiku": 3,
+        "sonnet": 14
+      },
+      "opus": {
+        "opus": 11,
+        "haiku": 3,
+        "sonnet": 4
+      },
+      "fable": {
+        "fable": 11,
+        "opus": 2,
+        "sonnet": 2
+      },
+      "haiku": {
+        "haiku": 11,
+        "sonnet": 3
+      }
+    },
+    "sweep": {
+      "table": [
+        {
+          "t": 0.3,
+          "kept": 64,
+          "coverage": 1,
+          "precision": 0.734375
+        },
+        {
+          "t": 0.4,
+          "kept": 64,
+          "coverage": 1,
+          "precision": 0.734375
+        },
+        {
+          "t": 0.5,
+          "kept": 59,
+          "coverage": 0.921875,
+          "precision": 0.7627118644067796
+        },
+        {
+          "t": 0.6,
+          "kept": 50,
+          "coverage": 0.78125,
+          "precision": 0.86
+        },
+        {
+          "t": 0.65,
+          "kept": 47,
+          "coverage": 0.734375,
+          "precision": 0.9148936170212766
+        },
+        {
+          "t": 0.7,
+          "kept": 42,
+          "coverage": 0.65625,
+          "precision": 0.9285714285714286
+        },
+        {
+          "t": 0.75,
+          "kept": 38,
+          "coverage": 0.59375,
+          "precision": 0.9210526315789473
+        },
+        {
+          "t": 0.8,
+          "kept": 34,
+          "coverage": 0.53125,
+          "precision": 0.9117647058823529
+        },
+        {
+          "t": 0.85,
+          "kept": 29,
+          "coverage": 0.453125,
+          "precision": 0.896551724137931
+        },
+        {
+          "t": 0.9,
+          "kept": 24,
+          "coverage": 0.375,
+          "precision": 0.9166666666666666
+        },
+        {
+          "t": 0.95,
+          "kept": 16,
+          "coverage": 0.25,
+          "precision": 0.9375
+        },
+        {
+          "t": 0.99,
+          "kept": 9,
+          "coverage": 0.140625,
+          "precision": 0.8888888888888888
+        }
+      ],
+      "threshold": null
+    }
+  },
+  "latency": {
+    "p50": 359,
+    "p95": 710,
+    "overBudget": 0,
+    "budgetMs": 1500
+  },
+  "inputTokens": 253786,
+  "predictions": [
+    {
+      "id": "r01",
+      "ms": 831,
+      "skill": {
+        "choice": "humanizer",
+        "p": 0.95,
+        "confidence": 0.95
+      },
+      "tier": {
+        "choice": "haiku",
+        "p": 0.63,
+        "confidence": 0.51
+      },
+      "inputTokens": 3920
+    },
+    {
+      "id": "r02",
+      "ms": 710,
+      "skill": {
+        "choice": "humanizer",
+        "p": 0.96,
+        "confidence": 0.96
+      },
+      "tier": {
+        "choice": "sonnet",
+        "p": 0.99,
+        "confidence": 0.99
+      },
+      "inputTokens": 4000
+    },
+    {
+      "id": "r03",
+      "ms": 752,
+      "skill": {
+        "choice": "none",
+        "p": 0.48,
+        "confidence": 0.47
+      },
+      "tier": {
+        "choice": "sonnet",
+        "p": 0.72,
+        "confidence": 0.63
+      },
+      "inputTokens": 3947
+    },
+    {
+      "id": "r04",
+      "ms": 778,
+      "skill": {
+        "choice": "skill-creator",
+        "p": 0.96,
+        "confidence": 0.96
+      },
+      "tier": {
+        "choice": "opus",
+        "p": 0.53,
+        "confidence": 0.37
+      },
+      "inputTokens": 3987
+    },
+    {
+      "id": "r05",
+      "ms": 307,
+      "skill": {
+        "choice": "skill-creator",
+        "p": 0.9400000000000001,
+        "confidence": 0.94
+      },
+      "tier": {
+        "choice": "fable",
+        "p": 0.95,
+        "confidence": 0.93
+      },
+      "inputTokens": 4249
+    },
+    {
+      "id": "r06",
+      "ms": 306,
+      "skill": {
+        "choice": "none",
+        "p": 0.49,
+        "confidence": 0.48
+      },
+      "tier": {
+        "choice": "fable",
+        "p": 0.94,
+        "confidence": 0.92
+      },
+      "inputTokens": 3956
+    },
+    {
+      "id": "r07",
+      "ms": 362,
+      "skill": {
+        "choice": "prd-development",
+        "p": 0.98,
+        "confidence": 0.98
+      },
+      "tier": {
+        "choice": "fable",
+        "p": 0.99,
+        "confidence": 0.99
+      },
+      "inputTokens": 3935
+    },
+    {
+      "id": "r08",
+      "ms": 347,
+      "skill": {
+        "choice": "prd-development",
+        "p": 0.99,
+        "confidence": 0.99
+      },
+      "tier": {
+        "choice": "fable",
+        "p": 0.81,
+        "confidence": 0.75
+      },
+      "inputTokens": 3907
+    },
+    {
+      "id": "r09",
+      "ms": 377,
+      "skill": {
+        "choice": "diagnosing-bugs",
+        "p": 0.98,
+        "confidence": 0.98
+      },
+      "tier": {
+        "choice": "opus",
+        "p": 0.6900000000000001,
+        "confidence": 0.59
+      },
+      "inputTokens": 3920
+    },
+    {
+      "id": "r10",
+      "ms": 396,
+      "skill": {
+        "choice": "caveman:investigate-first",
+        "p": 0.32,
+        "confidence": 0.31
+      },
+      "tier": {
+        "choice": "haiku",
+        "p": 0.5,
+        "confidence": 0.33
+      },
+      "inputTokens": 3928
+    },
+    {
+      "id": "r11",
+      "ms": 260,
+      "skill": {
+        "choice": "ux-squad",
+        "p": 0.85,
+        "confidence": 0.85
+      },
+      "tier": {
+        "choice": "opus",
+        "p": 0.54,
+        "confidence": 0.39
+      },
+      "inputTokens": 4109
+    },
+    {
+      "id": "r12",
+      "ms": 265,
+      "skill": {
+        "choice": "information-architecture",
+        "p": 0.62,
+        "confidence": 0.62
+      },
+      "tier": {
+        "choice": "opus",
+        "p": 0.52,
+        "confidence": 0.36
+      },
+      "inputTokens": 4022
+    },
+    {
+      "id": "r13",
+      "ms": 275,
+      "skill": {
+        "choice": "ui-ux-pro-max",
+        "p": 0.6900000000000001,
+        "confidence": 0.69
+      },
+      "tier": {
+        "choice": "haiku",
+        "p": 0.47,
+        "confidence": 0.29
+      },
+      "inputTokens": 3928
+    },
+    {
+      "id": "r14",
+      "ms": 403,
+      "skill": {
+        "choice": "no-ai-design-slop",
+        "p": 0.47000000000000003,
+        "confidence": 0.46
+      },
+      "tier": {
+        "choice": "opus",
+        "p": 0.94,
+        "confidence": 0.92
+      },
+      "inputTokens": 4046
+    },
+    {
+      "id": "r15",
+      "ms": 394,
+      "skill": {
+        "choice": "web-scraping",
+        "p": 0.35000000000000003,
+        "confidence": 0.34
+      },
+      "tier": {
+        "choice": "fable",
+        "p": 0.99,
+        "confidence": 0.99
+      },
+      "inputTokens": 3971
+    },
+    {
+      "id": "r16",
+      "ms": 353,
+      "skill": {
+        "choice": "brand-storytelling",
+        "p": 0.51,
+        "confidence": 0.51
+      },
+      "tier": {
+        "choice": "sonnet",
+        "p": 0.64,
+        "confidence": 0.52
+      },
+      "inputTokens": 4043
+    },
+    {
+      "id": "r17",
+      "ms": 366,
+      "skill": {
+        "choice": "linkedin-profile-optimizer",
+        "p": 0.36,
+        "confidence": 0.35
+      },
+      "tier": {
+        "choice": "opus",
+        "p": 0.49,
+        "confidence": 0.32
+      },
+      "inputTokens": 4028
+    },
+    {
+      "id": "r18",
+      "ms": 438,
+      "skill": {
+        "choice": "caveman:caveman-setup",
+        "p": 0.41000000000000003,
+        "confidence": 0.4
+      },
+      "tier": {
+        "choice": "sonnet",
+        "p": 0.95,
+        "confidence": 0.93
+      },
+      "inputTokens": 3946
+    },
+    {
+      "id": "r19",
+      "ms": 438,
+      "skill": {
+        "choice": "framer-motion-animator",
+        "p": 0.49,
+        "confidence": 0.48
+      },
+      "tier": {
+        "choice": "opus",
+        "p": 0.4,
+        "confidence": 0.2
+      },
+      "inputTokens": 3941
+    },
+    {
+      "id": "r20",
+      "ms": 445,
+      "skill": {
+        "choice": "to-questionnaire",
+        "p": 0.28,
+        "confidence": 0.27
+      },
+      "tier": {
+        "choice": "fable",
+        "p": 0.9,
+        "confidence": 0.87
+      },
+      "inputTokens": 4068
+    },
+    {
+      "id": "r21",
+      "ms": 264,
+      "skill": {
+        "choice": "wrangler",
+        "p": 0.66,
+        "confidence": 0.66
+      },
+      "tier": {
+        "choice": "sonnet",
+        "p": 0.75,
+        "confidence": 0.67
+      },
+      "inputTokens": 3938
+    },
+    {
+      "id": "r22",
+      "ms": 300,
+      "skill": {
+        "choice": "wrangler",
+        "p": 0.93,
+        "confidence": 0.93
+      },
+      "tier": {
+        "choice": "haiku",
+        "p": 0.85,
+        "confidence": 0.8
+      },
+      "inputTokens": 3926
+    },
+    {
+      "id": "r23",
+      "ms": 263,
+      "skill": {
+        "choice": "none",
+        "p": 0.99,
+        "confidence": 0.99
+      },
+      "tier": {
+        "choice": "haiku",
+        "p": 1,
+        "confidence": 1
+      },
+      "inputTokens": 3905
+    },
+    {
+      "id": "r24",
+      "ms": 282,
+      "skill": {
+        "choice": "none",
+        "p": 0.99,
+        "confidence": 0.99
+      },
+      "tier": {
+        "choice": "haiku",
+        "p": 1,
+        "confidence": 1
+      },
+      "inputTokens": 3908
+    },
+    {
+      "id": "r25",
+      "ms": 385,
+      "skill": {
+        "choice": "none",
+        "p": 0.99,
+        "confidence": 0.99
+      },
+      "tier": {
+        "choice": "haiku",
+        "p": 0.99,
+        "confidence": 0.99
+      },
+      "inputTokens": 3906
+    },
+    {
+      "id": "r26",
+      "ms": 395,
+      "skill": {
+        "choice": "none",
+        "p": 0.99,
+        "confidence": 0.99
+      },
+      "tier": {
+        "choice": "haiku",
+        "p": 0.99,
+        "confidence": 0.99
+      },
+      "inputTokens": 3911
+    },
+    {
+      "id": "r27",
+      "ms": 370,
+      "skill": {
+        "choice": "none",
+        "p": 0.96,
+        "confidence": 0.96
+      },
+      "tier": {
+        "choice": "haiku",
+        "p": 0.97,
+        "confidence": 0.96
+      },
+      "inputTokens": 3924
+    },
+    {
+      "id": "r28",
+      "ms": 362,
+      "skill": {
+        "choice": "none",
+        "p": 0.9,
+        "confidence": 0.9
+      },
+      "tier": {
+        "choice": "haiku",
+        "p": 0.92,
+        "confidence": 0.89
+      },
+      "inputTokens": 3917
+    },
+    {
+      "id": "r29",
+      "ms": 440,
+      "skill": {
+        "choice": "none",
+        "p": 0.7,
+        "confidence": 0.7
+      },
+      "tier": {
+        "choice": "haiku",
+        "p": 0.86,
+        "confidence": 0.81
+      },
+      "inputTokens": 3907
+    },
+    {
+      "id": "r30",
+      "ms": 466,
+      "skill": {
+        "choice": "none",
+        "p": 0.79,
+        "confidence": 0.79
+      },
+      "tier": {
+        "choice": "haiku",
+        "p": 0.88,
+        "confidence": 0.84
+      },
+      "inputTokens": 3915
+    },
+    {
+      "id": "r31",
+      "ms": 469,
+      "skill": {
+        "choice": "none",
+        "p": 0.5,
+        "confidence": 0.5
+      },
+      "tier": {
+        "choice": "haiku",
+        "p": 0.75,
+        "confidence": 0.67
+      },
+      "inputTokens": 3911
+    },
+    {
+      "id": "r32",
+      "ms": 461,
+      "skill": {
+        "choice": "none",
+        "p": 0.4,
+        "confidence": 0.39
+      },
+      "tier": {
+        "choice": "haiku",
+        "p": 0.9,
+        "confidence": 0.87
+      },
+      "inputTokens": 3906
+    },
+    {
+      "id": "r33",
+      "ms": 276,
+      "skill": {
+        "choice": "none",
+        "p": 0.83,
+        "confidence": 0.83
+      },
+      "tier": {
+        "choice": "sonnet",
+        "p": 0.59,
+        "confidence": 0.45
+      },
+      "inputTokens": 3928
+    },
+    {
+      "id": "r34",
+      "ms": 281,
+      "skill": {
+        "choice": "none",
+        "p": 0.6900000000000001,
+        "confidence": 0.69
+      },
+      "tier": {
+        "choice": "sonnet",
+        "p": 0.57,
+        "confidence": 0.43
+      },
+      "inputTokens": 3916
+    },
+    {
+      "id": "r35",
+      "ms": 276,
+      "skill": {
+        "choice": "none",
+        "p": 0.64,
+        "confidence": 0.64
+      },
+      "tier": {
+        "choice": "sonnet",
+        "p": 0.94,
+        "confidence": 0.92
+      },
+      "inputTokens": 3913
+    },
+    {
+      "id": "r36",
+      "ms": 269,
+      "skill": {
+        "choice": "none",
+        "p": 0.78,
+        "confidence": 0.78
+      },
+      "tier": {
+        "choice": "sonnet",
+        "p": 0.97,
+        "confidence": 0.96
+      },
+      "inputTokens": 4021
+    },
+    {
+      "id": "r37",
+      "ms": 384,
+      "skill": {
+        "choice": "none",
+        "p": 0.54,
+        "confidence": 0.54
+      },
+      "tier": {
+        "choice": "sonnet",
+        "p": 0.67,
+        "confidence": 0.56
+      },
+      "inputTokens": 3917
+    },
+    {
+      "id": "r38",
+      "ms": 360,
+      "skill": {
+        "choice": "none",
+        "p": 0.76,
+        "confidence": 0.76
+      },
+      "tier": {
+        "choice": "haiku",
+        "p": 0.89,
+        "confidence": 0.85
+      },
+      "inputTokens": 3935
+    },
+    {
+      "id": "r39",
+      "ms": 360,
+      "skill": {
+        "choice": "learning-capture",
+        "p": 0.55,
+        "confidence": 0.55
+      },
+      "tier": {
+        "choice": "sonnet",
+        "p": 0.9,
+        "confidence": 0.87
+      },
+      "inputTokens": 3965
+    },
+    {
+      "id": "r40",
+      "ms": 359,
+      "skill": {
+        "choice": "none",
+        "p": 0.73,
+        "confidence": 0.73
+      },
+      "tier": {
+        "choice": "sonnet",
+        "p": 0.84,
+        "confidence": 0.79
+      },
+      "inputTokens": 3968
+    },
+    {
+      "id": "r41",
+      "ms": 327,
+      "skill": {
+        "choice": "none",
+        "p": 0.78,
+        "confidence": 0.78
+      },
+      "tier": {
+        "choice": "sonnet",
+        "p": 0.95,
+        "confidence": 0.93
+      },
+      "inputTokens": 3950
+    },
+    {
+      "id": "r42",
+      "ms": 441,
+      "skill": {
+        "choice": "none",
+        "p": 0.85,
+        "confidence": 0.85
+      },
+      "tier": {
+        "choice": "sonnet",
+        "p": 0.85,
+        "confidence": 0.8
+      },
+      "inputTokens": 3984
+    },
+    {
+      "id": "r43",
+      "ms": 441,
+      "skill": {
+        "choice": "none",
+        "p": 0.63,
+        "confidence": 0.63
+      },
+      "tier": {
+        "choice": "sonnet",
+        "p": 0.77,
+        "confidence": 0.69
+      },
+      "inputTokens": 3933
+    },
+    {
+      "id": "r44",
+      "ms": 393,
+      "skill": {
+        "choice": "none",
+        "p": 0.78,
+        "confidence": 0.78
+      },
+      "tier": {
+        "choice": "sonnet",
+        "p": 0.67,
+        "confidence": 0.56
+      },
+      "inputTokens": 3940
+    },
+    {
+      "id": "r45",
+      "ms": 337,
+      "skill": {
+        "choice": "none",
+        "p": 0.75,
+        "confidence": 0.75
+      },
+      "tier": {
+        "choice": "sonnet",
+        "p": 0.69,
+        "confidence": 0.59
+      },
+      "inputTokens": 3926
+    },
+    {
+      "id": "r46",
+      "ms": 331,
+      "skill": {
+        "choice": "kandelio-email-test",
+        "p": 0.37,
+        "confidence": 0.36
+      },
+      "tier": {
+        "choice": "sonnet",
+        "p": 0.98,
+        "confidence": 0.97
+      },
+      "inputTokens": 4043
+    },
+    {
+      "id": "r47",
+      "ms": 280,
+      "skill": {
+        "choice": "none",
+        "p": 0.73,
+        "confidence": 0.73
+      },
+      "tier": {
+        "choice": "haiku",
+        "p": 0.54,
+        "confidence": 0.39
+      },
+      "inputTokens": 3914
+    },
+    {
+      "id": "r48",
+      "ms": 300,
+      "skill": {
+        "choice": "caveman:caveman-commit",
+        "p": 0.32,
+        "confidence": 0.31
+      },
+      "tier": {
+        "choice": "opus",
+        "p": 0.8,
+        "confidence": 0.73
+      },
+      "inputTokens": 3920
+    },
+    {
+      "id": "r49",
+      "ms": 306,
+      "skill": {
+        "choice": "frontend-design",
+        "p": 0.38,
+        "confidence": 0.37
+      },
+      "tier": {
+        "choice": "opus",
+        "p": 0.81,
+        "confidence": 0.75
+      },
+      "inputTokens": 3915
+    },
+    {
+      "id": "r50",
+      "ms": 256,
+      "skill": {
+        "choice": "frontend-design",
+        "p": 0.2,
+        "confidence": 0.19
+      },
+      "tier": {
+        "choice": "opus",
+        "p": 0.74,
+        "confidence": 0.65
+      },
+      "inputTokens": 3946
+    },
+    {
+      "id": "r51",
+      "ms": 372,
+      "skill": {
+        "choice": "none",
+        "p": 0.59,
+        "confidence": 0.59
+      },
+      "tier": {
+        "choice": "sonnet",
+        "p": 0.54,
+        "confidence": 0.39
+      },
+      "inputTokens": 3914
+    },
+    {
+      "id": "r52",
+      "ms": 360,
+      "skill": {
+        "choice": "none",
+        "p": 0.24000000000000002,
+        "confidence": 0.23
+      },
+      "tier": {
+        "choice": "sonnet",
+        "p": 0.49,
+        "confidence": 0.32
+      },
+      "inputTokens": 3922
+    },
+    {
+      "id": "r53",
+      "ms": 352,
+      "skill": {
+        "choice": "frontend-design",
+        "p": 0.53,
+        "confidence": 0.53
+      },
+      "tier": {
+        "choice": "opus",
+        "p": 0.76,
+        "confidence": 0.68
+      },
+      "inputTokens": 3937
+    },
+    {
+      "id": "r54",
+      "ms": 343,
+      "skill": {
+        "choice": "frontend-design",
+        "p": 0.72,
+        "confidence": 0.72
+      },
+      "tier": {
+        "choice": "opus",
+        "p": 0.95,
+        "confidence": 0.93
+      },
+      "inputTokens": 4029
+    },
+    {
+      "id": "r55",
+      "ms": 299,
+      "skill": {
+        "choice": "none",
+        "p": 0.5700000000000001,
+        "confidence": 0.57
+      },
+      "tier": {
+        "choice": "sonnet",
+        "p": 0.69,
+        "confidence": 0.59
+      },
+      "inputTokens": 4019
+    },
+    {
+      "id": "r56",
+      "ms": 284,
+      "skill": {
+        "choice": "none",
+        "p": 0.52,
+        "confidence": 0.52
+      },
+      "tier": {
+        "choice": "haiku",
+        "p": 0.99,
+        "confidence": 0.99
+      },
+      "inputTokens": 3907
+    },
+    {
+      "id": "r57",
+      "ms": 437,
+      "skill": {
+        "choice": "agents-sdk",
+        "p": 0.37,
+        "confidence": 0.36
+      },
+      "tier": {
+        "choice": "fable",
+        "p": 0.99,
+        "confidence": 0.99
+      },
+      "inputTokens": 3941
+    },
+    {
+      "id": "r58",
+      "ms": 266,
+      "skill": {
+        "choice": "codebase-design",
+        "p": 0.29000000000000004,
+        "confidence": 0.28
+      },
+      "tier": {
+        "choice": "opus",
+        "p": 0.57,
+        "confidence": 0.43
+      },
+      "inputTokens": 4162
+    },
+    {
+      "id": "r59",
+      "ms": 350,
+      "skill": {
+        "choice": "none",
+        "p": 0.54,
+        "confidence": 0.54
+      },
+      "tier": {
+        "choice": "sonnet",
+        "p": 0.64,
+        "confidence": 0.52
+      },
+      "inputTokens": 4053
+    },
+    {
+      "id": "r60",
+      "ms": 338,
+      "skill": {
+        "choice": "codebase-design",
+        "p": 0.33,
+        "confidence": 0.32
+      },
+      "tier": {
+        "choice": "fable",
+        "p": 0.8,
+        "confidence": 0.73
+      },
+      "inputTokens": 3964
+    },
+    {
+      "id": "r61",
+      "ms": 280,
+      "skill": {
+        "choice": "none",
+        "p": 0.39,
+        "confidence": 0.38
+      },
+      "tier": {
+        "choice": "fable",
+        "p": 0.71,
+        "confidence": 0.61
+      },
+      "inputTokens": 3972
+    },
+    {
+      "id": "r62",
+      "ms": 393,
+      "skill": {
+        "choice": "none",
+        "p": 0.62,
+        "confidence": 0.62
+      },
+      "tier": {
+        "choice": "fable",
+        "p": 0.71,
+        "confidence": 0.61
+      },
+      "inputTokens": 3918
+    },
+    {
+      "id": "r63",
+      "ms": 296,
+      "skill": {
+        "choice": "none",
+        "p": 0.8200000000000001,
+        "confidence": 0.82
+      },
+      "tier": {
+        "choice": "sonnet",
+        "p": 0.48,
+        "confidence": 0.31
+      },
+      "inputTokens": 3918
+    },
+    {
+      "id": "r64",
+      "ms": 333,
+      "skill": {
+        "choice": "none",
+        "p": 0.34,
+        "confidence": 0.33
+      },
+      "tier": {
+        "choice": "fable",
+        "p": 0.91,
+        "confidence": 0.88
+      },
+      "inputTokens": 4271
+    }
+  ]
+}

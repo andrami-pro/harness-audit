@@ -72,7 +72,7 @@ audit marks the Graphify criterion FAIL but does not abort the install.
 
 | Hook | Event | What it does |
 |---|---|---|
-| `prompt-router` | `UserPromptSubmit` | Off without a TypeSafe key. One advisory line: which skill and which subagent tier fit the prompt |
+| `prompt-router` | `UserPromptSubmit` | Off without a TypeSafe key. One advisory line: which skill and which subagent tier (haiku/sonnet/opus/fable) fit the prompt |
 | `jev-nudge` | `SessionStart` | While no key is present, says once a day that Jev is off. Silent with a key |
 | `sync-workflows` | `SessionStart` | Copies `develop-phase.js` to `~/.claude/harness/` and to `.claude/harness/` (git-ignored) of a project with a wrapper, only when it changed |
 
@@ -85,7 +85,11 @@ exactly two calls in this package that a frontier model was making by judgment a
 
 - **`loop-gate.js dedupe`** — is this round's finding a restatement of last round's? ([docs/loops.md](../../docs/loops.md#the-one-step-in-a-loop-no-agent-wrote--scriptsloop-gatejs))
 - **`prompt-router`** — which installed skill fits this prompt, and which subagent tier does it
-  deserve? One advisory line per prompt; the model still decides.
+  deserve? One advisory line per prompt; the model still decides. The tier criterion Jev reads:
+  - **haiku** — the prompt carries no task of its own (ok, go on, retry), or it is a lookup or a command to run
+  - **sonnet** — explain, answer about the state of something, write a message, give instructions, verify
+  - **opus** — build or fix code or UI
+  - **fable** — architecture, product, business, pricing or a plan
 
 **Off by default, on by one key.** Every Jev path checks `TYPESAFE_API_KEY` — the environment, or a
 `TYPESAFE_API_KEY=` line in `~/.agents/secrets.env` (the file the line-up advisor already reads,
@@ -106,16 +110,28 @@ bin/jev-setup --ping     # one round trip, never writes
 |---|---|
 | `dedupe` | For each pair: the two findings' `id`, `critic`, `severity`, `file`, `line`, `summary`, `fix` |
 | `prompt-router` | The first 1500 characters of the prompt you just typed; the names and 120-char descriptions of your installed skills |
+| develop-phase `routeByJev` | The first 1500 characters of the task |
 
-**Calibrate before you trust it.** The 0.85 / 0.95 thresholds were chosen, not measured.
-`node benchmarks/jev_dedupe_eval.js` measures them: it runs a labelled corpus
+**Calibrate before you trust it.** `node benchmarks/jev_dedupe_eval.js` runs a labelled corpus
 (`benchmarks/jev-dedupe/corpus.json` — paraphrases, cross-language restatements, and hard negatives
 that share a file, a line or most of their words with an old finding and are still new) through the
 production `dedupe()`, then prices every threshold from that one request. The two errors are not
-symmetric, so neither is the verdict: a restatement read as new costs a redundant fix round; a new
-blocker or major read as a restatement is hidden from the stop rule, and any of those at the
-shipped thresholds exits 1. The corpus is small and synthetic — add pairs from your own
-`loop-runs/` before you call a threshold settled. `JEV_LIVE=1 node scripts/validate.js` runs it.
+symmetric: a restatement read as new costs a redundant fix round; a new blocker or major read as a
+restatement is hidden from the stop rule, and any of those at the shipped thresholds exits 1. The
+0.85 / 0.95 thresholds were chosen, not measured, until the first live run ([2026-10-11](../../docs/harness-dev/loop-runs/2026-10-11-jev-dedupe-live.md)):
+nothing hidden, recall 41% (47% and 41% on two reruns). The dedupe reads more than half of the
+restatements as new, so loops run extra rounds. Next step: recalibrate both against that corpus.
+
+**Jev is not deterministic:** the same request moves p by up to 0.08, so `benchmarks/jev_router_eval.js`
+always runs twice and reports mean and [range]. Measured on 64 of the author's prompts, anonymized and labelled by
+hand, one operator, mostly Spanish ([2026-10-11](../../docs/harness-dev/loop-runs/2026-10-11-jev-router.md)):
+skill top-1 77.3% [76.6–78.1], 80.5% [79.7–81.3] counting an accepted alternative; tier top-1 73.4%.
+Where Jev rates its tier at p ≥ 0.80 (52% of the prompts) it is right 91.0% of the time. Down costs quality
+where up costs money, and Jev called one opus task haiku at p = 0.99, so develop-phase's `routeByJev`
+moves the implementer down one tier at most and never below sonnet. Replayed on the corpus from opus,
+those downgrades were right 95.3% [95.2–95.5]. It stays off by default; a wrapper may turn it on. The one
+real run with it predates the threshold and routed nothing. Fixing 26 skill descriptions read as `">-"`
+moved no score beyond run-to-run noise.
 
 **What never leaves, key or no key:** transcripts. `/session-review` and `/dashboard-harness` keep
 their promise — no API call, nothing leaves the machine — and `scripts/validate.js` holds them to it.

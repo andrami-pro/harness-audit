@@ -1,0 +1,223 @@
+jev router eval — 64 prompts × 2 passes (Jev is not deterministic: mean [min–max] of the passes)
+TIER top-1 73.4% [73.4%–73.4%] · SKILL top-1 strict 77.3% [76.6%–78.1%] · lax 80.5% [79.7%–81.3%]
+tier precision: haiku 66.7% [64.7%–68.8%] · sonnet 60.9% [60.9%–60.9%] · opus 84.6% [84.6%–84.6%] · fable 95.8% [91.7%–100.0%]
+tier recall:    haiku 78.6% [78.6%–78.6%] · sonnet 82.4% [82.4%–82.4%] · opus 61.1% [61.1%–61.1%] · fable 73.3% [73.3%–73.3%]
+THRESHOLD (cumulative, higher of the passes): 0.80 — precision 91.0% [90.6%–91.4%] on 52.3% [50.0%–54.7%] of the corpus
+DOWNGRADES pass 1 (from opus, one tier at most, never below sonnet): 21/22 right = 95.5% · wrong: r56 opus→sonnet (Jev haiku p=0.99) · 9 upgrade(s) not scored
+DOWNGRADES pass 2 (from opus, one tier at most, never below sonnet): 20/21 right = 95.2% · wrong: r56 opus→sonnet (Jev haiku p=0.99) · 8 upgrade(s) not scored
+
+── pass 1 — 64 prompts · 102 skill options · 0 unanswered · 296602 input tokens
+latency p50 242ms · p95 280ms · 0 answer(s) slower than the hook's 1500ms budget (the hook drops those)
+
+TIER   top-1 73% (strict = lax: tiers carry no alternatives)
+  label    n  pred  precision  recall
+  haiku   14   16     69%      79%
+  sonnet  17   23     61%      82%
+  opus    18   13     85%      61%
+  fable   15   12     92%      73%
+  confusion (rows = label, columns = Jev):
+            haiku sonnet   opus  fable
+  haiku        11      3      0      0
+  sonnet        3     14      0      0
+  opus          2      4     11      1
+  fable         0      2      2     11
+
+SKILL  top-1 strict 77% · lax 80%
+  label                          n  pred  prec strict  prec lax  recall strict  recall lax
+  agents-sdk                      0    2        0%       0%           n/a        n/a
+  brand-storytelling              0    1        0%     100%           n/a        n/a
+  caveman:caveman                 1    1      100%     100%          100%       100%
+  caveman:investigate-first       0    1        0%     100%           n/a        n/a
+  caveman:surgical-patch          0    1        0%       0%           n/a        n/a
+  codebase-design                 0    1        0%       0%           n/a        n/a
+  diagnosing-bugs                 2    1      100%     100%           50%       100%
+  firecrawl-agent                 0    2        0%       0%           n/a        n/a
+  framer-motion-animator          1    1      100%     100%          100%       100%
+  frontend-design                 0    2        0%       0%           n/a        n/a
+  golden-circle-advisor           1    0       n/a      n/a            0%       100%
+  grill-with-docs                 1    0       n/a      n/a            0%         0%
+  gtm-positioning-strategy        1    0       n/a      n/a            0%         0%
+  humanizer                       2    2      100%     100%          100%       100%
+  information-architecture        1    1      100%     100%          100%       100%
+  learning-capture                0    1        0%       0%           n/a        n/a
+  linkedin-profile-optimizer      1    0       n/a      n/a            0%         0%
+  no-ai-design-slop               1    0       n/a      n/a            0%         0%
+  none                           42   36       94%      94%           81%        81%
+  prd-development                 2    2      100%     100%          100%       100%
+  skill-creator                   3    2      100%     100%           67%        67%
+  to-questionnaire                1    1      100%     100%          100%       100%
+  ui-ux-pro-max                   1    1      100%     100%          100%       100%
+  ux-squad                        1    3       33%      33%          100%       100%
+  wrangler                        2    2      100%     100%          100%       100%
+  confusion, off the diagonal (label → Jev × count):
+    diagnosing-bugs → caveman:investigate-first ×1
+    golden-circle-advisor → brand-storytelling ×1
+    grill-with-docs → none ×1
+    gtm-positioning-strategy → firecrawl-agent ×1
+    linkedin-profile-optimizer → firecrawl-agent ×1
+    no-ai-design-slop → ux-squad ×1
+    none → learning-capture ×1
+    none → caveman:surgical-patch ×1
+    none → frontend-design ×2
+    none → ux-squad ×1
+    none → agents-sdk ×2
+    none → codebase-design ×1
+    skill-creator → none ×1
+
+TIER — precision of the predictions kept at each confidence cut-off
+  cut-off  kept  coverage  precision
+  0.30      64     100%       73%
+  0.40      64     100%       73%
+  0.50      62      97%       74%
+  0.60      51      80%       84%
+  0.65      47      73%       87%
+  0.70      42      66%       88%
+  0.75      38      59%       89%
+  0.80      35      55%       91%
+  0.85      28      44%       89%
+  0.90      23      36%       87%
+  0.95      15      23%       93%
+  0.99       8      13%       88%
+  → cumulative threshold 0.80: precision 91% on 35 prediction(s), 55% of the corpus
+  → holds-from-there-on threshold (not used): none (no cut-off qualifies on ≥ 5 predictions)
+SKILL strict — precision of the predictions kept at each confidence cut-off
+  cut-off  kept  coverage  precision
+  0.30      58      91%       81%
+  0.40      50      78%       86%
+  0.50      46      72%       87%
+  0.60      38      59%       95%
+  0.65      31      48%       97%
+  0.70      28      44%      100%
+  0.75      25      39%      100%
+  0.80      19      30%      100%
+  0.85      15      23%      100%
+  0.90      13      20%      100%
+  0.95      11      17%      100%
+  0.99       7      11%      100%
+  → cumulative threshold 0.60: precision 95% on 38 prediction(s), 59% of the corpus
+  → holds-from-there-on threshold (not used) 0.60: precision 95% on 38 prediction(s), 59% of the corpus
+SKILL lax — precision of the predictions kept at each confidence cut-off
+  cut-off  kept  coverage  precision
+  0.30      58      91%       83%
+  0.40      50      78%       88%
+  0.50      46      72%       89%
+  0.60      38      59%       95%
+  0.65      31      48%       97%
+  0.70      28      44%      100%
+  0.75      25      39%      100%
+  0.80      19      30%      100%
+  0.85      15      23%      100%
+  0.90      13      20%      100%
+  0.95      11      17%      100%
+  0.99       7      11%      100%
+  → cumulative threshold 0.60: precision 95% on 38 prediction(s), 59% of the corpus
+  → holds-from-there-on threshold (not used) 0.60: precision 95% on 38 prediction(s), 59% of the corpus
+
+── pass 2 — 64 prompts · 102 skill options · 0 unanswered · 296602 input tokens
+latency p50 239ms · p95 291ms · 0 answer(s) slower than the hook's 1500ms budget (the hook drops those)
+
+TIER   top-1 73% (strict = lax: tiers carry no alternatives)
+  label    n  pred  precision  recall
+  haiku   14   17     65%      79%
+  sonnet  17   23     61%      82%
+  opus    18   13     85%      61%
+  fable   15   11    100%      73%
+  confusion (rows = label, columns = Jev):
+            haiku sonnet   opus  fable
+  haiku        11      3      0      0
+  sonnet        3     14      0      0
+  opus          3      4     11      0
+  fable         0      2      2     11
+
+SKILL  top-1 strict 78% · lax 81%
+  label                          n  pred  prec strict  prec lax  recall strict  recall lax
+  agents-sdk                      0    1        0%       0%           n/a        n/a
+  brand-storytelling              0    1        0%     100%           n/a        n/a
+  caveman:caveman                 1    1      100%     100%          100%       100%
+  caveman:investigate-first       0    1        0%     100%           n/a        n/a
+  caveman:surgical-patch          0    1        0%       0%           n/a        n/a
+  codebase-design                 0    1        0%       0%           n/a        n/a
+  diagnosing-bugs                 2    1      100%     100%           50%       100%
+  firecrawl-agent                 0    2        0%       0%           n/a        n/a
+  framer-motion-animator          1    1      100%     100%          100%       100%
+  frontend-design                 0    2        0%       0%           n/a        n/a
+  golden-circle-advisor           1    0       n/a      n/a            0%       100%
+  grill-with-docs                 1    0       n/a      n/a            0%         0%
+  gtm-positioning-strategy        1    0       n/a      n/a            0%         0%
+  humanizer                       2    2      100%     100%          100%       100%
+  information-architecture        1    1      100%     100%          100%       100%
+  learning-capture                0    1        0%       0%           n/a        n/a
+  linkedin-profile-optimizer      1    0       n/a      n/a            0%         0%
+  no-ai-design-slop               1    0       n/a      n/a            0%         0%
+  none                           42   37       95%      95%           83%        83%
+  prd-development                 2    2      100%     100%          100%       100%
+  skill-creator                   3    2      100%     100%           67%        67%
+  to-questionnaire                1    1      100%     100%          100%       100%
+  ui-ux-pro-max                   1    1      100%     100%          100%       100%
+  ux-squad                        1    3       33%      33%          100%       100%
+  wrangler                        2    2      100%     100%          100%       100%
+  confusion, off the diagonal (label → Jev × count):
+    diagnosing-bugs → caveman:investigate-first ×1
+    golden-circle-advisor → brand-storytelling ×1
+    grill-with-docs → none ×1
+    gtm-positioning-strategy → firecrawl-agent ×1
+    linkedin-profile-optimizer → firecrawl-agent ×1
+    no-ai-design-slop → ux-squad ×1
+    none → learning-capture ×1
+    none → caveman:surgical-patch ×1
+    none → frontend-design ×2
+    none → ux-squad ×1
+    none → codebase-design ×1
+    none → agents-sdk ×1
+    skill-creator → none ×1
+
+TIER — precision of the predictions kept at each confidence cut-off
+  cut-off  kept  coverage  precision
+  0.30      64     100%       73%
+  0.40      63      98%       73%
+  0.50      61      95%       75%
+  0.60      50      78%       86%
+  0.65      48      75%       88%
+  0.70      42      66%       90%
+  0.75      36      56%       92%
+  0.80      32      50%       91%
+  0.85      28      44%       89%
+  0.90      23      36%       87%
+  0.95      16      25%       94%
+  0.99       9      14%       89%
+  → cumulative threshold 0.70: precision 90% on 42 prediction(s), 66% of the corpus
+  → holds-from-there-on threshold (not used): none (no cut-off qualifies on ≥ 5 predictions)
+SKILL strict — precision of the predictions kept at each confidence cut-off
+  cut-off  kept  coverage  precision
+  0.30      59      92%       80%
+  0.40      49      77%       86%
+  0.50      45      70%       89%
+  0.60      37      58%       97%
+  0.65      33      52%       97%
+  0.70      29      45%       97%
+  0.75      25      39%      100%
+  0.80      19      30%      100%
+  0.85      15      23%      100%
+  0.90      13      20%      100%
+  0.95      12      19%      100%
+  0.99       7      11%      100%
+  → cumulative threshold 0.60: precision 97% on 37 prediction(s), 58% of the corpus
+  → holds-from-there-on threshold (not used) 0.60: precision 97% on 37 prediction(s), 58% of the corpus
+SKILL lax — precision of the predictions kept at each confidence cut-off
+  cut-off  kept  coverage  precision
+  0.30      59      92%       83%
+  0.40      49      77%       88%
+  0.50      45      70%       91%
+  0.60      37      58%       97%
+  0.65      33      52%       97%
+  0.70      29      45%       97%
+  0.75      25      39%      100%
+  0.80      19      30%      100%
+  0.85      15      23%      100%
+  0.90      13      20%      100%
+  0.95      12      19%      100%
+  0.99       7      11%      100%
+  → cumulative threshold 0.50: precision 91% on 45 prediction(s), 70% of the corpus
+  → holds-from-there-on threshold (not used) 0.50: precision 91% on 45 prediction(s), 70% of the corpus
+
+VERDICT: ROUTABLE — tier threshold 0.80; capped downgrades ≥ 0.9 in both passes. routeByJev may be enabled in a wrapper (ROUTE_TIER_THRESHOLD = 0.8).

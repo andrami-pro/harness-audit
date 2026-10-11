@@ -1,7 +1,7 @@
 {
   "name": "harness-guards",
   "description": "Protect and observe any Claude Code session: write-time guards (destructive-command gate, secret scan, --no-verify block), a repeat-tool loop-hygiene reminder, loop telemetry, and /dashboard-harness and /session-review, a zero-token auditor read from the local transcripts that never leaves the machine.",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "author": {
     "name": "Andrés Ramírez · andrami",
     "url": "https://andrami.pro"

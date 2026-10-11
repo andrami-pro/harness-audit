@@ -2385,6 +2385,42 @@ check('prompt-router emits one advisory UserPromptSubmit context under budget an
   return `silent without key / on slash / on other events · skill + tier suggested from mock · slow API dropped in ${ms}ms · never decides`;
 });
 
+// skill-inventory read only the line of the `description:` key, so a YAML block scalar came back as its
+// indicator: 26 of the 102 skills on the author's machine reached the router described as ">-" or ">"
+// (docs/harness-dev/loop-runs/2026-10-10-jev-router-before-fix.skills.json). Both shipped copies are run.
+//
+// Negative control (2026-10-10, applied, observed, reverted — exit 1):
+//   frontmatterDescription() returns the key's own line, block scalar or not ...........................
+//     "plugins/harness-guards/scripts/skill-inventory.js: folded (>) read as ">" — the text is on the indented lines below the key"
+check('skill-inventory reads a folded (>, >-) and a literal (|) description, not the indicator', () => {
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'skill-inv-'));
+  const cases = {
+    folded: ['>', 'description: >\n  Rewrites a draft so it reads\n  as a person wrote it.\nname: folded', 'Rewrites a draft so it reads as a person wrote it.'],
+    'folded-strip': ['>-', 'name: folded-strip\ndescription: >-\n  Folded, stripped.\n\n  Second paragraph.\nmetadata:\n  a: 1', 'Folded, stripped. Second paragraph.'],
+    literal: ['|', 'description: |\n  Line one.\n  Line two.\nname: literal', 'Line one. Line two.'],
+    plain: ['plain', 'name: plain\ndescription: A plain one-liner', 'A plain one-liner'],
+    quoted: ['quoted', 'description: "Quoted, with: a colon"\nname: quoted', 'Quoted, with: a colon'],
+  };
+  try {
+    for (const [name, [, fm]] of Object.entries(cases)) {
+      fs.mkdirSync(path.join(repo, '.claude', 'skills', name), { recursive: true });
+      fs.writeFileSync(path.join(repo, '.claude', 'skills', name, 'SKILL.md'), `---\n${fm}\n---\n# ${name}\n`);
+    }
+    for (const p of ['harness-guards', 'harness-loops']) {
+      const rel = `plugins/${p}/scripts/skill-inventory.js`;
+      delete require.cache[path.join(ROOT, rel)];
+      const { skills } = require(path.join(ROOT, rel)).inventorySkills(repo, { warn: () => {} });
+      for (const [name, [shape, , want]] of Object.entries(cases)) {
+        const got = (skills.find((s) => s.source === 'project' && s.name === name) || {}).description;
+        if (got !== want) throw new Error(`${rel}: ${name} (${shape}) read as ${JSON.stringify(got)} — the text is on the indented lines below the key`);
+      }
+    }
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+  return 'both copies: > · >- · | · plain · quoted each read as their text, and a following key ends the block';
+});
+
 check('jev-nudge fires once a day and only while Jev is off; jev-setup reports status by exit code', () => {
   const nudge = path.join(ROOT, 'plugins/harness-loops/scripts/hooks/jev-nudge.js');
   const setup = path.join(ROOT, 'plugins/harness-loops/scripts/jev-setup.js');
@@ -2433,7 +2469,13 @@ check('README discloses Jev: the env var, the endpoint, what leaves the machine,
   const sec = t.split(/^## Jev/m)[1].split(/^## /m)[0];
   if (!/transcript/i.test(sec) || !/never/i.test(sec)) throw new Error('§Jev does not say transcripts never leave the machine');
   if (!/United States|US-hosted|hosted in the US/.test(sec) || !/SCC/.test(sec)) throw new Error('§Jev does not state where the data goes and under which transfer clauses');
-  return '§Jev present · env var, endpoint, setup command, degradation mode, both hooks, data flow and residency disclosed';
+  // The operator reads the tier criterion in the README; Jev reads it in jev.js. One wording, or the
+  // README describes a router that is not the one running.
+  for (const [tier, criterion] of Object.entries(require(path.join(ROOT, 'plugins/harness-loops/scripts/jev.js')).TIERS)) {
+    if (!sec.includes(`**${tier}** — ${criterion}`)) throw new Error(`§Jev does not print the ${tier} criterion exactly as jev.js TIERS has it`);
+  }
+  if (!/routeByJev/.test(sec) || !/jev_router_eval\.js/.test(sec)) throw new Error('§Jev does not say what routeByJev sends or what the router eval measured');
+  return '§Jev present · env var, endpoint, setup command, degradation mode, both hooks, data flow and residency disclosed · tier criterion matches jev.js';
 });
 
 // The only check here that touches the network, and it is opt-in twice: a key AND JEV_LIVE=1.
@@ -2651,6 +2693,97 @@ check('develop-phase loop honours every wrapper config key a fork used to hard-c
 //
 // Negative control (2026-10-10, reverted): the catch made unconditional — exit 1, "an error from inside
 // the loop fell through to the next route — the seats would run twice".
+// routeByJev hands the implementer's model to a classifier, and the corpus showed the dangerous error is
+// the downgrade (opus work called haiku at p=0.99). So jev.js decideTier() caps it — one tier at most,
+// never below sonnet — and the loop keeps the line-up, with the reason written down, on everything else: a
+// confidence under the measured threshold, a tier the seat relays outside those rules, a tier that would make
+// the reviewer review its own family, a dead seat, no key. The rules run as a pure function, the loop with
+// stub seats, the CLI against the mock.
+//
+// Negative controls (2026-10-10 and 2026-10-11, each applied, observed, reverted — all exit 1):
+//   the D25a clause dropped from the routing decision ................................................
+//     "a routed fable implementer shares the reviewer's family — D25a outranks the router (got ["fable",false])"
+//   decideTier() without the sonnet floor ...........................................................
+//     "decideTier(sonnet ← haiku p=0.9): implementer sonnet, Jev haiku — got haiku, want null: never below sonnet"
+check('develop-phase routeByJev: a downgrade goes one tier at most and never below sonnet, only at or above the threshold, never into the reviewer\'s family, and the run records why', () => {
+  const cli = path.join(ROOT, 'plugins/harness-loops/scripts/jev.js');
+  const { decideTier, ROUTE_TIER_THRESHOLD: T } = require(cli);
+  const rules = [
+    ['opus', 'haiku', 0.99, 'sonnet', 'one tier down at most'],
+    ['opus', 'sonnet', 0.95, 'sonnet', 'a one-tier downgrade above the threshold'],
+    ['sonnet', 'haiku', 0.9, null, 'never below sonnet'],
+    ['fable', 'haiku', 0.95, 'opus', 'one tier down at most'],
+    ['opus', 'fable', 0.95, 'fable', 'an upgrade is not capped'],
+    ['opus', 'sonnet', 0.5, null, 'under the threshold nothing moves'],
+    ['claude-opus-5-5', 'haiku', 0.95, 'sonnet', 'a full model id is read as its tier'],
+    ['openrouter/acme/model-x', 'sonnet', 0.95, null, 'no Claude tier to route from'],
+  ];
+  for (const [configured, suggested, p, want, why] of rules) {
+    const got = decideTier({ configured, suggested, p, threshold: 0.8 }).tier;
+    if (got !== want) throw new Error(`decideTier(${configured} ← ${suggested} p=${p}): implementer ${configured}, Jev ${suggested} — got ${got}, want ${want}: ${why}`);
+  }
+  if (decideTier({ configured: 'opus', suggested: 'sonnet', p: 0.99, threshold: null }).tier !== null) throw new Error('with no measured threshold decideTier still routed');
+  const harness = (file) => {
+    const src = require('fs').readFileSync(file, 'utf8').replace(/^export /m, '');
+    const AsyncFn = Object.getPrototypeOf(async function () {}).constructor;
+    const pf = { exitCode: 0, skipped: [], failedCheck: null, tail: '' };
+    const run = async (args, route) => {
+      const calls = [];
+      const agent = async (prompt, o) => {
+        calls.push({ label: String(o.label), model: o.model, prompt });
+        const l = String(o.label);
+        return l === 'route' ? route : l === 'preflight' ? pf : l.startsWith('review') ? '[PASS] a — x\nAPPROVED' : l === 'scout' ? 'B' : l === 'analyst' ? 'P' : 'impl';
+      };
+      const out = await new AsyncFn('args', 'agent', 'log', 'phase', src)({ task: 'T', maxIter: 1, routeByJev: true, ...args }, agent, () => {}, () => {});
+      return { r: out.routing, impl: (calls.find((c) => c.label.startsWith('impl')) || {}).model, calls };
+    };
+    const ok = { enabled: true, suggested: 'haiku', p: 0.99, threshold: 0.8, tier: 'sonnet', reason: 'p=0.99 ≥ 0.8: haiku → sonnet (one tier down at most)', error: null };
+    (async () => {
+      const routed = await run({}, ok);
+      const kept = await run({}, { ...ok, suggested: 'sonnet', p: 0.7, tier: null, reason: 'p=0.7 < threshold 0.8' });
+      const relayed = await run({}, { ...ok, tier: 'haiku' });
+      const family = await run({}, { ...ok, suggested: 'fable', tier: 'fable', reason: 'p=0.99 ≥ 0.8: fable' });
+      const dead = await run({}, null);
+      const off = await run({}, { ...ok, enabled: false, suggested: null, p: null, tier: null, reason: null, error: 'Jev off (no TYPESAFE_API_KEY)' });
+      const unset = await run({ routeByJev: undefined }, ok);
+      const custom = await run({ jevScript: '/opt/jev.js', task: 'two\nlines', models: { implementer: 'claude-opus-5-5' } }, ok);
+      console.log(JSON.stringify({
+        routed: [routed.impl, routed.r.decision, routed.r.configured, routed.r.suggested, /one tier down/.test(routed.r.reason), routed.calls[0].label, routed.calls[0].model],
+        kept: [kept.impl, kept.r.decision, kept.r.reason],
+        relayed: [relayed.impl, /outside jev\.js's rules/.test(relayed.r.reason)],
+        family: [family.impl, /reviewer's family/.test(family.r.reason)],
+        dead: [dead.impl, dead.r.decision],
+        off: [off.impl, off.r.reason],
+        unset: [unset.r, unset.calls.some((c) => c.label === 'route')],
+        prompt: [custom.calls[0].prompt.includes("node /opt/jev.js route --configured claude-opus-5-5 <<'JEV_TASK_END'\ntwo\nlines\nJEV_TASK_END")],
+      }));
+    })().catch((e) => console.log('THREW ' + e.message));
+  };
+  const out = execFileSync('node', ['-e', `(${harness})(process.argv[1])`, path.join(ROOT, DEVELOP_PHASE)], { encoding: 'utf8' }).trim();
+  if (out.startsWith('THREW')) throw new Error(`the develop-phase loop throws with routeByJev — ${out.slice(6)}`);
+  const r = JSON.parse(out);
+  const want = {
+    routed: [['sonnet', 'jev', 'opus', 'haiku', true, 'route', 'haiku'], "jev.js's capped tier did not reach the implementer, or the route seat is not the first, haiku seat"],
+    kept: [['opus', 'lineup', 'p=0.7 < threshold 0.8'], "a tier jev.js kept did not keep the line-up with jev.js's reason"],
+    relayed: [['opus', true], 'a seat relaying haiku past the sonnet floor routed the implementer'],
+    family: [['opus', true], "a routed fable implementer shares the reviewer's family — D25a outranks the router"],
+    dead: [['opus', 'lineup'], 'a dead route seat did not fall back to the line-up'],
+    off: [['opus', 'Jev off (no TYPESAFE_API_KEY)'], 'without a key the run did not keep the line-up and say why'],
+    unset: [[null, false], 'routeByJev unset still ran the route seat — it is opt-in'],
+    prompt: [[true], 'the route seat does not pass the configured implementer and the task on stdin to the configured jev.js'],
+  };
+  for (const [k, [v, why]] of Object.entries(want)) {
+    if (JSON.stringify(r[k]) !== JSON.stringify(v)) throw new Error(`${why} (got ${JSON.stringify(r[k])})`);
+  }
+  const parse = (x) => { try { return JSON.parse(x.out); } catch { throw new Error(`jev.js route printed no JSON: ${x.out} ${x.err}`); } };
+  const offCli = parse(runNode([cli, 'route', '--configured', 'opus'], jevEnv().env, 'rename the constant'));
+  if (offCli.enabled !== false || !/Jev off/.test(offCli.error)) throw new Error(`jev.js route without a key: ${JSON.stringify(offCli)}`);
+  const onCli = parse(runNode([cli, 'route', '--configured', 'opus'], jevEnv({ JEV_MOCK_FILE: jevMock('mock-router.json') }).env, 'rename the constant'));
+  if (onCli.suggested !== 'sonnet' || onCli.p !== 0.62 || onCli.threshold !== T || onCli.tier !== (0.62 >= T ? 'sonnet' : null)) throw new Error(`jev.js route with the mock: ${JSON.stringify(onCli)}`);
+  if (runNode([cli, 'route'], jevEnv().env, 'x').code !== 1) throw new Error('jev.js route without --configured did not refuse — the caps need the configured tier');
+  return `caps: one tier down, sonnet floor, upgrades free · threshold ${T} · relayed haiku, reviewer's family, dead seat, no key → line-up with the reason · opt-in`;
+});
+
 check('develop-phase wrapper: config + per-run args reach the loop, a missing copy falls back, an inner error does not', () => {
   const tpl = read('plugins/harness-audit/skills/harness-audit/develop-phase-wrapper.js');
   const left = tpl.match(/__[A-Z]+__/g) || [];
@@ -2719,6 +2852,9 @@ check('sync-workflows keeps the stable copy equal to the shipped loop, and only 
   try {
     execFileSync('node', [hook], { input: start, env, stdio: 'pipe' });
     if (fs.readFileSync(target, 'utf8') !== read(DEVELOP_PHASE)) throw new Error('first session start did not copy the loop');
+    if (fs.readFileSync(path.join(dir, 'harness', 'jev.js'), 'utf8') !== read('plugins/harness-loops/scripts/jev.js')) {
+      throw new Error("jev.js was not copied next to the loop — routeByJev's seat runs ~/.claude/harness/jev.js");
+    }
     const before = fs.statSync(target).mtimeMs;
     execFileSync('node', [hook], { input: start, env, stdio: 'pipe' });
     if (fs.statSync(target).mtimeMs !== before) throw new Error('an identical copy was rewritten — every session start would touch it');
@@ -2791,6 +2927,82 @@ check('jev dedupe eval — live, against api.typesafe.ai', () => {
   const r = runNode([path.join(ROOT, 'benchmarks/jev_dedupe_eval.js')], process.env);
   const verdict = (r.out.match(/^VERDICT: .*$/m) || [''])[0];
   if (r.code !== 0) throw new Error(verdict || `eval exited ${r.code}: ${r.err.trim()}`);
+  return verdict.replace(/^VERDICT: /, '');
+});
+
+// The router eval decides whether routeByJev may act, so its arithmetic is pinned offline: the corpus stays
+// labelled against the frozen skill snapshot and wide enough to measure every tier; without a key it
+// measures nothing (exit 3); it always runs two passes; a mock that answers "sonnet, p=0.62" to everything
+// scores exactly the sonnet rows and is not routable. The threshold is the CUMULATIVE reading — the lowest
+// cut-off whose kept predictions (≥ MIN_N) reach 0.9 together, the decision "route everything above p" —
+// and two passes combine to the higher one. Downgrades replay jev.js decideTier(), and no downgrade at all
+// (fewer than MIN_N) is no evidence for routing.
+//
+// Negative control (2026-10-11, applied, observed, reverted — exit 1):
+//   sweep() back to the holds-from-there-on reading (threshold = holdThreshold) .........................
+//     "the threshold is not the cumulative one — 'route everything above p' keeps 37/39 at 0.4 (got none)"
+check('jev router eval: corpus labelled against the snapshot, two passes, cumulative threshold, capped downgrades scored', () => {
+  const script = path.join(ROOT, 'benchmarks/jev_router_eval.js');
+  for (const f of ['benchmarks/jev_router_eval.js', 'benchmarks/fixtures/router_corpus.jsonl', 'benchmarks/fixtures/router_skills.json']) mustExist(f);
+  const { readCorpus, validate: validateCorpus, sweep, downgrades, combine, evaluate } = require(script);
+  const rows = readCorpus(path.join(ROOT, 'benchmarks/fixtures/router_corpus.jsonl'));
+  const errors = validateCorpus(rows, JSON.parse(read('benchmarks/fixtures/router_skills.json')));
+  if (errors.length) throw new Error(`corpus invalid: ${errors[0]}`);
+  const tiers = Object.fromEntries(Object.keys(require(path.join(ROOT, 'plugins/harness-loops/scripts/jev.js')).TIERS).map((t) => [t, rows.filter((r) => r.tier === t).length]));
+  if (Object.values(tiers).some((n) => n < 10)) throw new Error(`a tier has fewer than 10 rows: ${JSON.stringify(tiers)}`);
+  const withSkill = rows.filter((r) => r.skill !== 'none').length;
+  if (withSkill < 15 || rows.length - withSkill < 15) throw new Error(`skill/none too lopsided: ${withSkill}/${rows.length - withSkill}`);
+  const off = runNode([script], jevEnv().env);
+  if (off.code !== 3 || !/NOT MEASURED/.test(off.out)) throw new Error(`without a key the eval exited ${off.code}: ${off.out.trim()}`);
+  const mock = runNode([script], jevEnv({ JEV_MOCK_FILE: jevMock('mock-router.json') }).env);
+  const sonnet = ((100 * tiers.sonnet) / rows.length).toFixed(1);
+  if (mock.code !== 1 || !mock.out.includes(`× 2 passes`) || !mock.out.includes(`TIER top-1 ${sonnet}% [${sonnet}%–${sonnet}%]`) || !/VERDICT: NOT ROUTABLE/.test(mock.out)) {
+    throw new Error(`a mock that always answers sonnet did not score ${sonnet}% over two passes and stay unroutable: exit ${mock.code} ${mock.out.split('\n')[1] || mock.err.trim()}`);
+  }
+  const mk = (spec, label = 'opus') => {
+    const rs = []; const ps = [];
+    for (const [n, p, right] of spec) for (let i = 0; i < n; i++) { rs.push({ tier: label }); ps.push({ tier: { choice: right ? label : 'haiku', p } }); }
+    return [rs, ps];
+  };
+  // a: 5 wrong at 0.35, 10 right at 0.5, 9 right at 0.97, 1 wrong at 0.995 → 0.3 keeps 19/25, 0.4 keeps 19/20.
+  // b: 5 wrong at 0.35, 30 right at 0.5, 7 right and 2 wrong at 0.97 → 0.4 keeps 37/39 (95%), yet 0.6 and up
+  //    keep 7/9: cumulative 0.4, holds-from-there-on none. c: only 4 predictions ever clear 0.4 → none.
+  const th = (spec) => sweep(...mk(spec), 'tier', false);
+  const a = th([[5, 0.35, false], [10, 0.5, true], [9, 0.97, true], [1, 0.995, false]]);
+  const b = th([[5, 0.35, false], [30, 0.5, true], [7, 0.97, true], [2, 0.97, false]]);
+  const c = th([[10, 0.35, false], [4, 0.995, true]]);
+  if (!a.threshold || a.threshold.t !== 0.4) throw new Error(`19 of 20 right from 0.4 up gave threshold ${a.threshold && a.threshold.t}, expected 0.4`);
+  if (!b.threshold || b.threshold.t !== 0.4) throw new Error(`the threshold is not the cumulative one — 'route everything above p' keeps 37/39 at 0.4 (got ${b.threshold ? b.threshold.t : 'none'})`);
+  if (b.holdThreshold !== null) throw new Error('the holds-from-there-on reading accepted a cut-off that drops to 78% above it');
+  if (c.threshold !== null) throw new Error(`a cut-off with fewer than MIN_N predictions vouched for routing (${c.threshold.t})`);
+  // Downgrades from opus at threshold 0.8: haiku→sonnet on a haiku task (right), haiku→sonnet on an opus task
+  // (wrong), sonnet on a sonnet task (right); under the threshold, the configured tier and an upgrade are not scored.
+  const dRows = ['haiku', 'opus', 'sonnet', 'opus', 'fable', 'opus'].map((tier, i) => ({ id: `d${i}`, tier }));
+  const dPreds = [['haiku', 0.9], ['haiku', 0.99], ['sonnet', 0.85], ['sonnet', 0.7], ['fable', 0.9], ['opus', 0.95]].map(([choice, p]) => ({ tier: { choice, p } }));
+  const d = downgrades(dRows, dPreds, 0.8);
+  if (d.decisions !== 3 || d.right !== 2 || d.upgrades !== 1 || d.wrong[0].id !== 'd1') throw new Error(`downgrade replay wrong: ${JSON.stringify({ decisions: d.decisions, right: d.right, upgrades: d.upgrades })}`);
+  // Two passes: thresholds 0.4 and 0.5 combine to 0.5; all-sonnet tasks routed down from opus → routable.
+  // A corpus Jev reads perfectly but never downgrades has no evidence for the caps → not routable.
+  const pass = (spec, label) => {
+    const [rs, ps] = mk(spec, label);
+    const full = rs.map((r, i) => ({ ...r, id: `x${i}`, skill: 'none' }));
+    return [full, evaluate(full, { none: 'x' }, ps.map((p) => ({ ...p, skill: { choice: 'none', p: 1 }, ms: 1 })))];
+  };
+  const [r1, e1] = pass([[5, 0.35, false], [20, 0.5, true]], 'sonnet');
+  const [, e2] = pass([[5, 0.45, false], [20, 0.55, true]], 'sonnet');
+  const both = combine(r1, [e1, e2]);
+  if (both.threshold !== 0.5 || !both.routable) throw new Error(`two passes at 0.4 and 0.5 gave threshold ${both.threshold}, routable ${both.routable} — want 0.5, routable`);
+  const [r3, e3] = pass([[20, 0.9, true]], 'opus');
+  if (combine(r3, [e3, e3]).routable) throw new Error('no downgrade at all counted as evidence that downgrades are safe');
+  return `${rows.length} prompts (${Object.entries(tiers).map(([t, n]) => `${t} ${n}`).join(' / ')} · ${withSkill} with a skill) · off → 3 · always-sonnet → ${sonnet}% ×2, not routable · cumulative threshold, higher pass wins · downgrades replayed`;
+});
+
+check('jev router eval — live, against api.typesafe.ai', () => {
+  if (process.env.JEV_LIVE !== '1') skip('set JEV_LIVE=1 (and a TYPESAFE_API_KEY) to measure the router live');
+  if (!require(path.join(ROOT, 'plugins/harness-loops/scripts/jev.js')).isEnabled()) skip('no TYPESAFE_API_KEY — nothing to measure');
+  const r = runNode([path.join(ROOT, 'benchmarks/jev_router_eval.js')], process.env);
+  const verdict = (r.out.match(/^VERDICT: .*$/m) || [''])[0];
+  if (r.code === 2 || r.code === 3 || !verdict) throw new Error(verdict || `eval exited ${r.code}: ${r.err.trim()}`);
   return verdict.replace(/^VERDICT: /, '');
 });
 

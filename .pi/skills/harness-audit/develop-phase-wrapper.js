@@ -6,7 +6,7 @@ export const meta = {
 // This file is the project's config, and only that. The loop (scout → analyst → implementer → reviewer →
 // preflight → commit) is one global script that the harness-loops plugin keeps current, so an improvement
 // reaches every project at once. Change the config here; never copy the loop into the project.
-// Per-run args override any key below: { task, maxIter, preparer, reviewerModel, analystModel, commit, … }
+// Per-run args override any key below: { task, maxIter, preparer, reviewerModel, analystModel, commit, routeByJev, … }
 const CONFIG = {
   lang: '__LANG__',
   preflight: '__PREFLIGHT__',
@@ -14,6 +14,9 @@ const CONFIG = {
   context: __CONTEXT__,
   forbidden: __FORBIDDEN__,
   commit: false,
+  // true: Jev may move the implementer's tier when its confidence clears the measured threshold — down one tier
+  // at most and never below sonnet. Read README §Jev (harness-loops) first; the run's `routing` says what it did.
+  routeByJev: false,
 }
 
 // Where the global script is. workflow() only loads a file the session can already read, so first the copy

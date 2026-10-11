@@ -136,6 +136,8 @@ if [ -n "$DEST" ]; then
       WF_DEST="${HARNESS_WORKFLOWS_DIR:-$HOME/.claude/harness}"
       mkdir -p "$WF_DEST"
       cp "$LOOPS_DIR"/workflows/*.js "$WF_DEST"/
+      # routeByJev's seat runs `node ~/.claude/harness/jev.js route`.
+      cp "$LOOPS_DIR"/scripts/jev.js "$WF_DEST"/
       echo "✓ global develop-phase loop copied to $WF_DEST — re-run after pulling to update it"
       ;;
   esac

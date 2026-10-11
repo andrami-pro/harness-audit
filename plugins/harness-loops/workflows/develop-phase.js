@@ -2,6 +2,7 @@ export const meta = {
   name: 'develop-phase',
   description: 'Scout → Analyst → Implementer → Reviewer adversarial loop against harness-rubric.md, a Preflight gate, then an optional commit. Called through a project wrapper that passes its config.',
   phases: [
+    { title: 'Route', detail: 'routeByJev only: ask Jev which tier the implementer deserves', model: 'haiku' },
     { title: 'Scout', detail: 'Gather context into a short brief (read-only)', model: 'haiku' },
     { title: 'Plan', detail: 'Turn the brief into a short plan, or stop on a blocker', model: 'opus' },
     { title: 'Implement', detail: 'Write code against the PRD + brief + plan', model: 'opus' },
@@ -34,6 +35,10 @@ export const meta = {
 //   integrate       the command that integrates a committed branch, named in nextStep
 //   doneStep        what the human does with an approved, green, uncommitted change (default: git add -p && git
 //                   commit) — a project whose code git does not track names its own way to keep the change
+//   routeByJev      true: a haiku seat first asks Jev which tier the task deserves; the implementer takes it at or
+//                   above the threshold jev.js carries (measured by benchmarks/jev_router_eval.js), a downgrade one
+//                   tier at most and never below sonnet; the configured model otherwise. Off unless a wrapper sets it
+//   jevScript       the jev.js that seat runs (default ~/.claude/harness/jev.js, kept current by sync-workflows)
 const cfg = args && typeof args === 'object' ? args : { task: typeof args === 'string' ? args : undefined }
 const task = cfg.task ?? 'implement the active task in TASKS.md or equivalent'
 const maxIter = cfg.maxIter ?? 5
@@ -62,9 +67,10 @@ const BRIDGE = cfg.externalReview ?? 'scripts/external-review.sh'
 
 log(`Task: "${task}" · max ${maxIter} iter · ${preparer ? `Scout=${MODELS.scout} · Analyst=${MODELS.analyst} · ` : ''}Implementer=${MODELS.implementer} · Reviewer=${MODELS.reviewer}`)
 
+let routing = null
 // Every early exit is a 'blocked' handoff, never an exception: the caller reads one contract.
 const stop = (summary, blocker, iterations = 0, evidence = []) => ({
-  task, iterations, approved: false, preflightPassed: false, commit: null,
+  task, iterations, approved: false, preflightPassed: false, commit: null, routing,
   handoff: { status: 'blocked', summary, evidence, blocker },
   nextStep: blocker,
 })
@@ -85,6 +91,52 @@ const familyOf = (m) => {
 if (familyOf(MODELS.reviewer) === familyOf(MODELS.implementer)) {
   return stop('Reviewer and implementer share a model family',
     `Both resolve to "${familyOf(MODELS.reviewer)}" — change reviewerModel to another family (D25a has no override)`)
+}
+
+// routeByJev: the runtime has no shell, so a seat runs `jev.js route` and reports its JSON as fields. jev.js
+// decides the tier — the measured threshold, and a downgrade capped at one tier and at sonnet, because routing
+// down costs quality where routing up only costs money. The loop re-checks what a relaying seat could get
+// wrong and keeps D25a: never the reviewer's family. Anything else keeps the line-up; `routing` says why.
+if (cfg.routeByJev === true) {
+  phase('Route')
+  const ROUTE_SCHEMA = {
+    type: 'object',
+    additionalProperties: false,
+    required: ['enabled', 'suggested', 'p', 'threshold', 'tier', 'reason', 'error'],
+    properties: {
+      enabled: { type: 'boolean' },
+      suggested: { type: ['string', 'null'] },
+      p: { type: ['number', 'null'] },
+      threshold: { type: ['number', 'null'] },
+      tier: { type: ['string', 'null'] },
+      reason: { type: ['string', 'null'] },
+      error: { type: ['string', 'null'] },
+    },
+  }
+  const configured = MODELS.implementer
+  const r = await agent(
+    `Run exactly this and change nothing — it prints one JSON line:
+node ${cfg.jevScript ?? '~/.claude/harness/jev.js'} route --configured ${configured} <<'JEV_TASK_END'
+${task}
+JEV_TASK_END
+Return its seven fields exactly as printed. If the command fails or prints no JSON: enabled=false, suggested=null,
+p=null, threshold=null, tier=null, reason=null, error=<the error text>.`,
+    { model: 'haiku', label: 'route', phase: 'Route', schema: ROUTE_SCHEMA }
+  )
+  const rank = (t) => ['haiku', 'sonnet', 'opus', 'fable'].indexOf(t)
+  const reason = !r ? 'the route seat returned nothing'
+    : r.error ? r.error
+    : !r.tier ? (r.reason || 'jev.js kept the configured tier')
+    : rank(r.tier) < rank('sonnet') || r.threshold == null || !(r.p >= r.threshold)
+      ? `the seat reported ${r.tier} at p=${r.p}, threshold ${r.threshold} — outside jev.js's rules, not applied`
+    : familyOf(r.tier) === familyOf(MODELS.reviewer) ? `${r.tier} shares the reviewer's family (D25a)`
+    : null
+  if (!reason) MODELS.implementer = r.tier
+  routing = {
+    suggested: r?.suggested ?? null, p: r?.p ?? null, threshold: r?.threshold ?? null,
+    decision: reason ? 'lineup' : 'jev', implementer: MODELS.implementer, configured, reason: reason ?? r.reason,
+  }
+  log(`Route: implementer=${MODELS.implementer} (${routing.decision}) — ${routing.reason}`)
 }
 
 // Scout and Plan run once, outside the loop. They are a cost optimisation, not a gate: if a seat dies the
@@ -296,7 +348,7 @@ const LABEL = 'Reported by the implementer/reviewer seats — not independently 
 const integrate = cfg.integrate ? `, then ${cfg.integrate}` : ''
 
 return {
-  task, iterations: iteration, approved, preflightPassed, commit, handoff,
+  task, iterations: iteration, approved, preflightPassed, commit, handoff, routing,
   nextStep: LABEL + (approved && preflightPassed
     ? (commit?.committed ? `committed ${commit.hash}${integrate}` : `${cfg.doneStep ?? 'git add -p && git commit'}${integrate}`)
     : approved && preflight?.exitCode === 0 ? 'Preflight skipped checks — supply what they need and re-run; a SKIP is not a PASS'

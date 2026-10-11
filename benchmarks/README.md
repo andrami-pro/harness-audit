@@ -60,3 +60,8 @@ SQL injection, `dangerouslySetInnerHTML`, import-confinement break. Grow to ≥2
    `verifier-protocol.md` Step-6 negative control.
 4. **The scaffold is committed; the claim is not made until the run exists.** This file will carry
    the raw numbers + the exact command once a K≥30 run has been executed. It does not yet.
+
+## Jev evals
+
+- `benchmarks/jev_dedupe_eval.js` measures whether loop-gate's dedupe tells a restatement from a new finding, and at which threshold, by re-thresholding one labelled corpus offline. Run `node benchmarks/jev_dedupe_eval.js [--corpus <path>] [--json <out>]`. Exit codes: 0 production thresholds hide no new blocker or major; 1 they hide at least one; 2 corpus malformed; 3 Jev off (no TYPESAFE_API_KEY), nothing measured.
+- `benchmarks/jev_router_eval.js` measures whether the prompt-router picks the right skill and tier, and from which confidence its tier can be acted on, over hand-labelled operator prompts. Run `node benchmarks/jev_router_eval.js [--corpus <jsonl>] [--skills <json>] [--json <out>]`, or `--write-skills <out> [--cwd <dir>]` to rebuild the skill snapshot. It always runs the corpus twice and reports mean and range. Exit codes: 0 measured, a tier threshold exists and capped downgrades keep the precision bar, so routeByJev may be enabled; 1 measured, one of the two fails; 2 corpus or skill snapshot malformed; 3 Jev off (no TYPESAFE_API_KEY), nothing measured.

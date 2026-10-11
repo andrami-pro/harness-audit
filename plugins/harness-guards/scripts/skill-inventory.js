@@ -14,6 +14,24 @@ const os = require('node:os');
 
 const stderrWarn = (m) => process.stderr.write(`warn: ${m}\n`);
 
+// The `description:` of a frontmatter block, whatever YAML shape it takes. A block scalar (`>`, `>-`,
+// `|`, `|+`…) keeps its text on the indented lines below the key, and a plain or quoted value may
+// continue on them: reading only the key's own line returned the indicator itself, and the router
+// offered Jev a quarter of the installed skills described as ">-".
+function frontmatterDescription(fm) {
+  const lines = fm.split('\n');
+  const i = lines.findIndex((l) => /^description:/.test(l));
+  if (i === -1) return '';
+  const head = lines[i].slice('description:'.length).trim();
+  const body = [];
+  for (const l of lines.slice(i + 1)) {
+    if (l.trim() && !/^\s/.test(l)) break;
+    body.push(l.trim());
+  }
+  const text = /^[>|][0-9+-]*$/.test(head) ? body.join(' ') : [head, ...body].join(' ');
+  return text.trim().replace(/^["']|["']$/g, '');
+}
+
 // What the skill's own files say: how much context it costs, when it was last touched, whether it
 // has ever been through a learning loop. Every field is read from disk; none is inferred.
 function skillFacts(file) {
@@ -26,8 +44,7 @@ function skillFacts(file) {
     words = text.split(/\s+/).filter(Boolean).length;
     ageDays = Math.floor((Date.now() - fs.statSync(md).mtimeMs) / 864e5);
     const fm = /^---\n([\s\S]*?)\n---/.exec(text);
-    const dm = fm && /^description:\s*["']?([\s\S]*?)["']?\s*$/m.exec(fm[1]);
-    if (dm) description = dm[1].replace(/\s+/g, ' ').slice(0, 160);
+    if (fm) description = frontmatterDescription(fm[1]).replace(/\s+/g, ' ').slice(0, 160);
   } catch { /* a command file or an unreadable skill: the facts stay empty, never guessed */ }
   let learnings = null;
   const lp = path.join(path.dirname(md), 'LEARNINGS.md');
@@ -103,4 +120,4 @@ function inventorySkills(repo, { warn = stderrWarn } = {}) {
   return { skills: out, roles };
 }
 
-module.exports = { inventorySkills, skillFacts };
+module.exports = { inventorySkills, skillFacts, frontmatterDescription };

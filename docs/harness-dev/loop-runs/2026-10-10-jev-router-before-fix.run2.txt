@@ -1,0 +1,106 @@
+jev router eval — 64 prompts · 102 skill options · 0 unanswered · 253786 input tokens
+latency p50 359ms · p95 710ms · 0 answer(s) slower than the hook's 1500ms budget (the hook drops those)
+
+TIER   top-1 73% (strict = lax: tiers carry no alternatives)
+  label    n  pred  precision  recall
+  haiku   14   17     65%      79%
+  sonnet  17   23     61%      82%
+  opus    18   13     85%      61%
+  fable   15   11    100%      73%
+  confusion (rows = label, columns = Jev):
+            haiku sonnet   opus  fable
+  haiku        11      3      0      0
+  sonnet        3     14      0      0
+  opus          3      4     11      0
+  fable         0      2      2     11
+
+SKILL  top-1 strict 75% · lax 81%
+  label                          n  pred  prec strict  prec lax  recall strict  recall lax
+  agents-sdk                      0    1        0%       0%           n/a        n/a
+  brand-storytelling              0    1        0%     100%           n/a        n/a
+  caveman:caveman                 1    0       n/a      n/a            0%         0%
+  caveman:caveman-commit          0    1        0%     100%           n/a        n/a
+  caveman:caveman-setup           0    1        0%       0%           n/a        n/a
+  caveman:investigate-first       0    1        0%     100%           n/a        n/a
+  codebase-design                 0    2        0%       0%           n/a        n/a
+  diagnosing-bugs                 2    1      100%     100%           50%       100%
+  framer-motion-animator          1    1      100%     100%          100%       100%
+  frontend-design                 0    4        0%      25%           n/a        n/a
+  golden-circle-advisor           1    0       n/a      n/a            0%       100%
+  grill-with-docs                 1    0       n/a      n/a            0%         0%
+  gtm-positioning-strategy        1    0       n/a      n/a            0%         0%
+  humanizer                       2    2      100%     100%          100%       100%
+  information-architecture        1    1      100%     100%          100%       100%
+  kandelio-email-test             0    1        0%       0%           n/a        n/a
+  learning-capture                0    1        0%       0%           n/a        n/a
+  linkedin-profile-optimizer      1    1      100%     100%          100%       100%
+  no-ai-design-slop               1    1      100%     100%          100%       100%
+  none                           42   34       94%      94%           76%        81%
+  prd-development                 2    2      100%     100%          100%       100%
+  skill-creator                   3    2      100%     100%           67%        67%
+  to-questionnaire                1    1      100%     100%          100%       100%
+  ui-ux-pro-max                   1    1      100%     100%          100%       100%
+  ux-squad                        1    1      100%     100%          100%       100%
+  web-scraping                    0    1        0%       0%           n/a        n/a
+  wrangler                        2    2      100%     100%          100%       100%
+  confusion, off the diagonal (label → Jev × count):
+    caveman:caveman → caveman:caveman-setup ×1
+    diagnosing-bugs → caveman:investigate-first ×1
+    golden-circle-advisor → brand-storytelling ×1
+    grill-with-docs → none ×1
+    gtm-positioning-strategy → web-scraping ×1
+    none → learning-capture ×1
+    none → kandelio-email-test ×1
+    none → caveman:caveman-commit ×1
+    none → frontend-design ×4
+    none → agents-sdk ×1
+    none → codebase-design ×2
+    skill-creator → none ×1
+
+TIER — precision of the predictions kept at each confidence cut-off
+  cut-off  kept  coverage  precision
+  0.30      64     100%       73%
+  0.40      64     100%       73%
+  0.50      59      92%       76%
+  0.60      50      78%       86%
+  0.65      47      73%       91%
+  0.70      42      66%       93%
+  0.75      38      59%       92%
+  0.80      34      53%       91%
+  0.85      29      45%       90%
+  0.90      24      38%       92%
+  0.95      16      25%       94%
+  0.99       9      14%       89%
+  → no cut-off keeps precision ≥ 0.9 on ≥ 5 predictions
+SKILL strict — precision of the predictions kept at each confidence cut-off
+  cut-off  kept  coverage  precision
+  0.30      60      94%       77%
+  0.40      50      78%       86%
+  0.50      44      69%       91%
+  0.60      35      55%       97%
+  0.65      31      48%       97%
+  0.70      28      44%       96%
+  0.75      24      38%      100%
+  0.80      18      28%      100%
+  0.85      16      25%      100%
+  0.90      14      22%      100%
+  0.95      11      17%      100%
+  0.99       5       8%      100%
+  → threshold 0.50: precision 91% on 44 prediction(s), 69% of the corpus
+SKILL lax — precision of the predictions kept at each confidence cut-off
+  cut-off  kept  coverage  precision
+  0.30      60      94%       83%
+  0.40      50      78%       90%
+  0.50      44      69%       95%
+  0.60      35      55%       97%
+  0.65      31      48%       97%
+  0.70      28      44%       96%
+  0.75      24      38%      100%
+  0.80      18      28%      100%
+  0.85      16      25%      100%
+  0.90      14      22%      100%
+  0.95      11      17%      100%
+  0.99       5       8%      100%
+  → threshold 0.40: precision 90% on 50 prediction(s), 78% of the corpus
+
+VERDICT: NOT ROUTABLE — no confidence cut-off keeps tier precision ≥ 0.9. routeByJev keeps the configured line-up.

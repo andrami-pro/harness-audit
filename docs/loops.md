@@ -255,6 +255,16 @@ that need not be an Anthropic model:
   `scripts/external-review.sh`: `pi` runs the review with read-only tools and the workflow decides from the last line.
   It needs `pi` on PATH and the provider key in the auth `pi` uses. The reviewer/implementer family rule (D25a) is also
   enforced at run time: the same family returns a `blocked` handoff before any seat runs.
+- **Route** (opt-in, `routeByJev: true`, off by default). Before any other seat, a Haiku seat runs
+  `node ~/.claude/harness/jev.js route --configured <implementer>` (sync-workflows keeps that copy current; `jevScript`
+  points elsewhere) with the task on stdin. `jev.js decideTier()` decides: Jev's tier at or above
+  `ROUTE_TIER_THRESHOLD` (0.80), a downgrade one tier at most and never below sonnet — routing down costs quality,
+  routing up only money. The loop re-checks what the seat relays and refuses a tier in the reviewer's family (D25a);
+  anything else — no key, a dead seat, a low confidence — keeps the line-up. The run returns `routing: { suggested, p,
+  threshold, decision, implementer, configured, reason }` and logs one line. Measured by `benchmarks/jev_router_eval.js`
+  (two passes, 64 prompts): tier right 91.0% at p ≥ 0.80 on 52% of the prompts; capped downgrades from opus right
+  95.3%. The one real run (2026-10-11) predates the threshold and routed nothing. Numbers and files:
+  [docs/harness-dev/loop-runs/2026-10-11-jev-router.md](harness-dev/loop-runs/2026-10-11-jev-router.md).
 
 **On Pi** the same loop is `scripts/develop-phase-pi.js` (Pi has no Workflow runtime). The loop is code, not a prompt:
 each seat is one `pi -p --mode json --no-session` call with its own tool allowlist, every model comes from the `pi`

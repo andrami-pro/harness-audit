@@ -1,0 +1,799 @@
+{
+  "mode": "jev",
+  "reason": null,
+  "pairs": 34,
+  "requests": 1,
+  "production": {
+    "t": 0.85,
+    "tp": 8,
+    "fp": 0,
+    "fn": 9,
+    "tn": 14,
+    "fpBySeverity": {
+      "blocker": 0,
+      "major": 0,
+      "minor": 0
+    },
+    "wrongMatch": 0,
+    "fpCases": [],
+    "fnCases": [
+      {
+        "id": "c02",
+        "kind": "moved-line",
+        "severity": "major",
+        "p": 0.57
+      },
+      {
+        "id": "c08",
+        "kind": "partial-fix-remainder",
+        "severity": "blocker",
+        "p": 0.65
+      },
+      {
+        "id": "c11",
+        "kind": "multi-candidate",
+        "severity": "major",
+        "p": 0.75
+      },
+      {
+        "id": "c15",
+        "kind": "paraphrase",
+        "severity": "blocker",
+        "p": 0.59
+      },
+      {
+        "id": "c20",
+        "kind": "different-fix-same-defect",
+        "severity": "blocker",
+        "p": 0.61
+      },
+      {
+        "id": "c23",
+        "kind": "paraphrase",
+        "severity": "major",
+        "p": 0.65
+      },
+      {
+        "id": "c26",
+        "kind": "terse-restatement",
+        "severity": "blocker",
+        "p": 0.74
+      },
+      {
+        "id": "c28",
+        "kind": "multi-candidate",
+        "severity": "major",
+        "p": 0.51
+      },
+      {
+        "id": "c30",
+        "kind": "paraphrase",
+        "severity": "major",
+        "p": 0.25
+      }
+    ],
+    "precision": 1,
+    "recall": 0.47058823529411764
+  },
+  "table": [
+    {
+      "t": 0.5,
+      "tp": 12,
+      "fp": 1,
+      "fn": 5,
+      "tn": 13,
+      "fpBySeverity": {
+        "blocker": 0,
+        "major": 0,
+        "minor": 1
+      },
+      "wrongMatch": 4,
+      "fpCases": [
+        {
+          "id": "c19",
+          "kind": "hard-sibling-symbol",
+          "severity": "minor",
+          "p": 0.68
+        }
+      ],
+      "fnCases": [
+        {
+          "id": "c08",
+          "kind": "partial-fix-remainder",
+          "severity": "blocker",
+          "p": 0.65
+        },
+        {
+          "id": "c15",
+          "kind": "paraphrase",
+          "severity": "blocker",
+          "p": 0.59
+        },
+        {
+          "id": "c20",
+          "kind": "different-fix-same-defect",
+          "severity": "blocker",
+          "p": 0.61
+        },
+        {
+          "id": "c26",
+          "kind": "terse-restatement",
+          "severity": "blocker",
+          "p": 0.74
+        },
+        {
+          "id": "c30",
+          "kind": "paraphrase",
+          "severity": "major",
+          "p": 0.25
+        }
+      ],
+      "precision": 0.9230769230769231,
+      "recall": 0.7058823529411765
+    },
+    {
+      "t": 0.65,
+      "tp": 10,
+      "fp": 1,
+      "fn": 7,
+      "tn": 13,
+      "fpBySeverity": {
+        "blocker": 0,
+        "major": 0,
+        "minor": 1
+      },
+      "wrongMatch": 2,
+      "fpCases": [
+        {
+          "id": "c19",
+          "kind": "hard-sibling-symbol",
+          "severity": "minor",
+          "p": 0.68
+        }
+      ],
+      "fnCases": [
+        {
+          "id": "c02",
+          "kind": "moved-line",
+          "severity": "major",
+          "p": 0.57
+        },
+        {
+          "id": "c08",
+          "kind": "partial-fix-remainder",
+          "severity": "blocker",
+          "p": 0.65
+        },
+        {
+          "id": "c15",
+          "kind": "paraphrase",
+          "severity": "blocker",
+          "p": 0.59
+        },
+        {
+          "id": "c20",
+          "kind": "different-fix-same-defect",
+          "severity": "blocker",
+          "p": 0.61
+        },
+        {
+          "id": "c26",
+          "kind": "terse-restatement",
+          "severity": "blocker",
+          "p": 0.74
+        },
+        {
+          "id": "c28",
+          "kind": "multi-candidate",
+          "severity": "major",
+          "p": 0.51
+        },
+        {
+          "id": "c30",
+          "kind": "paraphrase",
+          "severity": "major",
+          "p": 0.25
+        }
+      ],
+      "precision": 0.9090909090909091,
+      "recall": 0.5882352941176471
+    },
+    {
+      "t": 0.75,
+      "tp": 9,
+      "fp": 0,
+      "fn": 8,
+      "tn": 14,
+      "fpBySeverity": {
+        "blocker": 0,
+        "major": 0,
+        "minor": 0
+      },
+      "wrongMatch": 1,
+      "fpCases": [],
+      "fnCases": [
+        {
+          "id": "c02",
+          "kind": "moved-line",
+          "severity": "major",
+          "p": 0.57
+        },
+        {
+          "id": "c08",
+          "kind": "partial-fix-remainder",
+          "severity": "blocker",
+          "p": 0.65
+        },
+        {
+          "id": "c15",
+          "kind": "paraphrase",
+          "severity": "blocker",
+          "p": 0.59
+        },
+        {
+          "id": "c20",
+          "kind": "different-fix-same-defect",
+          "severity": "blocker",
+          "p": 0.61
+        },
+        {
+          "id": "c23",
+          "kind": "paraphrase",
+          "severity": "major",
+          "p": 0.65
+        },
+        {
+          "id": "c26",
+          "kind": "terse-restatement",
+          "severity": "blocker",
+          "p": 0.74
+        },
+        {
+          "id": "c28",
+          "kind": "multi-candidate",
+          "severity": "major",
+          "p": 0.51
+        },
+        {
+          "id": "c30",
+          "kind": "paraphrase",
+          "severity": "major",
+          "p": 0.25
+        }
+      ],
+      "precision": 1,
+      "recall": 0.5294117647058824
+    },
+    {
+      "t": 0.85,
+      "tp": 8,
+      "fp": 0,
+      "fn": 9,
+      "tn": 14,
+      "fpBySeverity": {
+        "blocker": 0,
+        "major": 0,
+        "minor": 0
+      },
+      "wrongMatch": 0,
+      "fpCases": [],
+      "fnCases": [
+        {
+          "id": "c02",
+          "kind": "moved-line",
+          "severity": "major",
+          "p": 0.57
+        },
+        {
+          "id": "c08",
+          "kind": "partial-fix-remainder",
+          "severity": "blocker",
+          "p": 0.65
+        },
+        {
+          "id": "c11",
+          "kind": "multi-candidate",
+          "severity": "major",
+          "p": 0.75
+        },
+        {
+          "id": "c15",
+          "kind": "paraphrase",
+          "severity": "blocker",
+          "p": 0.59
+        },
+        {
+          "id": "c20",
+          "kind": "different-fix-same-defect",
+          "severity": "blocker",
+          "p": 0.61
+        },
+        {
+          "id": "c23",
+          "kind": "paraphrase",
+          "severity": "major",
+          "p": 0.65
+        },
+        {
+          "id": "c26",
+          "kind": "terse-restatement",
+          "severity": "blocker",
+          "p": 0.74
+        },
+        {
+          "id": "c28",
+          "kind": "multi-candidate",
+          "severity": "major",
+          "p": 0.51
+        },
+        {
+          "id": "c30",
+          "kind": "paraphrase",
+          "severity": "major",
+          "p": 0.25
+        }
+      ],
+      "precision": 1,
+      "recall": 0.47058823529411764
+    },
+    {
+      "t": 0.9,
+      "tp": 6,
+      "fp": 0,
+      "fn": 11,
+      "tn": 14,
+      "fpBySeverity": {
+        "blocker": 0,
+        "major": 0,
+        "minor": 0
+      },
+      "wrongMatch": 0,
+      "fpCases": [],
+      "fnCases": [
+        {
+          "id": "c02",
+          "kind": "moved-line",
+          "severity": "major",
+          "p": 0.57
+        },
+        {
+          "id": "c08",
+          "kind": "partial-fix-remainder",
+          "severity": "blocker",
+          "p": 0.65
+        },
+        {
+          "id": "c11",
+          "kind": "multi-candidate",
+          "severity": "major",
+          "p": 0.75
+        },
+        {
+          "id": "c15",
+          "kind": "paraphrase",
+          "severity": "blocker",
+          "p": 0.59
+        },
+        {
+          "id": "c18",
+          "kind": "paraphrase",
+          "severity": "minor",
+          "p": 0.86
+        },
+        {
+          "id": "c20",
+          "kind": "different-fix-same-defect",
+          "severity": "blocker",
+          "p": 0.61
+        },
+        {
+          "id": "c23",
+          "kind": "paraphrase",
+          "severity": "major",
+          "p": 0.65
+        },
+        {
+          "id": "c24",
+          "kind": "severity-down",
+          "severity": "minor",
+          "p": 0.86
+        },
+        {
+          "id": "c26",
+          "kind": "terse-restatement",
+          "severity": "blocker",
+          "p": 0.74
+        },
+        {
+          "id": "c28",
+          "kind": "multi-candidate",
+          "severity": "major",
+          "p": 0.51
+        },
+        {
+          "id": "c30",
+          "kind": "paraphrase",
+          "severity": "major",
+          "p": 0.25
+        }
+      ],
+      "precision": 1,
+      "recall": 0.35294117647058826
+    },
+    {
+      "t": 0.95,
+      "tp": 5,
+      "fp": 0,
+      "fn": 12,
+      "tn": 14,
+      "fpBySeverity": {
+        "blocker": 0,
+        "major": 0,
+        "minor": 0
+      },
+      "wrongMatch": 0,
+      "fpCases": [],
+      "fnCases": [
+        {
+          "id": "c02",
+          "kind": "moved-line",
+          "severity": "major",
+          "p": 0.57
+        },
+        {
+          "id": "c07",
+          "kind": "severity-up",
+          "severity": "major",
+          "p": 0.94
+        },
+        {
+          "id": "c08",
+          "kind": "partial-fix-remainder",
+          "severity": "blocker",
+          "p": 0.65
+        },
+        {
+          "id": "c11",
+          "kind": "multi-candidate",
+          "severity": "major",
+          "p": 0.75
+        },
+        {
+          "id": "c15",
+          "kind": "paraphrase",
+          "severity": "blocker",
+          "p": 0.59
+        },
+        {
+          "id": "c18",
+          "kind": "paraphrase",
+          "severity": "minor",
+          "p": 0.86
+        },
+        {
+          "id": "c20",
+          "kind": "different-fix-same-defect",
+          "severity": "blocker",
+          "p": 0.61
+        },
+        {
+          "id": "c23",
+          "kind": "paraphrase",
+          "severity": "major",
+          "p": 0.65
+        },
+        {
+          "id": "c24",
+          "kind": "severity-down",
+          "severity": "minor",
+          "p": 0.86
+        },
+        {
+          "id": "c26",
+          "kind": "terse-restatement",
+          "severity": "blocker",
+          "p": 0.74
+        },
+        {
+          "id": "c28",
+          "kind": "multi-candidate",
+          "severity": "major",
+          "p": 0.51
+        },
+        {
+          "id": "c30",
+          "kind": "paraphrase",
+          "severity": "major",
+          "p": 0.25
+        }
+      ],
+      "precision": 1,
+      "recall": 0.29411764705882354
+    }
+  ],
+  "separation": {
+    "minRestated": 0.25,
+    "maxNew": 0.68
+  },
+  "cases": [
+    {
+      "id": "c01",
+      "kind": "paraphrase",
+      "severity": "blocker",
+      "truth": "R1-c01-0",
+      "p": 0.97,
+      "via": "jev",
+      "restates": "R1-c01-0"
+    },
+    {
+      "id": "c02",
+      "kind": "moved-line",
+      "severity": "major",
+      "truth": "R1-c02-0",
+      "p": 0.57,
+      "via": "jev",
+      "restates": null
+    },
+    {
+      "id": "c03",
+      "kind": "cross-language",
+      "severity": "major",
+      "truth": "R1-c03-0",
+      "p": 0.98,
+      "via": "jev",
+      "restates": "R1-c03-0"
+    },
+    {
+      "id": "c04",
+      "kind": "hard-same-class",
+      "severity": "blocker",
+      "truth": null,
+      "p": 0.17,
+      "via": "jev",
+      "restates": null
+    },
+    {
+      "id": "c05",
+      "kind": "hard-lexical",
+      "severity": "major",
+      "truth": null,
+      "p": 0.06,
+      "via": "jev",
+      "restates": null
+    },
+    {
+      "id": "c06",
+      "kind": "hard-regression-from-fix",
+      "severity": "blocker",
+      "truth": null,
+      "p": 0.06,
+      "via": "jev",
+      "restates": null
+    },
+    {
+      "id": "c07",
+      "kind": "severity-up",
+      "severity": "major",
+      "truth": "R1-c07-0",
+      "p": 0.94,
+      "via": "jev",
+      "restates": "R1-c07-0"
+    },
+    {
+      "id": "c08",
+      "kind": "partial-fix-remainder",
+      "severity": "blocker",
+      "truth": "R1-c08-0",
+      "p": 0.65,
+      "via": "jev",
+      "restates": null
+    },
+    {
+      "id": "c09",
+      "kind": "hard-sibling-symbol",
+      "severity": "major",
+      "truth": null,
+      "p": 0.1,
+      "via": "jev",
+      "restates": null
+    },
+    {
+      "id": "c10",
+      "kind": "exact",
+      "severity": "minor",
+      "truth": "R1-c10-0",
+      "p": 1,
+      "via": "exact",
+      "restates": "R1-c10-0"
+    },
+    {
+      "id": "c11",
+      "kind": "multi-candidate",
+      "severity": "major",
+      "truth": "R1-c11-1",
+      "p": 0.75,
+      "via": "jev",
+      "restates": null
+    },
+    {
+      "id": "c12",
+      "kind": "hard-multi-candidate",
+      "severity": "blocker",
+      "truth": null,
+      "p": 0.08,
+      "via": "jev",
+      "restates": null
+    },
+    {
+      "id": "c13",
+      "kind": "paraphrase",
+      "severity": "minor",
+      "truth": "R1-c13-0",
+      "p": 0.96,
+      "via": "jev",
+      "restates": "R1-c13-0"
+    },
+    {
+      "id": "c14",
+      "kind": "hard-same-figure",
+      "severity": "blocker",
+      "truth": null,
+      "p": 0.23,
+      "via": "jev",
+      "restates": null
+    },
+    {
+      "id": "c15",
+      "kind": "paraphrase",
+      "severity": "blocker",
+      "truth": "R1-c15-0",
+      "p": 0.59,
+      "via": "jev",
+      "restates": null
+    },
+    {
+      "id": "c16",
+      "kind": "cross-language",
+      "severity": "major",
+      "truth": "R1-c16-0",
+      "p": 0.97,
+      "via": "jev",
+      "restates": "R1-c16-0"
+    },
+    {
+      "id": "c17",
+      "kind": "hard-same-page",
+      "severity": "major",
+      "truth": null,
+      "p": 0.04,
+      "via": "jev",
+      "restates": null
+    },
+    {
+      "id": "c18",
+      "kind": "paraphrase",
+      "severity": "minor",
+      "truth": "R1-c18-0",
+      "p": 0.86,
+      "via": "jev",
+      "restates": "R1-c18-0"
+    },
+    {
+      "id": "c19",
+      "kind": "hard-sibling-symbol",
+      "severity": "minor",
+      "truth": null,
+      "p": 0.68,
+      "via": "jev",
+      "restates": null
+    },
+    {
+      "id": "c20",
+      "kind": "different-fix-same-defect",
+      "severity": "blocker",
+      "truth": "R1-c20-0",
+      "p": 0.61,
+      "via": "jev",
+      "restates": null
+    },
+    {
+      "id": "c21",
+      "kind": "unrelated",
+      "severity": "blocker",
+      "truth": null,
+      "p": 0.05,
+      "via": "jev",
+      "restates": null
+    },
+    {
+      "id": "c22",
+      "kind": "hard-same-class",
+      "severity": "major",
+      "truth": null,
+      "p": 0.1,
+      "via": "jev",
+      "restates": null
+    },
+    {
+      "id": "c23",
+      "kind": "paraphrase",
+      "severity": "major",
+      "truth": "R1-c23-0",
+      "p": 0.65,
+      "via": "jev",
+      "restates": null
+    },
+    {
+      "id": "c24",
+      "kind": "severity-down",
+      "severity": "minor",
+      "truth": "R1-c24-0",
+      "p": 0.86,
+      "via": "jev",
+      "restates": "R1-c24-0"
+    },
+    {
+      "id": "c25",
+      "kind": "hard-same-line",
+      "severity": "major",
+      "truth": null,
+      "p": 0.11,
+      "via": "jev",
+      "restates": null
+    },
+    {
+      "id": "c26",
+      "kind": "terse-restatement",
+      "severity": "blocker",
+      "truth": "R1-c26-0",
+      "p": 0.74,
+      "via": "jev",
+      "restates": null
+    },
+    {
+      "id": "c27",
+      "kind": "hard-same-line",
+      "severity": "blocker",
+      "truth": null,
+      "p": 0.07,
+      "via": "jev",
+      "restates": null
+    },
+    {
+      "id": "c28",
+      "kind": "multi-candidate",
+      "severity": "major",
+      "truth": "R1-c28-1",
+      "p": 0.51,
+      "via": "jev",
+      "restates": null
+    },
+    {
+      "id": "c29",
+      "kind": "hard-multi-candidate",
+      "severity": "major",
+      "truth": null,
+      "p": 0.06,
+      "via": "jev",
+      "restates": null
+    },
+    {
+      "id": "c30",
+      "kind": "paraphrase",
+      "severity": "major",
+      "truth": "R1-c30-0",
+      "p": 0.25,
+      "via": "jev",
+      "restates": null
+    },
+    {
+      "id": "c31",
+      "kind": "hard-same-section",
+      "severity": "major",
+      "truth": null,
+      "p": 0.05,
+      "via": "jev",
+      "restates": null
+    }
+  ]
+}
