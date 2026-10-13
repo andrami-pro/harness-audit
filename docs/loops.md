@@ -247,7 +247,8 @@ writes into each project (`.claude/workflows/develop-phase.js`). It has two seat
 that need not be an Anthropic model:
 
 - **Scout** (cheap tier, read-only) reads the repo, code graph first when one exists, and returns a ≤ 400-word brief.
-- **Analyst** (workhorse tier) checks the brief and returns a ≤ 300-word plan. A first line `BLOCKER: …` stops the run
+- **Analyst** (workhorse tier) checks the brief and returns a ≤ 400-word plan whose `SEAMS:` block names the public
+  interfaces the tests exercise. A first line `BLOCKER: …` stops the run
   before the implementer spends a token. Scout and analyst run once, outside the loop; if either dies the run goes on
   without it. Pass `preparer: false` for a trivial task: on a one-file task they cost more than the implementation.
 - **Reviewer** is a native alias by default. Pass `reviewerModel: "openrouter/<vendor>/<model>"` (any id `pi --list-models`
@@ -255,6 +256,20 @@ that need not be an Anthropic model:
   `scripts/external-review.sh`: `pi` runs the review with read-only tools and the workflow decides from the last line.
   It needs `pi` on PATH and the provider key in the auth `pi` uses. The reviewer/implementer family rule (D25a) is also
   enforced at run time: the same family returns a `blocked` handoff before any seat runs.
+- **Seams, agreed once.** `seams: 'propose'` ends the run after the analyst with `handoff.status: blocked` and
+  `seams: { agreed: false, list }`; re-run with `seams` set to the list you accept (an array, or one per line) and the
+  analyst must keep them or stop on a `BLOCKER:`. A workflow cannot ask mid-run, so the question is two runs. Unset,
+  the analyst's own seams go straight to the implementer and the run records them as not agreed.
+- **Test-first** (`tdd`, on by default). The implementer writes one failing test per seam through its public interface,
+  watches it fail, then makes it pass, one vertical slice at a time, and reads `~/.agents/skills/tdd/SKILL.md` first
+  when Matt Pocock's `tdd` skill is installed. The code reviewer checks a test exists per seam.
+- **Spec axis** (`specReview`, on by default). The code reviewer gets the diff and the rubric, not the task, so it judged
+  scope blind. A second seat, in parallel, gets the task, the PRD, the plan, the seams and `git diff HEAD`, and reports
+  missing requirements, unrequested behaviour and wrong implementations with quotes. Approval needs both axes. They
+  stay side by side: `axes: { code, spec }` in the result, spec lines prefixed `spec: ` in the evidence, and a rejected
+  axis reaches the implementer as its own section. The spec seat runs on a Claude model outside the implementer's family
+  (D25a): the reviewer's model when that is a Claude one, else the first of fable, opus, sonnet that qualifies;
+  `models.spec` overrides it.
 - **Route** (opt-in, `routeByJev: true`, off by default). Before any other seat, a Haiku seat runs
   `node ~/.claude/harness/jev.js route --configured <implementer>` (sync-workflows keeps that copy current; `jevScript`
   points elsewhere) with the task on stdin. `jev.js decideTier()` decides: Jev's tier at or above
@@ -266,7 +281,8 @@ that need not be an Anthropic model:
   95.3%. The one real run (2026-10-11) predates the threshold and routed nothing. Numbers and files:
   [docs/harness-dev/loop-runs/2026-10-11-jev-router.md](harness-dev/loop-runs/2026-10-11-jev-router.md).
 
-**On Pi** the same loop is `scripts/develop-phase-pi.js` (Pi has no Workflow runtime). The loop is code, not a prompt:
+**On Pi** the same loop is `scripts/develop-phase-pi.js` (Pi has no Workflow runtime). It does not have seams, test-first or
+the spec axis yet (PRD-004 §7). The loop is code, not a prompt:
 each seat is one `pi -p --mode json --no-session` call with its own tool allowlist, every model comes from the `pi`
 column of the line-up at run time (the analyst sits in `architect`, the new `scout` role feeds the brief), D25a is
 re-checked before any seat, preflight is the project's own gate run through the shell (a `SKIP` line is not a pass),

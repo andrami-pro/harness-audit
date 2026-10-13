@@ -143,7 +143,9 @@ the ones that do not fit), then replace the file with the wrapper. Pilot: `notio
    (elsa-agents: scout, analyst, implementer, reviewer, preflight, commit). Hardened since in loops
    1.1.0–1.2.2 (per-run `prd`, seats isolated from the chat, the verdict is the last verdict line).
    Still unverified: the wrapper's third fallback, resolving the loop by the name `harness-loops:develop-phase`.
-3. TDD and the Spec axis. Not started.
+3. TDD and the Spec axis. **Done** in loops 1.3.0: `seams` (`'propose'`, then the agreed list), test-first
+   implementer (`tdd`), a parallel spec seat (`specReview`) under D25a; approval needs both axes, reported side by side.
+   Proven by stub seats in `validate.js` with four negative controls; not yet run live. Pi: not yet (§7).
 4. develop-spec (waves); pilot on one PRD. Not started.
 5. Migrate the remaining projects. **Partial**: READMEs are under 150 lines and the root README has the
    "which plugin do I need?" table. Of the projects that held a fork, 7 call the wrapper on their branch,

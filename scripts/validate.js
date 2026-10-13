@@ -2759,6 +2759,16 @@ check('develop-phase loop honours every wrapper config key a fork used to hard-c
 // change against the spec. Each piece is a way to go quiet wrong: an implementer that runs before the human saw
 // the seams, an analyst free to redraw agreed seams, a spec rejection outvoted by a code approval, a spec seat of
 // the implementer's family, two axes merged into one, or a spec reviewer that waits on the code reviewer's verdict.
+//
+// Negative controls (2026-10-14, each applied, observed, reverted — all exit 1):
+//   approved = axes.code.approved (the spec axis ignored) .............................................
+//     "a spec rejection was outvoted by the code approval, … or the two axes were merged in the handoff"
+//   the `seams: 'propose'` stop disabled ..............................................................
+//     "seams: 'propose' let the implementer run, or did not hand the analyst's seams back"
+//   the spec seat's D25a guard disabled ...............................................................
+//     "a spec seat of the implementer's family, or on a provider-qualified model, started"
+//   the spec seat started after `await codeReview` ...................................................
+//     "the spec seat started only after the code review returned — the two axes ran one after the other"
 check('develop-phase TDD + Spec axis: seams proposed then agreed, test-first, approval needs both axes, reported side by side', () => {
   const harness = (file) => {
     const src = require('fs').readFileSync(file, 'utf8').replace(/^export /m, '');

@@ -37,11 +37,13 @@ Every loop, what it writes and when it stops, in full: [docs/loops.md](../../doc
 The `sync-workflows` hook keeps a readable copy current, so an improvement here reaches every project's
 next run.
 
-`/develop-phase <task>` runs: a cheap **scout** reads the repo (code graph first) → an **analyst** plans,
-or stops before any implementer token on a `BLOCKER:` → the **implementer** builds → a **reviewer** from
-another model family looks for reasons to reject (a provider-qualified `reviewerModel` goes through the
-project's `scripts/external-review.sh`) → the project's **preflight** decides by exit code, and a `SKIP`
-is not a pass → an optional **commit** that stages the run's files by name, never your uncommitted work.
+`/develop-phase <task>` runs: a cheap **scout** reads the repo (code graph first) → an **analyst** plans
+and names the **seams** to test, or stops on a `BLOCKER:` (`seams: 'propose'` stops here so you agree them,
+then you re-run with them) → the **implementer** builds test-first → two reviewers in parallel, both from
+another model family: **code** against the rubric (a provider-qualified `reviewerModel` goes through
+`scripts/external-review.sh`) and **spec** against the task, PRD and seams; approval needs both → the
+project's **preflight** decides by exit code, and a `SKIP` is not a pass → an optional **commit** that
+stages the run's files by name, never your uncommitted work.
 It returns a `handoff` (`complete | continue | blocked`) that is what the seats report, labelled as such.
 On Pi the same loop is `scripts/develop-phase-pi.js`, with a tmux live view — see
 [docs/loops.md](../../docs/loops.md#develop-phase-scout-analyst-and-a-reviewer-from-another-vendor).

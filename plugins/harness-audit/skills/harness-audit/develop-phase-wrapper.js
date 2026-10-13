@@ -6,7 +6,8 @@ export const meta = {
 // This file is the project's config, and only that. The loop (scout → analyst → implementer → reviewer →
 // preflight → commit) is one global script that the harness-loops plugin keeps current, so an improvement
 // reaches every project at once. Change the config here; never copy the loop into the project.
-// Per-run args override any key below: { task, maxIter, preparer, reviewerModel, analystModel, commit, routeByJev, … }
+// Per-run args override any key below: { task, seams, maxIter, preparer, reviewerModel, analystModel, commit, routeByJev, … }
+// A first run with seams: 'propose' stops after the analyst and returns the seams; re-run with the ones you agree.
 const CONFIG = {
   lang: '__LANG__',
   preflight: '__PREFLIGHT__',
