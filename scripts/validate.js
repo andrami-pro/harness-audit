@@ -2769,6 +2769,8 @@ check('develop-phase loop honours every wrapper config key a fork used to hard-c
 //     "a spec seat of the implementer's family, or on a provider-qualified model, started"
 //   the spec seat started after `await codeReview` ...................................................
 //     "the spec seat started only after the code review returned — the two axes ran one after the other"
+//   the marker parser keeps markdown (strips only spaces and colons) .................................
+//     "a SEAMS block written in markdown (bold, bulleted, quoted, no END line) was not read" (got [0,0,0])
 check('develop-phase TDD + Spec axis: seams proposed then agreed, test-first, approval needs both axes, reported side by side', () => {
   const harness = (file) => {
     const src = require('fs').readFileSync(file, 'utf8').replace(/^export /m, '');
