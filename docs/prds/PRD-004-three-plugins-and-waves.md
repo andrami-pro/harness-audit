@@ -3,7 +3,7 @@ id: PRD-004
 title: Three plugins in one marketplace, a global develop-phase, and waves
 status: in-progress
 created: 2026-10-10
-updated: 2026-10-10
+updated: 2026-10-14
 ---
 
 # PRD-004 — Three plugins in one marketplace, a global develop-phase, and waves
@@ -136,10 +136,16 @@ the ones that do not fit), then replace the file with the wrapper. Pilot: `notio
 ## 8. Order
 
 1. Split into three plugins without behaviour change; `scripts/validate.js` proves each plugin installs
-   alone. **Done** (branch `feat/three-plugins`).
-2. Global develop-phase plus wrapper; migrate the pilot. **Done**: the loop is
-   `plugins/harness-loops/workflows/develop-phase.js`; the pilot's wrapper is on its branch
-   `s/develop-phase-wrapper`, not yet integrated nor run live.
-3. TDD and the Spec axis.
-4. develop-spec (waves); pilot on one PRD.
-5. Migrate the remaining projects; READMEs at most 150 lines each, plus a root "which plugin do I need?" table.
+   alone. **Done**, published in 3.0.0.
+2. Global develop-phase plus wrapper; migrate the pilot. **Done**, published in 3.0.0: the loop is
+   `plugins/harness-loops/workflows/develop-phase.js`, the wrapper template is
+   `plugins/harness-audit/skills/harness-audit/develop-phase-wrapper.js`. First live run 2026-10-10
+   (elsa-agents: scout, analyst, implementer, reviewer, preflight, commit). Hardened since in loops
+   1.1.0–1.2.2 (per-run `prd`, seats isolated from the chat, the verdict is the last verdict line).
+   Still unverified: the wrapper's third fallback, resolving the loop by the name `harness-loops:develop-phase`.
+3. TDD and the Spec axis. Not started.
+4. develop-spec (waves); pilot on one PRD. Not started.
+5. Migrate the remaining projects. **Partial**: READMEs are under 150 lines and the root README has the
+   "which plugin do I need?" table. Of the projects that held a fork, 7 call the wrapper on their branch,
+   3 have it applied but not committed, and 6 wait until their owner's work in progress lands
+   (the pilot `notion-impac-pilotage` among them, its wrapper on branch `s/develop-phase-wrapper`).
