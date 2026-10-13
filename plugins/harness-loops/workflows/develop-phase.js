@@ -235,11 +235,22 @@ No full code: the implementer writes it.${list(cfg.analystRules).map((r) => `\n$
 
 // The seams are agreed once, before any code: a 'propose' run ends here and hands them to the human, who
 // re-runs with the list they accept. A workflow cannot ask mid-run, and an agent waiting on a human holds a slot.
+// A marker line is read without its markdown (**SEAMS**:, - SEAMS:, > SEAMS (one per line):, END SEAMS:). With no
+// END line the block ends at the first blank line, so the risks section is never read as seams.
+const marker = (l) => l.replace(/[*`_#>\s:-]/g, '').toUpperCase()
 const seamsOf = (text) => {
-  const m = text.match(/^[\s*#`]*SEAMS:?[\s*`]*$([\s\S]*?)^[\s*#`]*END SEAMS[\s*`]*$/m)
-  return m ? m[1].split('\n').map((l) => l.trim()).filter(Boolean) : []
+  const lines = text.split('\n')
+  const start = lines.findIndex((l) => /^SEAMS(\(.*\))?$/.test(marker(l)))
+  if (start < 0) return []
+  const out = []
+  for (const l of lines.slice(start + 1)) {
+    if (marker(l) === 'ENDSEAMS' || (!l.trim() && out.length)) break
+    if (l.trim()) out.push(l.trim())
+  }
+  return out
 }
 const proposedSeams = seamsOf(plan)
+if (plan && !proposedSeams.length && !agreedSeams.length) log('⚠ The plan names no seams — the implementer tests the interfaces the task touches')
 if (proposeSeams) {
   if (!plan) {
     return stop("seams: 'propose' needs the analyst's plan, and there is none",
@@ -471,12 +482,12 @@ const linesOf = (text) => text.split('\n').filter((l) => /^\s*(?:[-*]\s*)?\[(PAS
 const verdictLines = linesOf(lastReview)
 const specLines = doSpec ? linesOf(lastSpec).map((l) => `spec: ${l}`) : []
 const openFails = [...verdictLines, ...specLines].filter((l) => /^(?:spec: )?\[FAIL\]/.test(l))
-const rejecting = axes ? [!axes.code.approved && 'code', axes.spec && !axes.spec.approved && 'spec'].filter(Boolean).join(' and ') : 'the review'
+const rejecting = axes ? `${[!axes.code.approved && 'code', axes.spec && !axes.spec.approved && 'spec'].filter(Boolean).join(' and ')} review` : 'review'
 const handoff = {
   status: approved && preflightPassed ? 'complete' : approved ? 'continue' : 'blocked',
   summary: approved
     ? `${doSpec ? 'Code and spec reviews' : 'Reviewer'} approved after ${iteration} iteration(s); preflight ${preflightState}${commit?.committed ? `; commit ${commit.hash}` : ''}`
-    : `The ${rejecting} review still rejects after ${maxIter} iteration(s)`,
+    : `The ${rejecting} still rejects after ${maxIter} iteration(s)`,
   evidence: [...verdictLines, ...specLines, `preflight: ${preflightState}`, ...skipped.map((l) => `preflight skipped: ${l}`)],
   ...(approved ? {} : { blocker: openFails.join(' · ') || 'reviewer returned REJECTED with no [FAIL] line' }),
 }

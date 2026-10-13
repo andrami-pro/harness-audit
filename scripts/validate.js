@@ -2790,6 +2790,9 @@ check('develop-phase TDD + Spec axis: seams proposed then agreed, test-first, ap
     (async () => {
       const propose = await run({ seams: 'propose' });
       const noSeams = await run({ seams: 'propose' }, { analyst: () => '1. edit src/cart.ts' });
+      const MARKED = ['**SEAMS**:\n- a() — x\n- b() — y\n**END SEAMS**', '4. Seams:\n- SEAMS:\n- a() — x\n- b() — y\nEND SEAMS:', '> SEAMS (one per line):\n- a() — x\n- b() — y\n\n3. Risks: none'];
+      const marked = [];
+      for (const m of MARKED) marked.push((await run({ seams: 'propose' }, { analyst: () => `1. edit src/cart.ts\n${m}` })).out.seams?.list.length ?? 0);
       const noPrep = await run({ seams: 'propose', preparer: false });
       const agreed = await run({ seams: '- addItem(cart, sku) — returns the new total\n- removeItem(cart, sku)' });
       const unset = await run({});
@@ -2813,6 +2816,7 @@ check('develop-phase TDD + Spec axis: seams proposed then agreed, test-first, ap
         propose: [propose.out.handoff.status, propose.n('impl'), propose.out.seams && propose.out.seams.list.length, propose.out.seams && propose.out.seams.agreed, /Seams proposed/.test(propose.out.handoff.summary)],
         noSeams: [noSeams.out.handoff.status, noSeams.n('impl'), /no seams/.test(noSeams.out.handoff.summary)],
         noPrep: [noPrep.out.handoff.status, noPrep.calls.length],
+        marked,
         agreed: [agreed.by('analyst').prompt.includes('AGREED SEAMS:\n- addItem(cart, sku) — returns the new total\n- removeItem(cart, sku)'),
           agreed.by('impl').prompt.includes('agreed by the human') && agreed.by('impl').prompt.includes('- removeItem(cart, sku)'),
           agreed.out.seams.agreed, agreed.out.seams.list.length],
@@ -2840,6 +2844,7 @@ check('develop-phase TDD + Spec axis: seams proposed then agreed, test-first, ap
   const want = {
     propose: [['blocked', 0, 2, false, true], "seams: 'propose' let the implementer run, or did not hand the analyst's seams back — the human agrees them before any code"],
     noSeams: [['blocked', 0, true], 'a plan without a SEAMS block was taken as an empty agreement — it must stop and say no seams were proposed'],
+    marked: [[2, 2, 2], 'a SEAMS block written in markdown (bold, bulleted, quoted, no END line) was not read — the seams are lost without a word'],
     noPrep: [['blocked', 0], "seams: 'propose' with preparer:false started a seat — there is no analyst to propose them"],
     agreed: [[true, true, true, 2], 'the agreed seams did not reach the analyst unchanged and the implementer as binding, or the run did not record them as agreed'],
     unset: [['complete', true, false], "with seams unset the analyst's proposed seams did not reach the implementer, or were recorded as agreed"],
