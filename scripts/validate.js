@@ -2774,7 +2774,7 @@ check('develop-phase TDD + Spec axis: seams proposed then agreed, test-first, ap
         return l === 'preflight' ? pf : l === 'scout' ? 'BRIEF' : l === 'analyst' ? PLAN : l.startsWith('review') || l.startsWith('spec') ? OK : 'impl';
       };
       const out = await new AsyncFn('args', 'agent', 'log', 'phase', src)({ task: 'T', maxIter: 1, prd: 'docs/prds/PRD-9.md', ...args }, agent, () => {}, () => {});
-      const by = (p, i = 0) => calls.filter((c) => c.label.startsWith(p))[i];
+      const by = (p, i = 0) => calls.filter((c) => c.label.startsWith(p))[i] || { prompt: '', model: null };
       return { out, calls, by, n: (p) => calls.filter((c) => c.label.startsWith(p)).length };
     };
     (async () => {
