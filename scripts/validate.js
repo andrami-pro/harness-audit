@@ -2511,7 +2511,7 @@ check('develop-phase loop decides from the verdict line and the exit code, and a
     const AsyncFn = Object.getPrototypeOf(async function () {}).constructor;
     const run = (review, pf) => new AsyncFn('args', 'agent', 'log', 'phase', src)(
       { maxIter: 1 },
-      async (_p, o) => (o.label === 'preflight' ? pf : String(o.label).startsWith('review') ? review : 'impl'),
+      async (_p, o) => (o.label === 'preflight' ? pf : String(o.label).startsWith('review') ? review : String(o.label).startsWith('spec') ? '[PASS] spec — x\\nAPPROVED' : 'impl'),
       () => {}, () => {});
     const pf = (exitCode, skipped = [], tail = '') => ({ exitCode, skipped, failedCheck: exitCode ? 'test' : null, tail });
     (async () => {
@@ -2565,7 +2565,7 @@ check('develop-phase loop: a blocker stops before the implementer, a same-family
       const out = await new AsyncFn('args', 'agent', 'log', 'phase', src)(args, agent, () => {}, () => {});
       return { status: out.handoff.status, approved: out.approved, calls };
     };
-    const ok = (l) => (l === 'preflight' ? pf : l.startsWith('review') ? '[PASS] a — x\nAPPROVED' : l === 'scout' ? 'BRIEF-TEXT' : l === 'analyst' ? 'PLAN-TEXT' : 'impl');
+    const ok = (l) => (l === 'preflight' ? pf : l.startsWith('review') ? '[PASS] a — x\nAPPROVED' : l.startsWith('spec') ? '[PASS] s — x\nAPPROVED' : l === 'scout' ? 'BRIEF-TEXT' : l === 'analyst' ? 'PLAN-TEXT' : 'impl');
     const ext = (verdict) => (l) => (l.startsWith('review') ? { output: verdict } : ok(l));
     const EXT = 'openrouter/acme/model-x';
     const labels = (r) => r.calls.map((c) => c.label);
@@ -2635,6 +2635,7 @@ check('develop-phase loop: every seat is told its prompt is its only instruction
         if (l === 'preflight') return pf;
         if (l === 'commit') return { committed: true, hash: 'abc1234', message: 'feat: x', note: 'a.ts' };
         if (l.startsWith('review')) return review(l);
+        if (l.startsWith('spec')) return '[PASS] s — x\nAPPROVED';
         return l === 'scout' ? 'BRIEF' : l === 'analyst' ? 'PLAN' : 'impl';
       };
       const out = await new AsyncFn('args', 'agent', 'log', 'phase', src)(args, agent, () => {}, () => {});
@@ -2696,7 +2697,7 @@ check('develop-phase loop honours every wrapper config key a fork used to hard-c
       return { out, calls, by: (p) => calls.find((c) => c.label.startsWith(p)) };
     };
     const ok = (l) => (l === 'preflight' ? pf : l === 'commit' ? { committed: true, hash: 'abc123', message: 'feat: x', note: '' }
-      : l.startsWith('review') ? { output: '[PASS] a — x\nAPROBADO' } : l === 'scout' ? 'BRIEF' : l === 'analyst' ? 'PLAN' : 'impl');
+      : l.startsWith('review') ? { output: '[PASS] a — x\nAPROBADO' } : l.startsWith('spec') ? '[PASS] s — x\nAPPROVED' : l === 'scout' ? 'BRIEF' : l === 'analyst' ? 'PLAN' : 'impl');
     const CFG = {
       task: 'T', maxIter: 1, lang: 'fr', preflight: 'pnpm preflight',
       models: { scout: 'haiku', analyst: 'opus', implementer: 'opus', reviewer: 'openrouter/xiaomi/mimo-v2.6-pro' },
@@ -2754,6 +2755,101 @@ check('develop-phase loop honours every wrapper config key a fork used to hard-c
   return 'lang · bridge verdict in the project\'s language · externalReview · preflight · agentTypes · forbidden · context · commit only when green, staging the run\'s files by name · integrate · doneStep';
 });
 
+// PRD-004 §3: the loop works test-first against seams the human agrees once, and a second reviewer judges the
+// change against the spec. Each piece is a way to go quiet wrong: an implementer that runs before the human saw
+// the seams, an analyst free to redraw agreed seams, a spec rejection outvoted by a code approval, a spec seat of
+// the implementer's family, two axes merged into one, or a spec reviewer that waits on the code reviewer's verdict.
+check('develop-phase TDD + Spec axis: seams proposed then agreed, test-first, approval needs both axes, reported side by side', () => {
+  const harness = (file) => {
+    const src = require('fs').readFileSync(file, 'utf8').replace(/^export /m, '');
+    const AsyncFn = Object.getPrototypeOf(async function () {}).constructor;
+    const pf = { exitCode: 0, skipped: [], failedCheck: null, tail: '' };
+    const PLAN = '1. edit src/cart.ts\nSEAMS:\n- addItem(cart, sku) — returns the new total\n- GET /cart — lists items\nEND SEAMS';
+    const OK = '[PASS] a — x\nAPPROVED';
+    const run = async (args, over = {}) => {
+      const calls = [];
+      const agent = async (prompt, o) => {
+        const l = String(o.label); calls.push({ label: l, model: o.model, prompt });
+        if (over[l.split(':')[0]]) return over[l.split(':')[0]](l, calls);
+        return l === 'preflight' ? pf : l === 'scout' ? 'BRIEF' : l === 'analyst' ? PLAN : l.startsWith('review') || l.startsWith('spec') ? OK : 'impl';
+      };
+      const out = await new AsyncFn('args', 'agent', 'log', 'phase', src)({ task: 'T', maxIter: 1, prd: 'docs/prds/PRD-9.md', ...args }, agent, () => {}, () => {});
+      const by = (p, i = 0) => calls.filter((c) => c.label.startsWith(p))[i];
+      return { out, calls, by, n: (p) => calls.filter((c) => c.label.startsWith(p)).length };
+    };
+    (async () => {
+      const propose = await run({ seams: 'propose' });
+      const noSeams = await run({ seams: 'propose' }, { analyst: () => '1. edit src/cart.ts' });
+      const noPrep = await run({ seams: 'propose', preparer: false });
+      const agreed = await run({ seams: '- addItem(cart, sku) — returns the new total\n- removeItem(cart, sku)' });
+      const unset = await run({});
+      const noTdd = await run({ tdd: false });
+      const specNo = await run({ maxIter: 2 }, { spec: () => '- [FAIL] requirement: discount codes — PRD §2 asks for them, none in the diff\nREJECTED' });
+      const specBare = await run({ maxIter: 3 }, { spec: () => 'Looks off to me.\nREJECTED' });
+      const specDead = await run({}, { spec: () => null });
+      const off = await run({ specReview: false }, { spec: () => 'REJECTED' });
+      const same = await run({ models: { spec: 'opus' } });
+      const qualified = await run({ models: { spec: 'openrouter/acme/x' } });
+      const extOpus = await run({ reviewerModel: 'openrouter/acme/model-x' }, { review: () => ({ output: OK }) });
+      const extFable = await run({ reviewerModel: 'openrouter/acme/model-x', models: { implementer: 'fable' } }, { review: () => ({ output: OK }) });
+      // Parallel: the code review resolves only once the spec seat has started. Run one after the other, it times out.
+      const parallel = await run({}, { review: (l, calls) => new Promise((res) => {
+        const t0 = Date.now();
+        const tick = () => (calls.some((c) => c.label.startsWith('spec')) ? res(OK) : Date.now() - t0 > 300 ? res('SEQUENTIAL\nREJECTED') : setTimeout(tick, 10));
+        tick();
+      }) });
+      const spec2 = specNo.by('spec', 1);
+      console.log(JSON.stringify({
+        propose: [propose.out.handoff.status, propose.n('impl'), propose.out.seams && propose.out.seams.list.length, propose.out.seams && propose.out.seams.agreed, /Seams proposed/.test(propose.out.handoff.summary)],
+        noSeams: [noSeams.out.handoff.status, noSeams.n('impl'), /no seams/.test(noSeams.out.handoff.summary)],
+        noPrep: [noPrep.out.handoff.status, noPrep.calls.length],
+        agreed: [agreed.by('analyst').prompt.includes('AGREED SEAMS:\n- addItem(cart, sku) — returns the new total\n- removeItem(cart, sku)'),
+          agreed.by('impl').prompt.includes('agreed by the human') && agreed.by('impl').prompt.includes('- removeItem(cart, sku)'),
+          agreed.out.seams.agreed, agreed.out.seams.list.length],
+        unset: [unset.out.handoff.status, unset.by('impl').prompt.includes('proposed by the analyst') && unset.by('impl').prompt.includes('- GET /cart — lists items'), unset.out.seams.agreed],
+        tdd: [/Work test-first/.test(unset.by('impl').prompt) && unset.by('impl').prompt.includes('~/.agents/skills/tdd/SKILL.md'), /test-first/.test(unset.by('review').prompt),
+          /test-first/.test(noTdd.by('impl').prompt) || /test-first/.test(noTdd.by('review').prompt)],
+        specPrompt: ['TASK: T', 'PRD: docs/prds/PRD-9.md', 'PLAN:\n1. edit src/cart.ts', '- GET /cart — lists items', 'git diff HEAD', "IMPLEMENTER'S REPORT:\nimpl"].every((x) => unset.by('spec').prompt.includes(x)),
+        specNo: [specNo.out.approved, specNo.out.handoff.status, specNo.n('impl'), specNo.out.axes.code.approved, specNo.out.axes.spec.approved,
+          specNo.by('impl', 1).prompt.includes('SPEC REVIEW (task, PRD, seams):\n- [FAIL] requirement: discount codes') && !specNo.by('impl', 1).prompt.includes('CODE REVIEW'),
+          specNo.out.handoff.evidence.includes('[PASS] a — x') && specNo.out.handoff.evidence.includes('spec: [FAIL] requirement: discount codes — PRD §2 asks for them, none in the diff'),
+          /spec: \[FAIL\] requirement: discount codes/.test(specNo.out.handoff.blocker), /spec review still rejects/.test(specNo.out.handoff.summary)],
+        independent: !spec2.prompt.includes('[PASS] a — x'),
+        specBare: [specBare.out.handoff.status, specBare.n('impl'), /spec review rejected without naming a \[FAIL\]/.test(specBare.out.handoff.summary)],
+        specDead: specDead.out.handoff.status,
+        off: [off.out.approved, off.n('spec'), off.out.axes.spec],
+        family: [same.out.handoff.status, same.calls.length, qualified.out.handoff.status, qualified.calls.length],
+        defaultModel: [unset.by('spec').model, extOpus.by('spec').model, extFable.by('spec').model],
+        parallel: parallel.out.approved,
+      }));
+    })().catch((e) => console.log('THREW ' + e.stack));
+  };
+  const out = execFileSync('node', ['-e', `(${harness})(process.argv[1])`, path.join(ROOT, DEVELOP_PHASE)], { encoding: 'utf8' }).trim();
+  if (out.startsWith('THREW')) throw new Error(`the develop-phase loop throws with seams or the spec axis — ${out.slice(6)}`);
+  const r = JSON.parse(out);
+  const want = {
+    propose: [['blocked', 0, 2, false, true], "seams: 'propose' let the implementer run, or did not hand the analyst's seams back — the human agrees them before any code"],
+    noSeams: [['blocked', 0, true], 'a plan without a SEAMS block was taken as an empty agreement — it must stop and say no seams were proposed'],
+    noPrep: [['blocked', 0], "seams: 'propose' with preparer:false started a seat — there is no analyst to propose them"],
+    agreed: [[true, true, true, 2], 'the agreed seams did not reach the analyst unchanged and the implementer as binding, or the run did not record them as agreed'],
+    unset: [['complete', true, false], "with seams unset the analyst's proposed seams did not reach the implementer, or were recorded as agreed"],
+    tdd: [[true, true, false], 'the implementer is not told to work test-first through the seams (and to read the tdd skill), the reviewer does not check it, or tdd:false did not turn it off'],
+    specPrompt: [true, 'the spec seat did not receive the task, the PRD, the plan, the seams, the diff and the report — it would judge scope blind'],
+    specNo: [[false, 'blocked', 2, true, false, true, true, true, true], 'a spec rejection was outvoted by the code approval, did not reach the implementer as its own section, or the two axes were merged in the handoff'],
+    independent: [true, "the spec seat saw the code reviewer's verdict — the axes must not read each other"],
+    specBare: [['blocked', 1, true], 'a spec rejection without a [FAIL] line looped — it must stop after one round, there is nothing to fix'],
+    specDead: ['blocked', 'a dead spec seat did not end in a blocked handoff'],
+    off: [[true, 0, null], 'specReview:false still ran the spec seat or let it block the approval'],
+    family: [['blocked', 0, 'blocked', 0], "a spec seat of the implementer's family, or on a provider-qualified model, started — D25a binds the second reviewer too"],
+    defaultModel: [['fable', 'fable', 'opus'], "the spec seat's default model is not the Claude reviewer, or with an external reviewer not the first Claude tier outside the implementer's family"],
+    parallel: [true, 'the spec seat started only after the code review returned — the two axes ran one after the other'],
+  };
+  for (const [k, [v, why]] of Object.entries(want)) {
+    if (JSON.stringify(r[k]) !== JSON.stringify(v)) throw new Error(`${why} (got ${JSON.stringify(r[k])})`);
+  }
+  return "propose → stop with the seams, 0 implementer · agreed seams binding · test-first prompted + reviewed · spec REJECTED blocks a code APPROVED · axes side by side · D25a on the spec seat · both axes in parallel";
+});
+
 // The wrapper is the one file the audit writes into every project, and the only route to the loop.
 // workflow() does not expand `~` (probed 2026-10-10: "Workflow script file not found: ~/…"), so the
 // wrapper names the copy by absolute path and falls back to the plugin's workflow by name. Only "not
@@ -2800,7 +2896,7 @@ check('develop-phase routeByJev: a downgrade goes one tier at most and never bel
       const agent = async (prompt, o) => {
         calls.push({ label: String(o.label), model: o.model, prompt });
         const l = String(o.label);
-        return l === 'route' ? route : l === 'preflight' ? pf : l.startsWith('review') ? '[PASS] a — x\nAPPROVED' : l === 'scout' ? 'B' : l === 'analyst' ? 'P' : 'impl';
+        return l === 'route' ? route : l === 'preflight' ? pf : l.startsWith('review') ? '[PASS] a — x\nAPPROVED' : l.startsWith('spec') ? '[PASS] s — x\nAPPROVED' : l === 'scout' ? 'B' : l === 'analyst' ? 'P' : 'impl';
       };
       const out = await new AsyncFn('args', 'agent', 'log', 'phase', src)({ task: 'T', maxIter: 1, routeByJev: true, ...args }, agent, () => {}, () => {});
       return { r: out.routing, impl: (calls.find((c) => c.label.startsWith('impl')) || {}).model, calls };

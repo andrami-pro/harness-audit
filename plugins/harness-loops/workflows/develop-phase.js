@@ -6,7 +6,7 @@ export const meta = {
     { title: 'Scout', detail: 'Gather context into a short brief (read-only)', model: 'haiku' },
     { title: 'Plan', detail: 'Turn the brief into a short plan, or stop on a blocker', model: 'opus' },
     { title: 'Implement', detail: 'Write code against the PRD + brief + plan', model: 'opus' },
-    { title: 'Review', detail: 'Find reasons to reject (independent verifier > self-critique)', model: 'fable' },
+    { title: 'Review', detail: 'Two axes, side by side: the code against the rubric, the change against the task, PRD and seams', model: 'fable' },
     { title: 'Preflight', detail: "Run the project's preflight gate", model: 'sonnet' },
     { title: 'Commit', detail: 'Commit on the current branch when approved and the gate is green', model: 'sonnet' },
   ],
@@ -21,9 +21,15 @@ export const meta = {
 //   maxIter         review rounds before giving up (default 5)
 //   preparer        false skips Scout + Plan: on a one-file task they cost more than the implementation
 //   lang            deliverable language: 'en' | 'fr' | 'es' | … — the commit message is written in it
-//   models          { scout, analyst, implementer, reviewer, preflight, commit } — the line-up (Step 4a)
+//   models          { scout, analyst, implementer, reviewer, spec, preflight, commit } — the line-up (Step 4a)
 //   analystModel, reviewerModel   per-run shortcuts for models.analyst / models.reviewer
-//   agentTypes      { scout, analyst, implementer, reviewer } — subagent types to run each seat as
+//   agentTypes      { scout, analyst, implementer, reviewer, spec } — subagent types to run each seat as
+//   seams           the public interfaces the tests exercise. Unset: the analyst proposes them and the run goes on.
+//                   'propose': the run stops after the analyst and returns them, for the human to agree once.
+//                   A list (or one per line): the agreed seams — the analyst keeps them, or stops on a BLOCKER
+//   tdd             false: the implementer is not asked to work test-first (default true)
+//   specReview      false: no spec axis (default true) — a second reviewer judges the change against the task,
+//                   the PRD, the plan and the seams; approval needs both axes
 //   context         what the scout reads (and the implementer, when there is no brief)
 //   prd             where the active PRD is
 //   preflight       the project's gate command (default 'npm run preflight')
@@ -47,6 +53,11 @@ const doCommit = cfg.commit === true
 const LANGS = { en: 'English', fr: 'French', es: 'Spanish', de: 'German', it: 'Italian', pt: 'Portuguese' }
 const language = LANGS[cfg.lang] ?? cfg.lang ?? 'English'
 const list = (v) => (Array.isArray(v) ? v : v ? [v] : [])
+const tdd = cfg.tdd !== false
+const doSpec = cfg.specReview !== false
+const proposeSeams = cfg.seams === 'propose'
+const agreedSeams = proposeSeams ? []
+  : (typeof cfg.seams === 'string' ? cfg.seams.split('\n') : list(cfg.seams)).map((s) => String(s).trim()).filter(Boolean)
 
 const MODELS = {
   scout: 'haiku', analyst: 'opus', implementer: 'opus', reviewer: 'fable', preflight: 'sonnet', commit: 'sonnet',
@@ -105,6 +116,19 @@ if (familyOf(MODELS.reviewer) === familyOf(MODELS.implementer)) {
   return stop('Reviewer and implementer share a model family',
     `Both resolve to "${familyOf(MODELS.reviewer)}" — change reviewerModel to another family (D25a has no override)`)
 }
+// The spec seat is a second reviewer, so D25a binds it too. It runs through agent(), which dispatches Anthropic
+// models only: a provider-qualified spec model is refused, and when the code reviewer is external the spec seat
+// defaults to the first Claude tier outside the implementer's family (resolved after routing, which may move it).
+if (doSpec && MODELS.spec && (MODELS.spec.includes('/') || familyOf(MODELS.spec) === familyOf(MODELS.implementer))) {
+  return stop('The spec reviewer cannot take the configured model',
+    MODELS.spec.includes('/')
+      ? `models.spec "${MODELS.spec}" is provider-qualified — the spec seat runs on a Claude model only`
+      : `models.spec and the implementer both resolve to "${familyOf(MODELS.spec)}" — pick another family (D25a has no override)`)
+}
+if (proposeSeams && !preparer) {
+  return stop("seams: 'propose' needs the analyst, and preparer is false",
+    "Re-run with preparer on, or pass the seams yourself in args.seams")
+}
 
 // routeByJev: the runtime has no shell, so a seat runs `jev.js route` and reports its JSON as fields. jev.js
 // decides the tier — the measured threshold, and a downgrade capped at one tier and at sonnet, because routing
@@ -143,6 +167,7 @@ p=null, threshold=null, tier=null, reason=null, error=<the error text>.`,
     : rank(r.tier) < rank('sonnet') || r.threshold == null || !(r.p >= r.threshold)
       ? `the seat reported ${r.tier} at p=${r.p}, threshold ${r.threshold} — outside jev.js's rules, not applied`
     : familyOf(r.tier) === familyOf(MODELS.reviewer) ? `${r.tier} shares the reviewer's family (D25a)`
+    : doSpec && MODELS.spec && familyOf(r.tier) === familyOf(MODELS.spec) ? `${r.tier} shares the spec reviewer's family (D25a)`
     : null
   if (!reason) MODELS.implementer = r.tier
   routing = {
@@ -150,6 +175,10 @@ p=null, threshold=null, tier=null, reason=null, error=<the error text>.`,
     decision: reason ? 'lineup' : 'jev', implementer: MODELS.implementer, configured, reason: reason ?? r.reason,
   }
   log(`Route: implementer=${MODELS.implementer} (${routing.decision}) — ${routing.reason}`)
+}
+if (doSpec && !MODELS.spec) {
+  MODELS.spec = !MODELS.reviewer.includes('/') ? MODELS.reviewer
+    : ['fable', 'opus', 'sonnet'].find((m) => familyOf(m) !== familyOf(MODELS.implementer))
 }
 
 // Scout and Plan run once, outside the loop. They are a cost optimisation, not a gate: if a seat dies the
@@ -182,11 +211,17 @@ You receive the task and a scout's brief. Verify in the code only what you doubt
 TASK: ${task}
 BRIEF:
 ${brief}
-Return a plan of at most 300 words:
+Return a plan of at most 400 words:
 1. Ordered steps, each with the file it touches.
 2. Tests to add or adjust (the reviewer demands regression coverage when existing logic changes).
 3. Risks, and what NOT to touch (out of the PRD's scope). Every risk you name is binding on the implementer.
-If the brief is not enough or an ambiguity blocks the work, the FIRST line is "BLOCKER: <reason>" and nothing else.
+4. Seams: the public interfaces the tests exercise (a function, an endpoint, a CLI command, a component's props),
+   one per line as "- <interface> — <behaviour the test pins>", between a line SEAMS: and a line END SEAMS.
+${agreedSeams.length ? `The human agreed these seams before the run: copy them unchanged into your SEAMS block. If the task cannot
+be built behind them, the FIRST line is "BLOCKER: <why the agreed seams do not fit>".
+AGREED SEAMS:
+${agreedSeams.join('\n')}
+` : ''}If the brief is not enough or an ambiguity blocks the work, the FIRST line is "BLOCKER: <reason>" and nothing else.
 No full code: the implementer writes it.${list(cfg.analystRules).map((r) => `\n${r}`).join('')}`,
       seat('analyst', { label: 'analyst', phase: 'Plan' })
     ) ?? ''
@@ -197,6 +232,33 @@ No full code: the implementer writes it.${list(cfg.analystRules).map((r) => `\n$
     }
   }
 }
+
+// The seams are agreed once, before any code: a 'propose' run ends here and hands them to the human, who
+// re-runs with the list they accept. A workflow cannot ask mid-run, and an agent waiting on a human holds a slot.
+const seamsOf = (text) => {
+  const m = text.match(/^[\s*#`]*SEAMS:?[\s*`]*$([\s\S]*?)^[\s*#`]*END SEAMS[\s*`]*$/m)
+  return m ? m[1].split('\n').map((l) => l.trim()).filter(Boolean) : []
+}
+const proposedSeams = seamsOf(plan)
+if (proposeSeams) {
+  if (!plan) {
+    return stop("seams: 'propose' needs the analyst's plan, and there is none",
+      'The scout or the analyst returned nothing — re-run, or pass the seams yourself in args.seams', 0, brief ? [brief] : [])
+  }
+  if (!proposedSeams.length) {
+    return stop('The analyst proposed no seams', 'Read the plan, then re-run with args.seams set to the interfaces to test', 0, [plan])
+  }
+  log(`Seams proposed (${proposedSeams.length}) — stopping for the human to agree them`)
+  return {
+    ...stop('Seams proposed — agree them before the implementer runs',
+      'Edit the seams if needed, then re-run with args.seams set to the agreed list', 0, [plan]),
+    seams: { agreed: false, list: proposedSeams },
+  }
+}
+const seams = agreedSeams.length ? agreedSeams : proposedSeams
+const seamsBlock = seams.length
+  ? `SEAMS (${agreedSeams.length ? 'agreed by the human — binding' : "proposed by the analyst"}):\n${seams.join('\n')}\n`
+  : ''
 const context = brief
   ? `A scout and an analyst prepared the context: start from it, open the original only when something does not add up
 or to write code, and do not re-explore the repo. The plan's risks are binding.
@@ -206,8 +268,14 @@ ${plan ? `\nPLAN:\n${plan}\n` : ''}
 Read: harness-rubric.md, .claude/agents/implementer.md.`
   : `Read: ${readFirst}, harness-rubric.md, .claude/agents/implementer.md.`
 const forbidden = list(cfg.forbidden)
+// Test-first composes with Pocock's tdd skill when it is installed (D4) and works without it.
+const TDD_RULES = `Work test-first, one vertical slice at a time. For each seam (none listed: each public interface the task
+touches), write one test that exercises it through that interface, run it and watch it fail for the expected reason,
+then write the least code that makes it pass; refactor only on green. If ~/.agents/skills/tdd/SKILL.md exists, read it first and follow it.
+In your report, name per seam the test and the command that ran it red, then green.`
 const implementerRules = [
   ...(forbidden.length ? [`FORBIDDEN, never run: ${forbidden.join(', ')}.`] : []),
+  ...(tdd ? [TDD_RULES] : []),
   ...list(cfg.implementerRules),
 ].join('\n')
 
@@ -223,7 +291,27 @@ const FAIL_LINE = /^\s*(?:[-*]\s*)?\[FAIL\]/
 const verdictOf = (review) => APPROVE.has(review.trim().split('\n').map((l) => l.replace(/[*`_\s#:.]/g, '').toUpperCase())
   .reverse().find((l) => APPROVE.has(l) || REJECT.has(l)))
 
-let approved = false, lastImpl = '', lastReview = '', iteration = 0
+// The spec axis: the code reviewer gets the diff and the rubric but not the task, so "scope as agreed" was judged
+// blind. This seat gets the task, the PRD, the plan and the seams, and judges only whether the change does what was
+// asked. Its verdict is read like the code reviewer's; approval needs both, and they are reported side by side.
+const SPEC_PROMPT = (impl) => `${SEAT_RULES}You are the spec reviewer of a development loop. You judge whether the change does what was asked —
+not code quality, another seat judges that. Read-only: edit nothing, run nothing that writes.
+Mandate: find where the change departs from the spec. Default = FAIL until there is evidence of PASS.
+THE SPEC — quote it in your evidence:
+TASK: ${task}
+PRD: ${prdHint} (read the part this task implements)
+${plan ? `PLAN:\n${plan}\n` : ''}${seamsBlock}THE CHANGE: run \`git diff HEAD\` and \`git status --short\`, and read every new file the report below lists.
+IMPLEMENTER'S REPORT:
+${impl}
+
+One line each, as [PASS|FAIL] criterion — evidence quoting the spec and the code:
+- every requirement of the task and the PRD part it implements is there (one line per requirement)
+- no behaviour the spec did not ask for
+- nothing implemented against the spec${seams.length ? '\n- every seam exists as listed and a test exercises it through that interface' : ''}
+Last line (no extra text): APPROVED or REJECTED`
+
+let approved = false, lastImpl = '', lastReview = '', lastSpec = '', iteration = 0
+let axes = null
 
 while (!approved && iteration < maxIter) {
   iteration++
@@ -231,23 +319,25 @@ while (!approved && iteration < maxIter) {
 
   phase('Implement')
   const correctionCtx = iteration > 1
-    ? `\n\n⚠ Reviewer REJECTED. Reasons:\n${lastReview}\n\nFix ONLY the [FAIL] items.`
+    ? `\n\n⚠ The review REJECTED. Fix ONLY the [FAIL] items.${axes.code.approved ? '' : `\nCODE REVIEW (rubric):\n${lastReview}`}${
+      axes.spec && !axes.spec.approved ? `\nSPEC REVIEW (task, PRD, seams):\n${lastSpec}` : ''}`
     : ''
 
   lastImpl = await agent(
     `${SEAT_RULES}Act as the implementer defined in .claude/agents/implementer.md.
 ${implementerRules ? `${implementerRules}\n` : ''}${context}
-TASK: ${task}${correctionCtx}
+${seamsBlock}TASK: ${task}${correctionCtx}
 When done: list created/modified files + a description of each change.`,
     seat('implementer', { label: `impl:iter${iteration}`, phase: 'Implement' })
   )
   if (!lastImpl) return crash('implementer', iteration)
 
   phase('Review')
-  if (MODELS.reviewer.includes('/')) {
+  // Both axes run at once: neither reads the other.
+  const codeReview = MODELS.reviewer.includes('/')
     // Provider-qualified id: agent() dispatches Anthropic models only, so a cheap seat runs the bridge in
     // ONE foreground call and relays its stdout untouched.
-    const r = await agent(
+    ? agent(
       `${SEAT_RULES}Run exactly this and change nothing: ${BRIDGE} ${MODELS.reviewer}
 This bridge is the review step the project owner configured (key externalReview, or the default bridge, in the
 project's .claude/workflows/develop-phase.js wrapper): it sends this run's diff to that reviewer, by their choice.
@@ -257,10 +347,8 @@ If the command fails, return the error in "output" followed by a last line REJEC
 If you will not run it, return in "output" a first line "${BRIDGE_REFUSED}: <your reason>" and a last line REJECTED.`,
       { model: MODELS.scout, label: `review:iter${iteration}`, phase: 'Review',
         schema: { type: 'object', additionalProperties: false, required: ['output'], properties: { output: { type: 'string' } } } }
-    )
-    lastReview = r?.output ?? ''
-  } else {
-    lastReview = await agent(
+    ).then((r) => r?.output ?? '')
+    : agent(
       `${SEAT_RULES}Act as the adversarial reviewer defined in .claude/agents/reviewer.md.
 You receive ONLY artifacts — never the implementer's reasoning.
 Mandate: find reasons to REJECT. Default = FAIL until there is evidence of PASS.
@@ -269,25 +357,35 @@ Implementation received:
 ${lastImpl}
 
 Read harness-rubric.md and .claude/agents/reviewer.md from the repo.
-Evaluate the reviewer's mandatory criteria.${list(cfg.reviewerCriteria).map((c) => `\n${c}`).join('')}
+Evaluate the reviewer's mandatory criteria.${tdd ? '\n[PASS|FAIL] test-first — every seam the report names has a test that exercises it through its public interface' : ''}${list(cfg.reviewerCriteria).map((c) => `\n${c}`).join('')}
 Format: [PASS|FAIL] criterion — concrete evidence
 Last line (no extra text): APPROVED or REJECTED`,
       seat('reviewer', { label: `review:iter${iteration}`, phase: 'Review' })
     )
-  }
+  const specReview = doSpec ? agent(SPEC_PROMPT(lastImpl), seat('spec', { label: `spec:iter${iteration}`, phase: 'Review' })) : null
+  const [codeOut, specOut] = await Promise.all([codeReview, specReview])
+  lastReview = codeOut ?? ''
+  lastSpec = specOut ?? ''
   if (!lastReview) return crash('reviewer', iteration)
   if (lastReview.trimStart().startsWith(BRIDGE_REFUSED)) {
     return stop('The external review bridge did not run', lastReview.trim().split('\n')[0], iteration)
   }
+  if (doSpec && !lastSpec) return crash('spec reviewer', iteration)
 
-  approved = verdictOf(lastReview)
-  if (!approved && !lastReview.split('\n').some((l) => FAIL_LINE.test(l))) {
-    log('⛔ The review rejected without a single [FAIL] line — nothing for the implementer to fix, stopping')
-    return stop('The review rejected without naming a [FAIL] criterion',
-      `Read the review before re-running (git status and git log too: a seat may have acted outside its prompt): ${lastReview.trim().slice(0, 400)}`,
-      iteration)
+  axes = {
+    code: { approved: Boolean(verdictOf(lastReview)), model: MODELS.reviewer },
+    spec: doSpec ? { approved: Boolean(verdictOf(lastSpec)), model: MODELS.spec } : null,
   }
-  log(approved ? `✓ APPROVED iter ${iteration}` : `✗ REJECTED — correcting`)
+  for (const [axis, text] of [['code', lastReview], ['spec', lastSpec]]) {
+    if (axes[axis] && !axes[axis].approved && !text.split('\n').some((l) => FAIL_LINE.test(l))) {
+      log(`⛔ The ${axis} review rejected without a single [FAIL] line — nothing for the implementer to fix, stopping`)
+      return stop(`The ${axis} review rejected without naming a [FAIL] criterion`,
+        `Read the review before re-running (git status and git log too: a seat may have acted outside its prompt): ${text.trim().slice(0, 400)}`,
+        iteration)
+    }
+  }
+  approved = axes.code.approved && (!axes.spec || axes.spec.approved)
+  log(approved ? `✓ APPROVED iter ${iteration}` : `✗ REJECTED (code ${axes.code.approved ? '✓' : '✗'}${axes.spec ? ` · spec ${axes.spec.approved ? '✓' : '✗'}` : ''}) — correcting`)
 }
 
 if (!approved) log(`⚠ Did not converge after ${maxIter} iter — escalate to the human`)
@@ -366,23 +464,28 @@ ${lastImpl}`,
   log(commit?.committed ? `✓ commit ${commit.hash} — ${commit.message}` : `⚠ no commit: ${commit?.note ?? 'the seat returned nothing'}`)
 }
 
-// The handoff is what the seats REPORT: the reviewer's [PASS|FAIL] lines are its evidence, the open
-// [FAIL] lines are its blocker. Nothing in this runtime can re-run them, so the label says so.
-const verdictLines = lastReview.split('\n').filter((l) => /^\s*(?:[-*]\s*)?\[(PASS|FAIL)\]/.test(l)).map((l) => l.trim().replace(/^[-*]\s*/, ''))
-const openFails = verdictLines.filter((l) => l.startsWith('[FAIL]'))
+// The handoff is what the seats REPORT: the reviewers' [PASS|FAIL] lines are its evidence, the open [FAIL] lines
+// its blocker. The two axes stay side by side — the spec lines carry a "spec: " prefix and are never re-ranked
+// against the code lines. Nothing in this runtime can re-run them, so the label says so.
+const linesOf = (text) => text.split('\n').filter((l) => /^\s*(?:[-*]\s*)?\[(PASS|FAIL)\]/.test(l)).map((l) => l.trim().replace(/^[-*]\s*/, ''))
+const verdictLines = linesOf(lastReview)
+const specLines = doSpec ? linesOf(lastSpec).map((l) => `spec: ${l}`) : []
+const openFails = [...verdictLines, ...specLines].filter((l) => /^(?:spec: )?\[FAIL\]/.test(l))
+const rejecting = axes ? [!axes.code.approved && 'code', axes.spec && !axes.spec.approved && 'spec'].filter(Boolean).join(' and ') : 'the review'
 const handoff = {
   status: approved && preflightPassed ? 'complete' : approved ? 'continue' : 'blocked',
   summary: approved
-    ? `Reviewer approved after ${iteration} iteration(s); preflight ${preflightState}${commit?.committed ? `; commit ${commit.hash}` : ''}`
-    : `Reviewer still rejects after ${maxIter} iteration(s)`,
-  evidence: [...verdictLines, `preflight: ${preflightState}`, ...skipped.map((l) => `preflight skipped: ${l}`)],
+    ? `${doSpec ? 'Code and spec reviews' : 'Reviewer'} approved after ${iteration} iteration(s); preflight ${preflightState}${commit?.committed ? `; commit ${commit.hash}` : ''}`
+    : `The ${rejecting} review still rejects after ${maxIter} iteration(s)`,
+  evidence: [...verdictLines, ...specLines, `preflight: ${preflightState}`, ...skipped.map((l) => `preflight skipped: ${l}`)],
   ...(approved ? {} : { blocker: openFails.join(' · ') || 'reviewer returned REJECTED with no [FAIL] line' }),
 }
 const LABEL = 'Reported by the implementer/reviewer seats — not independently certified: '
 const integrate = cfg.integrate ? `, then ${cfg.integrate}` : ''
 
 return {
-  task, iterations: iteration, approved, preflightPassed, commit, handoff, routing,
+  task, iterations: iteration, approved, preflightPassed, commit, handoff, routing, axes,
+  seams: { agreed: agreedSeams.length > 0, list: seams },
   nextStep: LABEL + (approved && preflightPassed
     ? (commit?.committed ? `committed ${commit.hash}${integrate}` : `${cfg.doneStep ?? 'git add -p && git commit'}${integrate}`)
     : approved && preflight?.exitCode === 0 ? 'Preflight skipped checks — supply what they need and re-run; a SKIP is not a PASS'
