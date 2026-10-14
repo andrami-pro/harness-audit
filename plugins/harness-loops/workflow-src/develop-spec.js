@@ -21,6 +21,8 @@ export const meta = {
 //   maxParallel   tickets in flight at once (default 2)
 //   integrate     the command that merges a ticket's branch into this checkout; `{branch}` is replaced by the
 //                 branch name, or the branch is appended. Default: git merge --no-ff
+//   worktreeSetup a command run in each new worktree before its ticket starts (`pnpm install --frozen-lockfile`):
+//                 a worktree holds only what git tracks, so dependencies and untracked files are not there
 // A ticket's `## Seams` section is its agreed seams. A ticket without one runs with the analyst's own.
 const cfg = args && typeof args === 'object' ? args : {}
 const TICKETS = cfg.tickets
@@ -89,6 +91,11 @@ if (read.dirty.length) {
 }
 
 const tickets = [...read.tickets].sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }))
+// Everything below keys on the id: two files with one id would run as one and both read as landed.
+const dupes = [...new Set(tickets.map((t) => t.id).filter((id, i, all) => all.indexOf(id) !== i))]
+if (dupes.length) {
+  return blocked('Two tickets share an id', `Renumber them: ${dupes.map((id) => tickets.filter((t) => t.id === id).map((t) => t.file).join(' and ')).join(' · ')}`)
+}
 const byId = Object.fromEntries(tickets.map((t) => [t.id, t]))
 const DONE = 'done', READY = 'ready-for-agent'
 const state = Object.fromEntries(tickets.map((t) => [t.id, t.status]))
@@ -138,62 +145,77 @@ const MERGE_SCHEMA = {
 // Every write to this checkout goes through one queue: two tickets that finish together never merge at once.
 let queue = Promise.resolve()
 const serial = (fn) => { const p = queue.then(fn); queue = p.catch(() => {}); return p }
-const statusLine = (t, status, comment) => `In ${read.root}/${TICKETS}/${t.file}: set the \`Status:\` line to ${status}, and append under
+// Paths, branches and messages reach a shell through a seat: single-quoted, so a title's $(…) stays text.
+const q = (v) => `'${String(v).replace(/'/g, "'\\''")}'`
+const ticketPath = (t) => `${TICKETS}/${t.file}`
+const statusLine = (t, status, comment) => `In ${read.root}, edit ${ticketPath(t)}: set the \`Status:\` line to ${status}, and append under
 \`## Comments\` (create the heading at the end if missing) one line "- <today's date, YYYY-MM-DD>: ${comment}", in ${language}.
-Then \`git add -- ${TICKETS}/${t.file}\` and \`git commit -m "chore(tickets): ${t.id} ${status}"\` — stage that file by name only.`
+Then \`git add -- ${q(ticketPath(t))}\` and \`git commit -m ${q(`chore(tickets): ${t.id} ${status}`)}\` — stage that file by name only.`
+const mark = (t, why) => serial(() => agent(`${SEAT}${statusLine(t, 'blocked', `develop-spec: ${why}`)}
+Return done, hash (git rev-parse --short HEAD), note.`, { model: 'sonnet', label: `${t.id}:mark`, phase: 'Waves', schema: MERGE_SCHEMA }))
+const LAND_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['merged', 'hash', 'cleaned', 'note'],
+  properties: { merged: { type: 'boolean' }, hash: { type: ['string', 'null'] }, cleaned: { type: 'boolean' }, note: { type: 'string' } },
+}
 
 const runTicket = async (t) => {
   const branch = `spec/${slug(t)}`
   const workdir = `${read.root}/.claude/worktrees/spec-${slug(t)}`
+  // A ticket blocked earlier kept its worktree and branch for inspection; set back to ready-for-agent, it resumes there.
   const made = await agent(
-    `${SEAT}Run exactly this and change nothing:
-cd ${read.root} && git worktree add ${workdir} -b ${branch} ${read.branch} && grep -qxF '.claude/worktrees/' "$(git rev-parse --git-common-dir)/info/exclude" || echo '.claude/worktrees/' >> "$(git rev-parse --git-common-dir)/info/exclude"
-done=true when the worktree exists afterwards; otherwise done=false and the error in note. hash=null.`,
+    `${SEAT}Prepare this ticket's worktree. Run each command as written; change nothing else.
+1. cd ${q(read.root)}
+2. If the directory ${q(workdir)} exists, reuse it. Otherwise, if \`git show-ref --verify --quiet refs/heads/${branch}\` succeeds,
+   run \`git worktree add ${q(workdir)} ${q(branch)}\`; otherwise run \`git worktree add ${q(workdir)} -b ${q(branch)} ${q(read.branch)}\`.
+3. Make sure the line .claude/worktrees/ is in "$(git rev-parse --git-common-dir)/info/exclude" (append it if missing).${cfg.worktreeSetup ? `
+4. cd ${q(workdir)} && ${cfg.worktreeSetup}` : ''}
+done=true when every step succeeded; otherwise done=false and the failing step's error in note. hash=null.`,
     { model: 'haiku', label: `${t.id}:worktree`, phase: 'Waves', schema: MERGE_SCHEMA }
   )
   if (!made?.done) {
-    const why = `worktree not created: ${made?.note ?? 'the seat returned nothing'}`
-    await serial(() => agent(`${SEAT}${statusLine(t, 'blocked', `develop-spec: ${why}`)}\nReturn done, hash (git rev-parse --short HEAD), note.`,
-      { model: 'sonnet', label: `${t.id}:mark`, phase: 'Waves', schema: MERGE_SCHEMA }))
+    const why = `worktree not ready: ${made?.note ?? 'the seat returned nothing'}`
+    await mark(t, why)
     return { id: t.id, status: 'blocked', reason: why, workdir: null }
   }
   // The ticket's own seams are the agreed ones; a per-run seams or tickets key never reaches a ticket.
-  const { tickets: _t, confirmed: _c, maxParallel: _m, seams: _s, integrate: _i, ...base } = cfg
+  const { tickets: _t, confirmed: _c, maxParallel: _m, seams: _s, integrate: _i, worktreeSetup: _w, ...base } = cfg
   const res = await developPhase(
     { ...base,
-      task: `Implement ticket ${t.id} — ${t.title}. The ticket is ${TICKETS}/${t.file}: read it whole (problem, what to do, acceptance criteria, out of scope). Its acceptance criteria are the spec; do only what it asks.`,
+      task: `Implement ticket ${t.id} — ${t.title}. The ticket is ${ticketPath(t)}: read it whole (problem, what to do, acceptance criteria, out of scope). Its acceptance criteria are the spec; do only what it asks.`,
       seams: t.seams.length ? t.seams : undefined, workdir, commit: true, doneStep: undefined },
     (prompt, o) => agent(prompt, { ...o, label: `${t.id}:${o.label}`, phase: `Ticket ${t.id}` }),
     (m) => log(`[${t.id}] ${m}`),
     () => {}
   )
   if (res?.handoff?.status !== 'complete' || !res.commit?.committed) {
-    const why = res?.handoff?.blocker || res?.nextStep || res?.handoff?.summary || 'develop-phase returned nothing'
-    await serial(() => agent(`${SEAT}${statusLine(t, 'blocked', `develop-spec: ${String(why).slice(0, 300)} — worktree kept at ${workdir}`)}
-Return done, hash (git rev-parse --short HEAD), note.`,
-      { model: 'sonnet', label: `${t.id}:mark`, phase: 'Waves', schema: MERGE_SCHEMA }))
+    const why = String(res?.handoff?.blocker || res?.nextStep || res?.handoff?.summary || 'develop-phase returned nothing')
+    await mark(t, `${why.slice(0, 300)} — worktree kept at ${workdir}`)
     return { id: t.id, status: 'blocked', reason: why, workdir, run: res }
   }
   const integrate = cfg.integrate
-    ? (cfg.integrate.includes('{branch}') ? cfg.integrate.replaceAll('{branch}', branch) : `${cfg.integrate} ${branch}`)
-    : `git merge --no-ff ${branch} -m "merge: ${t.id} — ${t.title.replace(/"/g, "'")}"`
-  const merged = await serial(() => agent(
-    `${SEAT}You are the merge seat of a waves run, the only seat that writes to ${read.branch}. Work in ${read.root}.
-1. \`git -C ${read.root} branch --show-current\` must print ${read.branch}; otherwise done=false, say so in note, and stop.
-2. Run: cd ${read.root} && ${integrate}
-   On a conflict or a failure: \`git merge --abort\` if a merge is in progress, done=false, and name the files in note. Stop.
+    ? (cfg.integrate.includes('{branch}') ? cfg.integrate.replaceAll('{branch}', q(branch)) : `${cfg.integrate} ${q(branch)}`)
+    : `git merge --no-ff ${q(branch)} -m ${q(`merge: ${t.id} — ${t.title}`)}`
+  // Landing and tidying are reported apart: a merge that landed is landed even when its worktree will not go.
+  const land = await serial(() => agent(
+    `${SEAT}You are the merge seat of a waves run, the only seat that writes to ${read.branch}. Work in ${q(read.root)}.
+1. \`git -C ${q(read.root)} branch --show-current\` must print ${read.branch}; otherwise merged=false, say so in note, and stop.
+2. Run: cd ${q(read.root)} && ${integrate}
+   On a conflict or a failure: \`git merge --abort\` if a merge is in progress, merged=false, and name the files in note. Stop.
+   merged=true once the merge commit is on ${read.branch}, whatever happens after.
 3. ${statusLine(t, DONE, `merged by develop-spec from ${branch}`)}
-4. \`git worktree remove ${workdir}\` then \`git branch -d ${branch}\`.
-Return done, hash (git rev-parse --short HEAD after step 3), note.`,
-    { model: cfg.models?.commit ?? 'sonnet', label: `${t.id}:merge`, phase: 'Waves', schema: MERGE_SCHEMA }
+4. Tidy up: \`git worktree remove ${q(workdir)}\`, then \`git branch -d ${q(branch)}\`. cleaned=false and why in note if either refuses.
+Return merged, hash (git rev-parse --short HEAD after step 3), cleaned, note.`,
+    { model: cfg.models?.commit ?? 'sonnet', label: `${t.id}:merge`, phase: 'Waves', schema: LAND_SCHEMA }
   ))
-  if (!merged?.done) {
-    const why = `approved and committed on ${branch}, but not merged: ${merged?.note ?? 'the merge seat returned nothing'}`
-    await serial(() => agent(`${SEAT}${statusLine(t, 'blocked', `develop-spec: ${why}`)}\nReturn done, hash (git rev-parse --short HEAD), note.`,
-      { model: 'sonnet', label: `${t.id}:mark`, phase: 'Waves', schema: MERGE_SCHEMA }))
+  if (!land?.merged) {
+    const why = `approved and committed on ${branch}, but not merged: ${land?.note ?? 'the merge seat returned nothing'}`
+    await mark(t, why)
     return { id: t.id, status: 'blocked', reason: why, workdir, run: res }
   }
-  return { id: t.id, status: DONE, hash: merged.hash, commit: res.commit.hash, axes: res.axes, run: res }
+  return { id: t.id, status: DONE, hash: land.hash, commit: res.commit.hash, axes: res.axes, run: res,
+    ...(land.cleaned ? {} : { tidy: `${workdir} or ${branch} left in place: ${land.note}` }) }
 }
 
 // The frontier is every ready ticket whose blockers are all done; a slot frees, the frontier is recomputed. A
@@ -258,6 +280,7 @@ Format: [PASS|FAIL] criterion — evidence quoting the ticket or the PRD. Last l
 const line = (t, rest) => `- ${t.id} — ${t.title}${rest ? `: ${rest}` : ''}`
 const decisions = [
   ...stuck.map((t) => `${t.id}: ${String(results[t.id].reason).slice(0, 300)}`),
+  ...landed.filter((t) => results[t.id].tidy).map((t) => `${t.id} landed, tidy up by hand: ${results[t.id].tidy}`),
   ...(finalReview ? [...finalReview.code.fails.map((f) => `final code review: ${f}`), ...finalReview.spec.fails.map((f) => `final spec review: ${f}`)] : []),
   ...(finalReview && !finalReview.code.returned ? ['the final code review returned nothing — review the merged range by hand'] : []),
   ...(finalReview && !finalReview.spec.returned ? ['the final spec review returned nothing — review the merged range by hand'] : []),

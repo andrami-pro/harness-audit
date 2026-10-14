@@ -2996,8 +2996,9 @@ check('develop-spec waves: plan first, frontier by Blocked by, slots, one migrat
         if (seat === 'merge' || seat === 'mark') {
           maxMerging = Math.max(maxMerging, ++merging); await sleep(10); merging--;
           if (active.delete(id) && t.migration) mig--;
-          const fail = seat === 'merge' && opt.mergeFail === id;
-          return { done: !fail, hash: `m${id}`, note: fail ? 'conflict in a.ts' : '' };
+          if (seat === 'mark') return { done: true, hash: `k${id}`, note: '' };
+          const fail = opt.mergeFail === id, untidy = opt.untidy === id;
+          return { merged: !fail, hash: `m${id}`, cleaned: !fail && !untidy, note: fail ? 'conflict in a.ts' : untidy ? 'worktree has untracked files' : '' };
         }
         return null;
       };
@@ -3018,6 +3019,9 @@ check('develop-spec waves: plan first, frontier by Blocked by, slots, one migrat
       const mergeFail = await run({ confirmed: true }, three(), { mergeFail: '01' });
       const perRun = await run({ confirmed: true, seams: 'propose', integrate: 'scripts/integrer.sh {branch}' }, three());
       const doneDep = await run({ confirmed: true }, [T('01', { status: 'done' }), T('02', { blockedBy: ['01'] })]);
+      const dupes = await run({ confirmed: true }, [T('01'), T('01', { file: '01-y.md' }), T('02')]);
+      const evil = await run({ confirmed: true, worktreeSetup: 'pnpm install --frozen-lockfile' }, [T('01', { title: "x $(touch /tmp/p) it's" })]);
+      const untidy = await run({ confirmed: true }, three(), { untidy: '01' });
       const st = (r) => r.out.tickets.map((t) => `${t.id}:${t.status}`).join(' ');
       console.log(JSON.stringify({
         plan: [JSON.stringify(plan.out.plan.waves), plan.started.length, plan.out.handoff.status, /approve the ticket breakdown/.test(plan.out.handoff.summary)],
@@ -3029,8 +3033,12 @@ check('develop-spec waves: plan first, frontier by Blocked by, slots, one migrat
         cycle: [cycle.out.handoff.status, cycle.started.length, cycle.out.plan.warnings.filter((w) => /can never start/.test(w)).length],
         mergeFail: [st(mergeFail), /not merged: conflict in a\.ts/.test(mergeFail.out.brief), mergeFail.started.includes('03')],
         seams: [full.by('02:analyst').prompt.includes('AGREED SEAMS:\n- f() — x'), full.by('01:analyst').prompt.includes('AGREED SEAMS'),
-          full.by('01:impl:iter1').prompt.includes('This run works in /r/.claude/worktrees/spec-prd-9-01'), full.by('01:worktree').prompt.includes('git worktree add /r/.claude/worktrees/spec-prd-9-01 -b spec/prd-9-01 main')],
-        perRun: [st(perRun), perRun.by('01:merge').prompt.includes('scripts/integrer.sh spec/prd-9-01'), perRun.calls.some((c) => c.label === '01:commit')],
+          full.by('01:impl:iter1').prompt.includes('This run works in /r/.claude/worktrees/spec-prd-9-01'), full.by('01:worktree').prompt.includes("git worktree add '/r/.claude/worktrees/spec-prd-9-01' -b 'spec/prd-9-01' 'main'"),
+          full.by('01:worktree').prompt.includes("git worktree add '/r/.claude/worktrees/spec-prd-9-01' 'spec/prd-9-01'")],
+        perRun: [st(perRun), perRun.by('01:merge').prompt.includes("scripts/integrer.sh 'spec/prd-9-01'"), perRun.calls.some((c) => c.label === '01:commit')],
+        dupes: [dupes.out.handoff.status, dupes.started.length, /01-x\.md and 01-y\.md/.test(dupes.out.handoff.blocker)],
+        quoted: [evil.by('01:merge').prompt.includes("-m 'merge: 01 — x $(touch /tmp/p) it'\\''s'"), evil.by('01:worktree').prompt.includes('pnpm install --frozen-lockfile')],
+        untidy: [st(untidy), /01 landed, tidy up by hand: .*worktree has untracked files/.test(untidy.out.brief), untidy.at('01:merge') < untidy.at('03:worktree')],
         doneDep: st(doneDep),
       }));
     })().catch((e) => console.log('THREW ' + e.stack));
@@ -3047,8 +3055,11 @@ check('develop-spec waves: plan first, frontier by Blocked by, slots, one migrat
     serial: [1, 'maxParallel: 1 still ran two tickets at once'],
     cycle: [['blocked', 0, 2], 'a dependency cycle was not named as tickets that can never start'],
     mergeFail: [['01:blocked 02:done 03:ready-for-agent', true, false], 'an approved ticket that did not merge was counted as done, or its dependent started'],
-    seams: [[true, false, true, true], "a ticket's ## Seams did not reach its analyst as agreed seams, or its seats do not work in the ticket's worktree"],
+    seams: [[true, false, true, true, true], "a ticket's ## Seams did not reach its analyst as agreed seams, its seats do not work in the ticket's worktree, or a kept branch is not reused on retry"],
     perRun: [['01:done 02:done 03:done', true, true], "a per-run seams key reached the tickets (propose would stop each one), or integrate's {branch} was not filled"],
+    dupes: [['blocked', 0, true], 'two tickets with one id ran as one — the second would be reported landed without running'],
+    quoted: [[true, true], "a ticket title reaches the merge seat's shell unquoted (its $(…) would run), or worktreeSetup did not reach the new worktree"],
+    untidy: [['01:done 02:done 03:done', true, true], 'a merge that landed was reported not merged because its worktree could not be removed'],
     doneDep: ['01:done 02:done', 'a ticket already done did not count as a met blocker'],
   };
   for (const [k, [v, why]] of Object.entries(want)) {

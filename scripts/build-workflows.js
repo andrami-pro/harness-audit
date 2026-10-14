@@ -32,7 +32,8 @@ function build() {
     body,
     '}',
   ].join('\n');
-  return src.replace(MARK, fn);
+  // A function, not a string: a `$&` or `$'` in the loop's code would otherwise be read as a replacement pattern.
+  return src.replace(MARK, () => fn);
 }
 
 if (require.main === module) {
