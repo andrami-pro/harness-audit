@@ -3502,6 +3502,8 @@ esac
 // From the first live develop-spec-pi run (2026-10-14): a provider that drops ("Connection error.") while pi exits 0, and
 // a commit seat that returns nothing. Controls, each reverted alone (exit 1): the crash without the seat's error event
 // ("… was not reported as such: exit 0 — empty output"); the fallback cut at 80 characters ("… not the task's first sentence").
+// The seat's time limit: SIGTERM to pi alone instead of its process group ("… held the run 60s (limit 2s)"); no kill
+// after pi exits while a helper holds its stdout ("… held the run 60s after it answered").
 check('develop-phase-pi: loop in code — pass commits, D25a refuses, BLOQUEO stops, SKIP is not a PASS', () => {
   const { run, done } = piLoop();
   const pass = run('pass');

@@ -286,20 +286,21 @@ that need not be an Anthropic model:
 declared skips, a read-only reviewer and the spec axis, as above. The loop is code, not a prompt: each seat is one `pi
 -p --mode json --no-session` call with its own tool allowlist, every model comes from the `pi` column of the line-up at
 run time (the analyst sits in `architect`, the new `scout` role feeds the brief), D25a is re-checked before any seat,
-preflight is the project's own gate run through the shell (a `SKIP` or `⊘` line is not a pass), and the commit message
-is the only thing a model writes in the commit step. With a TypeSafe key, Jev sizes the task first: `trivial` skips
-scout and analyst, `bounded` gives the analyst the implementer's model. `--seams propose` stops after the analyst with
-its seams in the result's `seams.list`; `--seams "<one per line>"` passes the agreed ones, which the analyst copies or
-stops on `BLOQUEO:`/`BLOCKER:`, and which the implementer and the reviewer get too. The implementer works test-first
-with the same rule text as the Claude loop (`--no-tdd` turns it off) and the reviewer checks one test per seam. A
-read-only `spec-<n>` seat runs in parallel with the code reviewer, with the task, the PRD (`--prd <path>`, else
-`docs/prds/`), the plan, the seams and the diff; approval needs both, the result carries `axes: { code, spec }` and
-`spec: ` evidence lines, and each rejected axis reaches the implementer as its own section. Its model is
-`harness.pi.spec` (never `defaults`), or the reviewer's when unset, refused like the reviewer's when Claude or the
-implementer's family (D25a); `--no-spec-review` turns it off. `--allow-skipped "<substring>"`, repeatable, makes a matching `SKIP` line reported, not counted. From a
-Pi session, a small extension can expose it as `/develop-phase <task>`; from a shell: `node scripts/develop-phase-pi.js
---task "…" [--no-preparer] [--no-commit] [--max-iter N] [--preflight "<cmd>"] [--no-jev] [--run-dir <path>] [--no-tmux]
-[--seams propose|"<list>"] [--no-tdd] [--no-spec-review] [--allow-skipped "<substring>"] [--prd <path>]`.
+preflight is the project's own gate run through the shell (a `SKIP` or `⊘` line is not a pass), each seat runs in a
+process group of its own that is killed at its time limit, and the commit message is the only thing a model writes in
+the commit step. With a TypeSafe key, Jev sizes the task first: `trivial` skips scout and analyst, `bounded` gives the
+analyst the implementer's model. `--seams propose` stops after the analyst with its seams in the result's `seams.list`;
+`--seams "<one per line>"` passes the agreed ones, which the analyst copies or stops on `BLOQUEO:`/`BLOCKER:`, and which
+the implementer and the reviewer get too. The implementer works test-first with the same rule text as the Claude loop
+(`--no-tdd` turns it off) and the reviewer checks one test per seam. A read-only `spec-<n>` seat runs in parallel with
+the code reviewer, with the task, the PRD (`--prd <path>`, else `docs/prds/`), the plan, the seams and the diff;
+approval needs both, the result carries `axes: { code, spec }` and `spec: ` evidence lines, and each rejected axis
+reaches the implementer as its own section. Its model is `harness.pi.spec` (never `defaults`), or the reviewer's when
+unset, refused like the reviewer's when Claude or the implementer's family (D25a); `--no-spec-review` turns it off.
+`--allow-skipped "<substring>"`, repeatable, makes a matching `SKIP` line reported, not counted. From a Pi session, a
+small extension can expose it as `/develop-phase <task>`; from a shell: `node scripts/develop-phase-pi.js --task "…"
+[--no-preparer] [--no-commit] [--max-iter N] [--preflight "<cmd>"] [--no-jev] [--run-dir <path>] [--no-tmux] [--seams
+propose|"<list>"] [--no-tdd] [--no-spec-review] [--allow-skipped "<substring>"] [--prd <path>]`.
 
 <a id="tmux"></a>
 **Live view (tmux).** `--mode json` is what lets each seat's actions show up as they happen instead of only at the
@@ -365,7 +366,7 @@ prints the plan and changes nothing. It refuses a ticket file that was never com
 HEAD), and a `--worktree-setup` that leaves files git does not ignore, since develop-phase-pi commits with `git add -A`.
 A ticket set back to `ready-for-agent` resumes in its kept worktree after merging what landed since.
 A merge conflict is aborted and the ticket marked blocked: resolve it by hand in the kept worktree. Proven by stub seats
-in `validate.js`; no live run yet.
+in `validate.js` and a live pilot ([2026-10-14](harness-dev/loop-runs/2026-10-14-develop-spec-pi-pilot.md)).
 
 **Why it is a built file.** A workflow runs another only one level deep, and the wrapper already spends that level, so
 develop-spec cannot call develop-phase. `scripts/build-workflows.js` inlines develop-phase's loop into it as a function,
