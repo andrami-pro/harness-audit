@@ -274,6 +274,7 @@ function changeSet() {
 // "[FAIL] … no APROBADO" as an approval; notes a reviewer adds after its verdict must not hide it.
 const APROBADOS = ['APROBADO', 'APPROVED', 'APPROUVÉ', 'APPROUVE'];
 const VERDICTOS = [...APROBADOS, 'RECHAZADO', 'REJECTED', 'REJETÉ', 'REJETE'];
+const FAIL_LINE = /^\s*(?:[-*]\s*)?\[FAIL\]/;
 function verdictOf(review) {
   const v = review.trim().split('\n').map((l) => l.replace(/[*`_\s#:.]/g, '').toUpperCase()).reverse().find((l) => VERDICTOS.includes(l));
   return APROBADOS.includes(v);
@@ -605,8 +606,20 @@ Una línea por criterio, como [PASS|FAIL] criterio — evidencia que cita la spe
       code: { approved: verdictOf(lastReview), model: seats.reviewer },
       spec: a.spec ? { approved: verdictOf(lastSpec), model: seats.spec } : null,
     };
+    for (const [axis, text] of [['code', lastReview], ['spec', lastSpec]]) {
+      const ax = axes[axis];
+      if (ax && !ax.approved && !text.split('\n').some((l) => FAIL_LINE.test(l))) {
+        log(`⛔ El eje ${axis} rechazó sin nombrar [FAIL] — nada que corregir, se detiene`);
+        bus(`Review iter ${iteration} → ${axis} RECHAZADO sin [FAIL]`);
+        return finish(result({
+          iterations: iteration, approved: false, preflightPassed: false, commit: null, axes,
+          handoff: { status: 'blocked', summary: `El eje ${axis} rechazó sin nombrar [FAIL]`, blocker: text.trim().slice(0, 400), evidence: [] },
+          nextStep: 'Reportado por implementer/reviewer — no certificado de forma independiente: revisar la review y re-lanzar con instrucciones claras',
+        }));
+      }
+    }
     approved = axes.code.approved && (!axes.spec || axes.spec.approved);
-    const fails = `${lastReview}\n${lastSpec}`.split('\n').filter((l) => /^\s*\[FAIL\]/.test(l)).length;
+    const fails = `${lastReview}\n${lastSpec}`.split('\n').filter((l) => FAIL_LINE.test(l)).length;
     log(approved ? `✓ APROBADO iter ${iteration}` : `✗ RECHAZADO (code ${axes.code.approved ? '✓' : '✗'}${axes.spec ? ` · spec ${axes.spec.approved ? '✓' : '✗'}` : ''}) — corrigiendo`);
     bus(`Review iter ${iteration} → ${approved ? 'APROBADO' : `RECHAZADO (code ${axes.code.approved ? '✓' : '✗'}${axes.spec ? ` · spec ${axes.spec.approved ? '✓' : '✗'}` : ''} · ${fails} FAIL)`}`);
   }
