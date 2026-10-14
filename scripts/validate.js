@@ -3396,17 +3396,18 @@ check('jev router eval — live, against api.typesafe.ai', () => {
 });
 
 // develop-phase-pi.js holds the loop in code, so the loop is tested with a fake `pi` on PATH that answers
-// per seat (HARNESS_SEAT) — no network, no model. Four runs: a clean pass that commits, a same-family
-// line-up refused before any seat, an analyst BLOQUEO that stops before the implementer, and a gate that
-// exits 0 with a SKIP line, which must not count as a pass.
-check('develop-phase-pi: loop in code — pass commits, D25a refuses, BLOQUEO stops, SKIP is not a PASS', () => {
+// per seat (HARNESS_SEAT) — no network, no model. Each run gets its own git repo; the seats' prompts stay in
+// the run dir (<seat>.prompt.md), so a check reads what each seat was told.
+const piLoop = () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dp-pi-'));
   const bin = path.join(tmp, 'bin');
   fs.mkdirSync(bin);
   fs.writeFileSync(path.join(bin, 'pi'), `#!/bin/sh
 case "$HARNESS_SEAT" in
   scout) echo "brief: sum.js:1" ;;
-  analyst) if [ -n "$FAKE_BLOCK" ]; then echo "BLOQUEO: falta decidir"; else echo "1. sum.js"; fi ;;
+  analyst) if [ -n "$FAKE_BLOCK" ]; then echo "$FAKE_BLOCK: falta decidir";
+    elif [ -n "$FAKE_SEAMS" ]; then printf '1. sum.js\\n**SEAMS**:\\n- sum() — devuelve 2\\n- node sum.js — imprime 2\\n\\nRiesgos: x\\n';
+    else echo "1. sum.js"; fi ;;
   implementer-*) echo "module.exports = 2;" > sum.js; echo "sum.js cambiado" ;;
   reviewer-*) printf '[PASS] a — x\\n**APROBADO**\\n' ;;
   commit) echo "fix: ajusta sum" ;;
@@ -3426,16 +3427,24 @@ esac
     execFileSync('sh', ['-c', 'git init -q && echo "module.exports = 1;" > sum.js && git add -A && git -c user.email=t@t -c user.name=t commit -qm init'], { cwd: d });
     return d;
   };
-  const run = (name, { reviewer = 'rev-1', preflight = 'true', env = {} } = {}) => {
+  const run = (name, { reviewer = 'rev-1', preflight = 'true', env = {}, args = [] } = {}) => {
     const cwd = repo(name);
-    const r = require('node:child_process').spawnSync('node', [path.join(ROOT, 'plugins/harness-loops/scripts/develop-phase-pi.js'), '--task', 't', '--max-iter', '1', '--no-jev', '--no-tmux', '--preflight', preflight], {
+    const r = require('node:child_process').spawnSync('node', [path.join(ROOT, 'plugins/harness-loops/scripts/develop-phase-pi.js'), '--task', 't', '--max-iter', '1', '--no-jev', '--no-tmux', '--preflight', preflight, ...args], {
       cwd, encoding: 'utf8',
       env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, MODEL_LINEUP_PATH: lineup(reviewer), GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t', ...env },
     });
     let out = null;
     try { out = JSON.parse(r.stdout); } catch { /* refused runs print no JSON */ }
-    return { code: r.status, out, err: r.stderr, log: execFileSync('git', ['log', '--oneline'], { cwd, encoding: 'utf8' }).trim().split('\n') };
+    const prompt = (seat) => { try { return fs.readFileSync(path.join(out.runDir, `${seat}.prompt.md`), 'utf8'); } catch { return null; } };
+    return { code: r.status, out, err: r.stderr, prompt, log: execFileSync('git', ['log', '--oneline'], { cwd, encoding: 'utf8' }).trim().split('\n') };
   };
+  return { tmp, run, done: () => fs.rmSync(tmp, { recursive: true, force: true }) };
+};
+
+// Four runs: a clean pass that commits, a same-family line-up refused before any seat, an analyst BLOQUEO
+// that stops before the implementer, and a gate that exits 0 with a SKIP line, which must not count as a pass.
+check('develop-phase-pi: loop in code — pass commits, D25a refuses, BLOQUEO stops, SKIP is not a PASS', () => {
+  const { run, done } = piLoop();
   const pass = run('pass');
   if (pass.code !== 0 || pass.out.handoff.status !== 'complete' || !pass.out.commit.committed || pass.log[0].indexOf('fix: ajusta sum') === -1) {
     throw new Error(`clean run did not complete and commit: exit ${pass.code} ${pass.err.slice(-300)}`);
@@ -3444,12 +3453,54 @@ esac
   if (fam.code !== 2 || fam.out || !/D25a|family/.test(fam.err)) throw new Error(`same-family reviewer not refused: exit ${fam.code}`);
   const cl = run('claude', { reviewer: 'claude-fable-5' });
   if (cl.code !== 2 || cl.out || !/non-Claude/.test(cl.err)) throw new Error(`a Claude seat on Pi was not refused: exit ${cl.code}`);
-  const block = run('block', { env: { FAKE_BLOCK: '1' } });
+  const block = run('block', { env: { FAKE_BLOCK: 'BLOQUEO' } });
   if (block.code !== 1 || block.out.handoff.status !== 'blocked' || block.out.iterations !== 0) throw new Error('BLOQUEO did not stop before the implementer');
   const skipRun = run('skip', { preflight: 'echo "SKIP notion:verify"; exit 0' });
   if (skipRun.code !== 1 || skipRun.out.preflightPassed || skipRun.out.commit || skipRun.out.handoff.status !== 'continue') throw new Error('exit 0 with a SKIP line counted as a pass');
-  fs.rmSync(tmp, { recursive: true, force: true });
+  done();
   return 'pass → complete + commit · same family → exit 2 · BLOQUEO → blocked at 0 iter · SKIP → continue, no commit';
+});
+
+// PRD-004 §7, ticket 01: the Pi loop agrees seams, works test-first, accepts the skips a project declares and
+// tells its reviewer it is read-only — the same rules as workflows/develop-phase.js, held here by stub seats.
+check('develop-phase-pi: seams propose stops before the implementer, agreed seams reach every seat, test-first, declared skips, read-only reviewer', () => {
+  const { run, done } = piLoop();
+  const SEAMS = ['- sum() — devuelve 2', '- node sum.js — imprime 2'];
+  const prop = run('propose', { env: { FAKE_SEAMS: '1' }, args: ['--seams', 'propose'] });
+  if (prop.code !== 1 || !prop.out || prop.out.iterations !== 0 || prop.out.handoff.status !== 'blocked') throw new Error(`--seams propose did not stop at 0 iterations: exit ${prop.code} ${prop.err.slice(-200)}`);
+  if (prop.prompt('implementer-1') !== null) throw new Error('--seams propose ran the implementer');
+  if (JSON.stringify(prop.out.seams) !== JSON.stringify({ agreed: false, list: SEAMS })) throw new Error(`--seams propose returned seams ${JSON.stringify(prop.out.seams)} — want the analyst's block, risks left out`);
+  const noPrep = run('propose-noprep', { args: ['--seams', 'propose', '--no-preparer'] });
+  if (noPrep.code !== 2) throw new Error(`--seams propose with --no-preparer was not a usage error: exit ${noPrep.code}`);
+
+  const agreed = run('agreed', { args: ['--seams', 'uno: sum()\ndos: node sum.js'] });
+  if (agreed.code !== 0 || agreed.out.handoff.status !== 'complete') throw new Error(`a run with agreed seams did not complete: exit ${agreed.code} ${agreed.err.slice(-200)}`);
+  const ana = agreed.prompt('analyst') || '';
+  if (!/END SEAMS/.test(ana) || !ana.includes('AGREED SEAMS:\nuno: sum()\ndos: node sum.js')) throw new Error('the analyst prompt does not carry the agreed seams');
+  const impl = agreed.prompt('implementer-1') || '';
+  if (!impl.includes('uno: sum()\ndos: node sum.js') || !impl.includes('Work test-first, one vertical slice at a time')) throw new Error('the implementer prompt lacks the agreed seams or the test-first rule');
+  const rev = agreed.prompt('reviewer-1') || '';
+  if (!rev.includes('uno: sum()\ndos: node sum.js') || !/\[PASS\|FAIL\] test-first — every seam the report names has a test/.test(rev)) throw new Error('the reviewer prompt lacks the seams or the one-test-per-seam criterion');
+  if (!/Solo lectura: .*no edites nada, no ejecutes nada que escriba/.test(rev)) throw new Error('the reviewer prompt does not say read-only');
+  if (JSON.stringify(agreed.out.seams) !== JSON.stringify({ agreed: true, list: ['uno: sum()', 'dos: node sum.js'] })) throw new Error(`agreed seams reported as ${JSON.stringify(agreed.out.seams)}`);
+  const blocker = run('blocker', { env: { FAKE_BLOCK: 'BLOCKER' }, args: ['--seams', 'uno: sum()'] });
+  if (blocker.code !== 1 || blocker.out.handoff.status !== 'blocked' || blocker.out.iterations !== 0) throw new Error('an analyst BLOCKER on the agreed seams did not stop before the implementer');
+  const noTdd = run('no-tdd', { args: ['--no-tdd'] });
+  if (noTdd.code !== 0 || /Work test-first/.test(noTdd.prompt('implementer-1') || '')) throw new Error('--no-tdd still asks the implementer to work test-first');
+  if (/test-first/.test(noTdd.prompt('reviewer-1') || '')) throw new Error('--no-tdd still has the reviewer check test-first');
+  const { runPreflight } = require(path.join(ROOT, 'plugins/harness-loops/scripts/develop-phase-pi.js'));
+  const pfDir = fs.mkdtempSync(path.join(os.tmpdir(), 'dp-pi-pf-'));
+  const one = runPreflight('echo "SKIP JEV live: no key"; exit 0', pfDir, ['jev live']);
+  if (!one.passed || one.skipped.length || JSON.stringify(one.allowedSkips) !== JSON.stringify(['SKIP JEV live: no key'])) throw new Error(`a declared SKIP still blocks the gate: ${JSON.stringify(one)}`);
+  const two = runPreflight('echo "SKIP jev live: no key"; echo "SKIP notion:verify"; exit 0', pfDir, ['jev live']);
+  if (two.passed || JSON.stringify(two.skipped) !== JSON.stringify(['SKIP notion:verify']) || two.allowedSkips.length !== 1) throw new Error(`an undeclared SKIP next to a declared one passed: ${JSON.stringify(two)}`);
+  fs.rmSync(pfDir, { recursive: true, force: true });
+  const allowed = run('allowed-skip', { preflight: 'echo "SKIP notion:verify"; exit 0', args: ['--allow-skipped', 'notion', '--allow-skipped', 'other'] });
+  if (allowed.code !== 0 || allowed.out.handoff.status !== 'complete' || !allowed.out.commit.committed || !allowed.out.handoff.evidence.includes('preflight skip (declarada): SKIP notion:verify')) {
+    throw new Error(`a run whose only SKIP is declared did not complete, commit and report it: exit ${allowed.code}`);
+  }
+  done();
+  return 'propose → blocked at 0 iter, seams.list = the analyst\'s block · propose + --no-preparer → exit 2 · agreed seams → analyst + implementer, test-first · BLOCKER stops · --no-tdd drops the rule · declared SKIP reported, another still blocks';
 });
 
 const GLYPH = { pass: '✓', fail: '✗', skip: '⊘' };

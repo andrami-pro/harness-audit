@@ -44,7 +44,7 @@ another model family: **code** against the rubric (a provider-qualified `reviewe
 project's **preflight** decides by exit code, and a `SKIP` is not a pass → an optional **commit** that
 stages the run's files by name, never your uncommitted work.
 It returns a `handoff` (`complete | continue | blocked`) that is what the seats report, labelled as such.
-On Pi the same loop is `scripts/develop-phase-pi.js`, with a tmux live view — see
+On Pi the same loop is `scripts/develop-phase-pi.js`, with seams, test-first and a tmux live view (no spec axis yet) — see
 [docs/loops.md](../../docs/loops.md#develop-phase-scout-analyst-and-a-reviewer-from-another-vendor).
 Args with `tickets: "<folder>"` run **develop-spec**, the waves loop, with the same config: it plans waves from each
 ticket's `Status:` and `Blocked by:`, then with `confirmed: true` works two tickets at a time, each in its own

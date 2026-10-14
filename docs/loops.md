@@ -282,15 +282,20 @@ that need not be an Anthropic model:
   95.3%. The one real run (2026-10-11) predates the threshold and routed nothing. Numbers and files:
   [docs/harness-dev/loop-runs/2026-10-11-jev-router.md](harness-dev/loop-runs/2026-10-11-jev-router.md).
 
-**On Pi** the same loop is `scripts/develop-phase-pi.js` (Pi has no Workflow runtime). It does not have seams, test-first or
-the spec axis yet (PRD-004 §7). The loop is code, not a prompt:
+**On Pi** the same loop is `scripts/develop-phase-pi.js` (Pi has no Workflow runtime). It has seams, test-first, declared
+skips and a read-only reviewer, as above; it does not have the spec axis yet (PRD-004 §7). The loop is code, not a prompt:
 each seat is one `pi -p --mode json --no-session` call with its own tool allowlist, every model comes from the `pi`
 column of the line-up at run time (the analyst sits in `architect`, the new `scout` role feeds the brief), D25a is
 re-checked before any seat, preflight is the project's own gate run through the shell (a `SKIP` line is not a pass),
 and the commit message is the only thing a model writes in the commit step. With a TypeSafe key, Jev sizes the task
-first: `trivial` skips scout and analyst, `bounded` gives the analyst the implementer's model. From a Pi session, a
+first: `trivial` skips scout and analyst, `bounded` gives the analyst the implementer's model. `--seams propose` stops
+after the analyst with its seams in the result's `seams.list`; `--seams "<one per line>"` passes the agreed ones, which the
+analyst copies or stops on `BLOQUEO:`/`BLOCKER:`, and which the implementer and the reviewer get too. The implementer
+works test-first with the same rule text as the Claude loop (`--no-tdd` turns it off) and the reviewer checks one test per
+seam. `--allow-skipped "<substring>"`, repeatable, makes a matching `SKIP` line reported, not counted. From a Pi session, a
 small extension can expose it as `/develop-phase <task>`; from a shell: `node scripts/develop-phase-pi.js --task "…"
-[--no-preparer] [--no-commit] [--max-iter N] [--preflight "<cmd>"] [--no-jev] [--run-dir <path>] [--no-tmux]`.
+[--no-preparer] [--no-commit] [--max-iter N] [--preflight "<cmd>"] [--no-jev] [--run-dir <path>] [--no-tmux]
+[--seams propose|"<list>"] [--no-tdd] [--allow-skipped "<substring>"]`.
 
 <a id="tmux"></a>
 **Live view (tmux).** `--mode json` is what lets each seat's actions show up as they happen instead of only at the
