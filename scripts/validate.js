@@ -2945,6 +2945,104 @@ check('develop-phase workdir, allowSkipped and a read-only reviewer', () => {
   return 'every seat cd\'s into the workdir · declared skips reported, not counted · any other skip still NOT VERIFIED · reviewer read-only';
 });
 
+// develop-spec (PRD-004 §4) is develop-phase's loop inlined by scripts/build-workflows.js — a workflow runs another
+// only one level deep and the wrapper spends it — plus a scheduler. Each scheduling rule is a way to go quiet wrong:
+// code before the human approved the breakdown, a dependent started before its blocker merged, more tickets in
+// flight than asked, two migrations at once, two merges into one checkout at once, a blocked ticket whose dependents
+// start anyway, a run over the user's uncommitted work, or a built file that no longer carries the current loop.
+check('develop-spec waves: plan first, frontier by Blocked by, slots, one migration and one merge at a time, a brief', () => {
+  const build = runNode([path.join(ROOT, 'scripts/build-workflows.js'), '--check'], process.env, '');
+  if (build.code !== 0) throw new Error(`plugins/harness-loops/workflows/develop-spec.js is stale — run node scripts/build-workflows.js (${build.err.trim()})`);
+  const harness = (file) => {
+    const src = require('fs').readFileSync(file, 'utf8').replace(/^export /m, '');
+    const AsyncFn = Object.getPrototypeOf(async function () {}).constructor;
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const T = (id, o = {}) => ({ id, file: `${id}-x.md`, title: `T${id}`, status: 'ready-for-agent', blockedBy: [], migration: false, seams: [], ...o });
+    const run = async (args, tickets, opt = {}) => {
+      const calls = [], started = [], active = new Set();
+      let maxActive = 0, merging = 0, maxMerging = 0, mig = 0, maxMig = 0;
+      const agent = async (prompt, o) => {
+        const l = String(o.label); calls.push({ label: l, prompt });
+        if (l === 'read') return { root: '/r', branch: 'main', head: 'h0', dirty: opt.dirty ?? [], error: null, tickets };
+        const id = l.split(':')[0], seat = l.split(':').slice(1).join(':');
+        if (id === 'final') return '[PASS] a — x\nAPPROVED';
+        const t = tickets.find((x) => x.id === id);
+        if (seat === 'worktree') {
+          started.push(id); active.add(id); maxActive = Math.max(maxActive, active.size);
+          if (t.migration) maxMig = Math.max(maxMig, ++mig);
+          return { done: true, hash: null, note: '' };
+        }
+        if (seat.startsWith('impl')) { await sleep(15); return 'impl'; }
+        if (seat.startsWith('review')) return (opt.reject === id) ? '[FAIL] x — y\nREJECTED' : '[PASS] a — x\nAPPROVED';
+        if (seat.startsWith('spec')) return '[PASS] s — x\nAPPROVED';
+        if (seat === 'scout') return 'B';
+        if (seat === 'analyst') return 'P';
+        if (seat === 'preflight') return { exitCode: 0, skipped: [], failedCheck: null, tail: '' };
+        if (seat === 'commit') return { committed: true, hash: `c${id}`, message: 'feat: x', note: '' };
+        if (seat === 'merge' || seat === 'mark') {
+          maxMerging = Math.max(maxMerging, ++merging); await sleep(10); merging--;
+          if (active.delete(id) && t.migration) mig--;
+          const fail = seat === 'merge' && opt.mergeFail === id;
+          return { done: !fail, hash: `m${id}`, note: fail ? 'conflict in a.ts' : '' };
+        }
+        return null;
+      };
+      const out = await new AsyncFn('args', 'agent', 'log', 'phase', src)({ tickets: 'docs/tickets/prd-9', maxIter: 1, ...args }, agent, () => {}, () => {});
+      const at = (l) => calls.findIndex((c) => c.label === l);
+      return { out, calls, started, maxActive, maxMerging, maxMig, at, by: (l) => calls.find((c) => c.label === l) || { prompt: '' } };
+    };
+    const three = () => [T('01'), T('02', { seams: ['- f() — x'] }), T('03', { blockedBy: ['01'] })];
+    (async () => {
+      const plan = await run({}, three());
+      const full = await run({ confirmed: true }, three());
+      const reject = await run({ confirmed: true }, three(), { reject: '01' });
+      const migr = await run({ confirmed: true }, [T('01', { migration: true }), T('02', { migration: true }), T('03')]);
+      const migPlan = await run({}, [T('01', { migration: true }), T('02', { migration: true }), T('03')]);
+      const dirty = await run({ confirmed: true }, three(), { dirty: [' M src/a.ts'] });
+      const serial = await run({ confirmed: true, maxParallel: 1 }, three());
+      const cycle = await run({ confirmed: true }, [T('01', { blockedBy: ['02'] }), T('02', { blockedBy: ['01'] })]);
+      const mergeFail = await run({ confirmed: true }, three(), { mergeFail: '01' });
+      const perRun = await run({ confirmed: true, seams: 'propose', integrate: 'scripts/integrer.sh {branch}' }, three());
+      const doneDep = await run({ confirmed: true }, [T('01', { status: 'done' }), T('02', { blockedBy: ['01'] })]);
+      const st = (r) => r.out.tickets.map((t) => `${t.id}:${t.status}`).join(' ');
+      console.log(JSON.stringify({
+        plan: [JSON.stringify(plan.out.plan.waves), plan.started.length, plan.out.handoff.status, /approve the ticket breakdown/.test(plan.out.handoff.summary)],
+        full: [st(full), full.at('01:merge') < full.at('03:worktree'), full.maxActive, full.maxMerging, full.out.handoff.status, /Landed \(3\)/.test(full.out.brief), full.calls.filter((c) => c.label.startsWith('final:')).length],
+        reject: [st(reject), reject.started.includes('03'), reject.out.handoff.status, /Waiting \(1\):\n- 03 — T03: blocked by 01 \(blocked\)/.test(reject.out.brief), /01: /.test(reject.out.handoff.blocker), !!reject.by('01:mark').prompt.match(/Status:` line to blocked/)],
+        migration: [migr.maxMig, st(migr), JSON.stringify(migPlan.out.plan.waves)],
+        dirty: [dirty.out.handoff.status, dirty.started.length],
+        serial: serial.maxActive,
+        cycle: [cycle.out.handoff.status, cycle.started.length, cycle.out.plan.warnings.filter((w) => /can never start/.test(w)).length],
+        mergeFail: [st(mergeFail), /not merged: conflict in a\.ts/.test(mergeFail.out.brief), mergeFail.started.includes('03')],
+        seams: [full.by('02:analyst').prompt.includes('AGREED SEAMS:\n- f() — x'), full.by('01:analyst').prompt.includes('AGREED SEAMS'),
+          full.by('01:impl:iter1').prompt.includes('This run works in /r/.claude/worktrees/spec-prd-9-01'), full.by('01:worktree').prompt.includes('git worktree add /r/.claude/worktrees/spec-prd-9-01 -b spec/prd-9-01 main')],
+        perRun: [st(perRun), perRun.by('01:merge').prompt.includes('scripts/integrer.sh spec/prd-9-01'), perRun.calls.some((c) => c.label === '01:commit')],
+        doneDep: st(doneDep),
+      }));
+    })().catch((e) => console.log('THREW ' + e.stack));
+  };
+  const out = execFileSync('node', ['-e', `(${harness})(process.argv[1])`, path.join(ROOT, 'plugins/harness-loops/workflows/develop-spec.js')], { encoding: 'utf8' }).trim();
+  if (out.startsWith('THREW')) throw new Error(`develop-spec throws when run — ${out.slice(6)}`);
+  const r = JSON.parse(out);
+  const want = {
+    plan: [['[["01","02"],["03"]]', 0, 'blocked', true], 'without confirmed: true the run started a ticket, or the planned waves are wrong — the human approves the breakdown before any code'],
+    full: [['01:done 02:done 03:done', true, 2, 1, 'complete', true, 2], 'a dependent started before its blocker merged, the slots or the one-merge queue were not honoured, or the brief/final review is missing'],
+    reject: [['01:blocked 02:done 03:ready-for-agent', false, 'blocked', true, true, true], "a blocked ticket's dependent started, the rest of the graph stopped, the ticket was not marked blocked, or the brief does not say who waits on what"],
+    migration: [[1, '01:done 02:done 03:done', '[["01","03"],["02"]]'], 'two tickets that add a migration ran in the same wave'],
+    dirty: [['blocked', 0], "a waves run started over the user's uncommitted work — it merges into that checkout"],
+    serial: [1, 'maxParallel: 1 still ran two tickets at once'],
+    cycle: [['blocked', 0, 2], 'a dependency cycle was not named as tickets that can never start'],
+    mergeFail: [['01:blocked 02:done 03:ready-for-agent', true, false], 'an approved ticket that did not merge was counted as done, or its dependent started'],
+    seams: [[true, false, true, true], "a ticket's ## Seams did not reach its analyst as agreed seams, or its seats do not work in the ticket's worktree"],
+    perRun: [['01:done 02:done 03:done', true, true], "a per-run seams key reached the tickets (propose would stop each one), or integrate's {branch} was not filled"],
+    doneDep: ['01:done 02:done', 'a ticket already done did not count as a met blocker'],
+  };
+  for (const [k, [v, why]] of Object.entries(want)) {
+    if (JSON.stringify(r[k]) !== JSON.stringify(v)) throw new Error(`${why} (got ${JSON.stringify(r[k])})`);
+  }
+  return 'plan before code · frontier recomputed per merge · 2 slots · 1 migration · 1 merge at a time · blocked → dependents wait · dirty checkout refused · built file current';
+});
+
 // The wrapper is the one file the audit writes into every project, and the only route to the loop.
 // workflow() does not expand `~` (probed 2026-10-10: "Workflow script file not found: ~/…"), so the
 // wrapper names the copy by absolute path and falls back to the plugin's workflow by name. Only "not
