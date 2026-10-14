@@ -23,7 +23,7 @@
 //   node develop-phase-pi.js --task "<task>" [--max-iter 5] [--no-preparer] [--no-commit]
 //                            [--preflight "<command>"] [--no-jev] [--run-dir <path>] [--no-tmux]
 //                            [--seams propose | --seams "<one per line>"] [--no-tdd] [--no-spec-review]
-//                            [--allow-skipped "<substring>"]…
+//                            [--allow-skipped "<substring>"]… [--prd <path>]
 //   --seams propose   stop after the analyst and return its seams in the result, for the human to agree once
 //   --seams "<list>"  the agreed seams: the analyst copies them or stops on BLOQUEO/BLOCKER; every seat gets them
 //   --no-tdd          the implementer is not asked to work test-first (default: test-first, one test per seam)
@@ -58,7 +58,7 @@ const READ_ONLY = 'read,grep,find,ls';
 
 // ── args ─────────────────────────────────────────────────────────────────────────────────────────────
 function parseArgs(argv) {
-  const a = { task: '', maxIter: 5, preparer: true, commit: true, preflight: null, jev: true, runDir: null, tmux: true, seams: null, tdd: true, allowSkipped: [], spec: true };
+  const a = { task: '', maxIter: 5, preparer: true, commit: true, preflight: null, jev: true, runDir: null, tmux: true, seams: null, tdd: true, allowSkipped: [], spec: true, prd: null };
   for (let i = 0; i < argv.length; i += 1) {
     const k = argv[i];
     if (k === '--task') a.task = argv[++i] || '';
@@ -73,6 +73,7 @@ function parseArgs(argv) {
     else if (k === '--no-tdd') a.tdd = false;
     else if (k === '--no-spec-review') a.spec = false;
     else if (k === '--allow-skipped') a.allowSkipped.push(argv[++i] || '');
+    else if (k === '--prd') a.prd = argv[++i] || null;
     else throw new Error(`unknown argument: ${k}`);
   }
   if (!a.task.trim()) throw new Error('--task is required');
@@ -426,7 +427,7 @@ async function main() {
 comandos que leen (graphify, git log/diff/show, cat, ls). Nada que escriba.
 Antes de leer código consulta el grafo si existe graphify-out/graph.json: \`graphify query "<pregunta>"\`
 (o \`graphify explain\` / \`graphify path\`); lee archivos crudos solo después, para líneas concretas.
-Lee lo justo de: STATUS.md, AGENTS.md, docs/client-context/ (solo lo relacionado), docs/prds/ (PRD activo), TASKS.md
+Lee lo justo de: STATUS.md, AGENTS.md, docs/client-context/ (solo lo relacionado), ${a.prd || 'docs/prds/ (PRD activo)'}, TASKS.md
 — los que existan.
 TAREA: ${task}
 Devuelve un brief de ≤ 400 palabras, sin relleno:
@@ -577,7 +578,7 @@ código, eso lo juzga otro asiento. Mandato: encuentra dónde el cambio se apart
 Default = FAIL hasta evidencia de PASS.
 LA SPEC — cítala en tu evidencia:
 TAREA: ${task}
-PRD: docs/prds/ (el PRD activo; lee la parte que esta tarea implementa)
+${a.prd ? `PRD: ${a.prd}` : 'PRD: docs/prds/ (el PRD activo; lee la parte que esta tarea implementa)'}
 ${plan ? `PLAN:\n${plan}\n` : ''}${seamsBlock}
 ## Lo que el implementer dice que hizo (afirmación a verificar, no evidencia)
 ${lastImpl.slice(0, 6000)}

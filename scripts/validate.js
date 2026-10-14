@@ -3599,6 +3599,25 @@ check('develop-phase-pi: D25a on the spec seat — implementer\'s family or a Cl
   return 'spec = implementer\'s family → exit 2, no seat ran · Claude spec → exit 2 · --no-spec-review → role not read';
 });
 
+// Ticket 01: --prd reaches the scout and the spec reviewer; without it the prompts stay as they were.
+check('develop-phase-pi: --prd reaches scout and spec prompts, default stays docs/prds/', () => {
+  const { run, done } = piLoop();
+  const withPrd = run('with-prd', { args: ['--prd', 'docs/prds/x.md'] });
+  if (withPrd.code !== 0) throw new Error(`run with --prd failed: exit ${withPrd.code} ${withPrd.err.slice(-200)}`);
+  const scout = withPrd.prompt('scout') || '';
+  const spec = withPrd.prompt('spec-1') || '';
+  if (!scout.includes('docs/prds/x.md')) throw new Error('scout prompt does not name the --prd path');
+  if (!spec.includes('docs/prds/x.md')) throw new Error('spec prompt does not name the --prd path');
+  const noPrd = run('no-prd');
+  if (noPrd.code !== 0) throw new Error(`run without --prd failed: exit ${noPrd.code} ${noPrd.err.slice(-200)}`);
+  const scoutNo = noPrd.prompt('scout') || '';
+  const specNo = noPrd.prompt('spec-1') || '';
+  if (!scoutNo.includes('docs/prds/ (PRD activo)')) throw new Error('scout prompt changed when --prd is absent');
+  if (!specNo.includes('docs/prds/ (el PRD activo')) throw new Error('spec prompt changed when --prd is absent');
+  done();
+  return '--prd reaches scout and spec; absent prompts stay as before';
+});
+
 // develop-spec-pi.js is the waves loop on Pi: the scheduler, the worktrees, the merges and the status lines are code,
 // and each ticket runs the real develop-phase-pi.js inside its worktree. A fake `pi` answers per seat and per ticket
 // (the id is read from the prompt file), and its implementer traces start/end so a check can count tickets in flight.
@@ -3744,6 +3763,66 @@ esac
     fs.rmSync(tmp, { recursive: true, force: true });
   }
   return 'plan before any code · 03 waits for 01 to merge · 2 slots, 1 with --max-parallel 1 · one migration at a time · conflict aborted + blocked · dirty and duplicate ids refused · worktree setup · titles quoted';
+});
+
+// Ticket 01: develop-spec-pi forwards its --prd to every ticket's develop-phase-pi run.
+check('develop-spec-pi: --prd is forwarded to every ticket', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ds-pi-prd-'));
+  const bin = path.join(tmp, 'bin');
+  fs.mkdirSync(bin);
+  fs.writeFileSync(path.join(bin, 'pi'), `#!/bin/sh
+for a in "$@"; do case "$a" in @*) P="\${a#@}" ;; esac; done
+ID=$(grep -o 'Implement ticket [0-9]*' "$P" | head -1 | grep -o '[0-9]*$')
+case "$HARNESS_SEAT" in
+  scout) echo "brief: x" ;;
+  analyst) echo "1. x" ;;
+  implementer-*) echo "$ID" > "t$ID.txt"; echo "t$ID.txt" ;;
+  reviewer-*) printf '[PASS] a — x\\nAPROBADO\\n' ;;
+  spec-*) printf '[PASS] tarea — x\\nAPROBADO\\n' ;;
+  final-*) printf '[PASS] todo — x\\nAPROBADO\\n' ;;
+  commit) echo "feat: ticket $ID" ;;
+esac
+`, { mode: 0o755 });
+  const lineup = path.join(tmp, 'lineup.json');
+  const e = (model) => ({ provider: 'fake', model });
+  fs.writeFileSync(lineup, JSON.stringify({ version: 1, defaults: {}, harness: { pi: {
+    scout: e('scout-1'), architect: e('arch-1'), orchestrator: e('orch-1'), implementer: e('impl-1'), reviewer: e('rev-1') } } }));
+  const T = (id, o = {}) => `# ${id} — ${o.title ?? `T${id}`}\n\nStatus: ${o.status ?? 'ready-for-agent'}\nBlocked by: ${o.blockedBy ?? 'None'}\n\n## What to do\n\nx\n\n## Comments\n`;
+  const GIT = { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' };
+  let n = 0;
+  const run = (args = []) => {
+    const repo = path.join(tmp, `r${++n}`);
+    fs.mkdirSync(path.join(repo, 'docs/tickets/w'), { recursive: true });
+    fs.writeFileSync(path.join(repo, 'docs/tickets/w', '01-x.md'), T('01'));
+    execFileSync('sh', ['-c', 'git init -q -b main && git add -A && git commit -qm init'], { cwd: repo, env: { ...process.env, ...GIT } });
+    const runDir = path.join(tmp, `run-${n}`);
+    const r = require('node:child_process').spawnSync('node', [path.join(ROOT, 'plugins/harness-loops/scripts/develop-spec-pi.js'),
+      '--tickets', 'docs/tickets/w', '--confirmed', '--no-jev', '--no-tmux', '--max-iter', '1', '--preflight', 'true', '--run-dir', runDir, ...args], {
+      cwd: repo, encoding: 'utf8', timeout: 120000,
+      env: { ...process.env, ...GIT, PATH: `${bin}:${process.env.PATH}`, MODEL_LINEUP_PATH: lineup },
+    });
+    let out = null;
+    try { out = JSON.parse(r.stdout); } catch { /* usage errors print no JSON */ }
+    const childPrompt = (seat) => { try { return fs.readFileSync(path.join(runDir, 'ticket-01', `${seat}.prompt.md`), 'utf8'); } catch { return null; } };
+    return { code: r.status, out, err: r.stderr, childPrompt };
+  };
+  try {
+    const withPrd = run(['--prd', 'docs/prds/x.md']);
+    if (withPrd.code !== 0 || withPrd.out?.handoff.status !== 'complete') throw new Error(`waves with --prd did not complete: exit ${withPrd.code} ${withPrd.err.slice(-200)}`);
+    const scout = withPrd.childPrompt('scout') || '';
+    const spec = withPrd.childPrompt('spec-1') || '';
+    if (!scout.includes('docs/prds/x.md')) throw new Error('ticket scout prompt does not name the forwarded --prd path');
+    if (!spec.includes('docs/prds/x.md')) throw new Error('ticket spec prompt does not name the forwarded --prd path');
+    const noPrd = run();
+    if (noPrd.code !== 0 || noPrd.out?.handoff.status !== 'complete') throw new Error(`waves without --prd did not complete: exit ${noPrd.code} ${noPrd.err.slice(-200)}`);
+    const scoutNo = noPrd.childPrompt('scout') || '';
+    const specNo = noPrd.childPrompt('spec-1') || '';
+    if (!scoutNo.includes('docs/prds/ (PRD activo)')) throw new Error('ticket scout prompt changed when --prd is absent');
+    if (!specNo.includes('docs/prds/ (el PRD activo')) throw new Error('ticket spec prompt changed when --prd is absent');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+  return '--prd reaches every ticket; without it the child prompts stay as before';
 });
 
 const GLYPH = { pass: '✓', fail: '✗', skip: '⊘' };
