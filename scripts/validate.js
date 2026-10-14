@@ -2893,6 +2893,58 @@ check('develop-phase TDD + Spec axis: seams proposed then agreed, test-first, ap
   return "propose → stop with the seams, 0 implementer · agreed seams binding · test-first prompted + reviewed · spec REJECTED blocks a code APPROVED · axes side by side · D25a on the spec seat · both axes in parallel · every early exit carries axes: null and the seams known";
 });
 
+// develop-spec runs each ticket in a worktree of its own, so every seat of that ticket has to work there; and a
+// project whose gate always skips a live check would never pass unattended, so it names the skips it accepts —
+// each one still reported. The first live run also showed a code reviewer editing files to replay controls.
+check('develop-phase workdir, allowSkipped and a read-only reviewer', () => {
+  const harness = (file) => {
+    const src = require('fs').readFileSync(file, 'utf8').replace(/^export /m, '');
+    const AsyncFn = Object.getPrototypeOf(async function () {}).constructor;
+    const run = async (args, skipped = []) => {
+      const calls = [];
+      const agent = async (prompt, o) => {
+        const l = String(o.label); calls.push({ label: l, prompt });
+        if (l === 'preflight') return { exitCode: 0, skipped, failedCheck: null, tail: '' };
+        if (l === 'commit') return { committed: true, hash: 'abc', message: 'feat: x', note: '' };
+        return l.startsWith('review') || l.startsWith('spec') ? '[PASS] a — x\nAPPROVED' : l === 'scout' ? 'B' : l === 'analyst' ? 'P' : 'impl';
+      };
+      const out = await new AsyncFn('args', 'agent', 'log', 'phase', src)({ task: 'T', maxIter: 1, ...args }, agent, () => {}, () => {});
+      return { out, calls };
+    };
+    const SK = ['⊘ jev live smoke — set JEV_LIVE=1 (and a TYPESAFE_API_KEY) to run', '66/69 checks passed · 3 NOT VERIFIED'];
+    (async () => {
+      const wt = await run({ workdir: '/repo/.claude/worktrees/spec-01', commit: true });
+      const plain = await run({});
+      const allowed = await run({ allowSkipped: ['JEV_LIVE=1', '3 NOT VERIFIED'] }, SK);
+      const extra = await run({ allowSkipped: ['JEV_LIVE=1', '3 NOT VERIFIED'] }, [...SK, 'SKIP: e2e — no browser']);
+      const none = await run({}, SK);
+      const IN = 'This run works in /repo/.claude/worktrees/spec-01';
+      console.log(JSON.stringify({
+        workdir: [wt.calls.every((c) => c.prompt.includes(IN)), wt.calls.find((c) => c.label === 'preflight').prompt.includes('cd /repo/.claude/worktrees/spec-01 && npm run preflight'),
+          plain.calls.some((c) => c.prompt.includes('worktree of its own'))],
+        allowed: [allowed.out.preflightPassed, allowed.out.handoff.status, allowed.out.handoff.evidence.filter((e) => e.startsWith('preflight skipped (allowed by config)')).length],
+        extra: [extra.out.preflightPassed, extra.out.handoff.evidence.includes('preflight skipped: SKIP: e2e — no browser')],
+        none: none.out.preflightPassed,
+        readOnly: /Read-only: read files and run the tests, edit nothing/.test(plain.calls.find((c) => c.label.startsWith('review')).prompt),
+      }));
+    })().catch((e) => console.log('THREW ' + e.stack));
+  };
+  const out = execFileSync('node', ['-e', `(${harness})(process.argv[1])`, path.join(ROOT, DEVELOP_PHASE)], { encoding: 'utf8' }).trim();
+  if (out.startsWith('THREW')) throw new Error(`the develop-phase loop throws with workdir or allowSkipped — ${out.slice(6)}`);
+  const r = JSON.parse(out);
+  const want = {
+    workdir: [[true, true, false], 'a seat of a worktree run was not told to work in it (or the preflight does not cd there), or a plain run was told about a worktree'],
+    allowed: [[true, 'complete', 2], 'a skip the project declared in allowSkipped still blocked the run, or was dropped from the evidence instead of reported'],
+    extra: [[false, true], 'a skip outside allowSkipped passed — only the declared skips are accepted'],
+    none: [false, 'without allowSkipped a skipped check passed — a SKIP is not a PASS'],
+    readOnly: [true, 'the code reviewer is not told it is read-only — the first live run saw it edit files to replay controls'],
+  };
+  for (const [k, [v, why]] of Object.entries(want)) {
+    if (JSON.stringify(r[k]) !== JSON.stringify(v)) throw new Error(`${why} (got ${JSON.stringify(r[k])})`);
+  }
+  return 'every seat cd\'s into the workdir · declared skips reported, not counted · any other skip still NOT VERIFIED · reviewer read-only';
+});
+
 // The wrapper is the one file the audit writes into every project, and the only route to the loop.
 // workflow() does not expand `~` (probed 2026-10-10: "Workflow script file not found: ~/…"), so the
 // wrapper names the copy by absolute path and falls back to the plugin's workflow by name. Only "not
