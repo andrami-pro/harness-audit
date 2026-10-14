@@ -1,6 +1,6 @@
 # 01 — Pi: seams, test-first, declared skips and a read-only reviewer
 
-Status: ready-for-agent
+Status: blocked
 Blocked by: None
 
 PRD: `docs/prds/PRD-004-three-plugins-and-waves.md` §3 and §7 ("Pi parity").
@@ -40,3 +40,5 @@ read-only. The Pi loop does none of it, and `docs/loops.md` says so.
 The spec review axis on Pi (ticket 03). `workflows/develop-phase.js` itself.
 
 ## Comments
+
+- 2026-10-14: develop-spec: Reported by the implementer/reviewer seats — not independently certified: Preflight skipped checks — supply what they need and re-run; a SKIP is not a PASS — worktree kept at /home/andrami/Documents/harness-audit/.claude/worktrees/spec-prd-004-waves-pilot-01
