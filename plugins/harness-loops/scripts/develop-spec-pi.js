@@ -187,7 +187,8 @@ async function main() {
   const runPhase = (t, workdir) => new Promise((resolve) => {
     const args = [path.join(__dirname, 'develop-phase-pi.js'),
       '--task', `Implement ticket ${t.id} — ${t.title}. The ticket is ${TICKETS}/${t.file}: read it whole (problem, what to do, acceptance criteria, out of scope). Its acceptance criteria are the spec; do only what it asks.`,
-      ...(t.seams.length ? ['--seams', t.seams.join('\n')] : []), '--run-dir', path.join(runDir, `ticket-${t.id}`), ...a.phase];
+      ...(t.seams.length ? ['--seams', t.seams.join('\n')] : []), '--run-dir', path.join(runDir, `ticket-${t.id}`), ...a.phase,
+      ...(a.prd ? ['--prd', a.prd] : [])];
     const child = spawn('node', args, { cwd: workdir, env: process.env, stdio: ['ignore', 'pipe', 'pipe'] });
     let out = '';
     let buf = '';
