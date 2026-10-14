@@ -642,7 +642,7 @@ Una línea por criterio, como [PASS|FAIL] criterio — evidencia que cita la spe
     },
     nextStep: LABEL + (approved && pf.passed
       ? (commit && commit.committed ? 'integrar la rama y desplegar desde el checkout principal' : 'git add -A && git commit en este worktree')
-      : approved && pf.exitCode === 0 ? 'Preflight con SKIP — falta un requisito; un SKIP no es un PASS'
+      : approved && pf.exitCode === 0 ? `Preflight con SKIP fuera de --allow-skipped: ${pf.skipped.join(' · ')} — falta un requisito; un SKIP no es un PASS`
         : approved ? 'Preflight falló o no existe — corregir antes de commit'
           : `No convergió — revisar los [FAIL] restantes tras ${a.maxIter} iter y reportar al humano`),
   }));
@@ -652,4 +652,4 @@ if (require.main === module) {
   main().then((code) => process.exit(code), (e) => { log(`develop-phase-pi: ${e.stack || e}`); process.exit(1); });
 }
 
-module.exports = { parseArgs, verdictOf, seamsOf, preflightCommand, runPreflight, resolveSeats, SIZES };
+module.exports = { parseArgs, verdictOf, seamsOf, preflightCommand, runPreflight, resolveSeats, runSeat, SIZES };

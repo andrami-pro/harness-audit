@@ -3597,6 +3597,114 @@ check('develop-phase-pi: D25a on the spec seat — implementer\'s family or a Cl
   return 'spec = implementer\'s family → exit 2, no seat ran · Claude spec → exit 2 · --no-spec-review → role not read';
 });
 
+// develop-spec-pi.js is the waves loop on Pi: the scheduler, the worktrees, the merges and the status lines are code,
+// and each ticket runs the real develop-phase-pi.js inside its worktree. A fake `pi` answers per seat and per ticket
+// (the id is read from the prompt file), and its implementer traces start/end so a check can count tickets in flight.
+check('develop-spec-pi: plan first, frontier by Blocked by, slots, one migration at a time, merges in code, a brief', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ds-pi-'));
+  const bin = path.join(tmp, 'bin');
+  fs.mkdirSync(bin);
+  fs.writeFileSync(path.join(bin, 'pi'), `#!/bin/sh
+for a in "$@"; do case "$a" in @*) P="\${a#@}" ;; esac; done
+ID=$(grep -o 'Implement ticket [0-9]*' "$P" | head -1 | grep -o '[0-9]*$')
+case "$HARNESS_SEAT" in
+  scout) echo "brief: x" ;;
+  analyst) echo "1. x" ;;
+  implementer-*) echo "S $ID" >> "$FAKE_TRACE"; sleep 0.4
+    if [ -n "$FAKE_CONFLICT" ]; then echo "$ID" > shared.txt; elif [ -f t01.txt ]; then echo "has01" > "t$ID.txt"; else echo "$ID" > "t$ID.txt"; fi
+    echo "E $ID" >> "$FAKE_TRACE"; echo "t$ID.txt" ;;
+  reviewer-*) printf '[PASS] a — x\\nAPROBADO\\n' ;;
+  spec-*) if [ "$ID" = "$FAKE_REJECT" ]; then printf '[FAIL] tarea — falta x\\nRECHAZADO\\n'; else printf '[PASS] tarea — x\\nAPROBADO\\n'; fi ;;
+  final-*) printf '[PASS] todo — x\\nAPROBADO\\n' ;;
+  commit) echo "feat: ticket $ID" ;;
+esac
+`, { mode: 0o755 });
+  const lineup = path.join(tmp, 'lineup.json');
+  const e = (model) => ({ provider: 'fake', model });
+  fs.writeFileSync(lineup, JSON.stringify({ version: 1, defaults: {}, harness: { pi: {
+    scout: e('scout-1'), architect: e('arch-1'), orchestrator: e('orch-1'), implementer: e('impl-1'), reviewer: e('rev-1') } } }));
+  const T = (id, o = {}) => `# ${id} — ${o.title ?? `T${id}`}\n\nStatus: ${o.status ?? 'ready-for-agent'}\nBlocked by: ${o.blockedBy ?? 'None'}\n${o.migration ? 'Migration: yes\n' : ''}\n## What to do\n\nx\n${o.seams ? `\n## Seams\n\n${o.seams}\n` : ''}\n## Comments\n`;
+  const three = { '01': T('01', { seams: '- f() — x' }), '02': T('02'), '03': T('03', { blockedBy: '01' }) };
+  const GIT = { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' };
+  let n = 0;
+  const run = (tickets, { args = [], env = {}, before } = {}) => {
+    const cwd = path.join(tmp, `r${++n}`);
+    fs.mkdirSync(path.join(cwd, 'docs/tickets/w'), { recursive: true });
+    for (const [id, body] of Object.entries(tickets)) fs.writeFileSync(path.join(cwd, 'docs/tickets/w', `${id.replace(/'$/, '')}-${id.endsWith("'") ? 'y' : 'x'}.md`), body);
+    fs.writeFileSync(path.join(cwd, '.gitignore'), 'secret.json\n');
+    execFileSync('sh', ['-c', 'git init -q -b main && git add -A && git commit -qm init'], { cwd, env: { ...process.env, ...GIT } });
+    if (before) before(cwd);
+    const trace = path.join(tmp, `trace-${n}`);
+    fs.writeFileSync(trace, '');
+    const r = require('node:child_process').spawnSync('node', [path.join(ROOT, 'plugins/harness-loops/scripts/develop-spec-pi.js'),
+      '--tickets', 'docs/tickets/w', '--no-jev', '--no-tmux', '--max-iter', '1', '--preflight', 'true', '--run-dir', path.join(tmp, `run-${n}`), ...args], {
+      cwd, encoding: 'utf8', timeout: 120000,
+      env: { ...process.env, ...GIT, PATH: `${bin}:${process.env.PATH}`, MODEL_LINEUP_PATH: lineup, FAKE_TRACE: trace, ...env },
+    });
+    let out = null;
+    try { out = JSON.parse(r.stdout); } catch { /* usage errors print no JSON */ }
+    let active = 0, maxActive = 0;
+    const order = fs.readFileSync(trace, 'utf8').split('\n').filter(Boolean);
+    for (const l of order) { active += l.startsWith('S ') ? 1 : -1; maxActive = Math.max(maxActive, active); }
+    const sh = (c) => execFileSync('sh', ['-c', c], { cwd, encoding: 'utf8' }).trim();
+    const status = (f) => (fs.readFileSync(path.join(cwd, 'docs/tickets/w', f), 'utf8').match(/^Status: (.*)$/m) || [])[1];
+    return { code: r.status, out, err: r.stderr, cwd, sh, status, order, maxActive };
+  };
+  const st = (r) => (r.out ? r.out.tickets.map((t) => `${t.id}:${t.status}`).join(' ') : `exit ${r.code} ${r.err.slice(-300)}`);
+  try {
+    const plan = run(three);
+    const full = run(three, { args: ['--confirmed'] });
+    const reject = run(three, { args: ['--confirmed'], env: { FAKE_REJECT: '01' } });
+    const serial = run(three, { args: ['--confirmed', '--max-parallel', '1'] });
+    const migr = run({ '01': T('01', { migration: true }), '02': T('02', { migration: true }), '03': T('03') }, { args: ['--confirmed'] });
+    const conflict = run({ '01': T('01'), '02': T('02') }, { args: ['--confirmed'], env: { FAKE_CONFLICT: '1' } });
+    const dirty = run(three, { args: ['--confirmed'], before: (cwd) => fs.appendFileSync(path.join(cwd, '.gitignore'), 'x\n') });
+    const dupes = run({ '01': T('01'), "01'": T('01'), '02': T('02') }, { args: ['--confirmed'] });
+    const secret = path.join(tmp, 'secret.json');
+    fs.writeFileSync(secret, '{}');
+    const setup = run({ '01': T('01') }, { args: ['--confirmed', '--preflight', 'test -f secret.json', '--worktree-setup', `cp ${secret} .`] });
+    const nosetup = run({ '01': T('01') }, { args: ['--confirmed', '--preflight', 'test -f secret.json'] });
+    const evil = run({ '01': T('01', { title: "x $(touch pwned) it's" }) }, { args: ['--confirmed'] });
+    const usage = run(three, { args: ['--seams', 'propose'] });
+    const got = {
+      plan: [plan.code, JSON.stringify(plan.out?.plan.waves), plan.order.length, plan.sh('git worktree list | wc -l')],
+      full: [st(full), full.code, full.out?.handoff.status, full.maxActive, full.order.indexOf('S 03') > full.order.indexOf('E 01'),
+        full.sh('cat t03.txt'), full.sh("git log --format=%s | grep -c '^merge: '"), full.status('01-x.md'), full.sh('git worktree list | wc -l'),
+        full.sh("git branch --list 'spec/*' | wc -l"), /Landed \(3\)/.test(full.out?.brief), full.out?.finalReview?.spec.approved],
+      reject: [st(reject), reject.order.some((l) => l.endsWith(' 03')), reject.status('01-x.md'), fs.existsSync(path.join(reject.cwd, '.pi/worktrees/spec-w-01')),
+        /Waiting \(1\):\n- 03 — T03: blocked by 01 \(blocked\)/.test(reject.out?.brief)],
+      serial: serial.maxActive,
+      migration: [migr.maxActive <= 2, JSON.stringify(migr.out?.plan.waves), migr.order.indexOf('S 02') > migr.order.indexOf('E 01')],
+      conflict: [st(conflict), /conflict in shared\.txt/.test(conflict.out?.brief), conflict.sh('git status --short --untracked-files=no | wc -l')],
+      dirty: [dirty.out?.handoff.status, dirty.order.length],
+      dupes: [dupes.out?.handoff.status, dupes.order.length, /01-x\.md and 01-y\.md/.test(dupes.out?.handoff.blocker)],
+      setup: [st(setup), st(nosetup)],
+      quoted: [st(evil), fs.existsSync(path.join(evil.cwd, 'pwned')), evil.sh('git log --format=%s | grep "^merge: "')],
+      usage: usage.code,
+    };
+    const want = {
+      plan: [[1, '[["01","02"],["03"]]', 0, '1'], 'without --confirmed the run started a ticket or made a worktree, or the planned waves are wrong'],
+      full: [['01:done 02:done 03:done', 0, 'complete', 2, true, 'has01', '3', 'done', '1', '0', true, true],
+        "the waves did not land every ticket, a dependent started before its blocker merged (03 must see 01's file), the slots were not used, or a worktree, a branch or the brief was left wrong"],
+      reject: [['01:blocked 02:done 03:ready-for-agent', false, 'blocked', true, true], "a blocked ticket's dependent started, the ticket was not marked blocked, its worktree was not kept, or the brief does not say who waits"],
+      serial: [1, '--max-parallel 1 still ran two tickets at once'],
+      migration: [[true, '[["01","03"],["02"]]', true], 'two tickets that add a migration ran at once'],
+      conflict: [['01:done 02:blocked', true, '0'], 'a merge conflict was not aborted, named and the ticket marked blocked'],
+      dirty: [['blocked', 0], "a waves run started over the user's uncommitted work"],
+      dupes: [['blocked', 0, true], 'two tickets with one id ran'],
+      setup: [['01:done', '01:blocked'], '--worktree-setup did not run in the worktree before its ticket (the gitignored file the preflight reads must be copied in), or a missing one did not block'],
+      quoted: [['01:done', false, "merge: 01 — x $(touch pwned) it's"], 'a ticket title reached the shell unquoted'],
+      usage: [2, '--seams is per ticket and must be refused'],
+    };
+    for (const [k, [v, why]] of Object.entries(want)) {
+      if (JSON.stringify(got[k]) !== JSON.stringify(v)) throw new Error(`${why} (got ${JSON.stringify(got[k])})`);
+    }
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+  return 'plan before any code · 03 waits for 01 to merge · 2 slots, 1 with --max-parallel 1 · one migration at a time · conflict aborted + blocked · dirty and duplicate ids refused · worktree setup · titles quoted';
+});
+
 const GLYPH = { pass: '✓', fail: '✗', skip: '⊘' };
 let failed = 0, skipped = 0;
 for (const r of results) {
