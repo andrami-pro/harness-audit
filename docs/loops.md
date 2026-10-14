@@ -298,7 +298,8 @@ rejected axis reaches the implementer as its own section. Its model is `harness.
 reviewer's when unset, refused like the reviewer's when Claude or the implementer's family (D25a); `--no-spec-review`
 turns it off. What Pi still lacks: a `prd` path (the spec seat is pointed at `docs/prds/`, not one file), the stop on a
 rejection with no `[FAIL]` line, and a live run of the spec axis. `--allow-skipped "<substring>"`, repeatable, makes a
-matching `SKIP` line reported, not counted. From a Pi session, a small extension can expose it as `/develop-phase <task>`; from a shell: `node scripts/develop-phase-pi.js --task "…"
+matching `SKIP` line reported, not counted. From a Pi session, a small extension can expose it as
+`/develop-phase <task>`; from a shell: `node scripts/develop-phase-pi.js --task "…"
 [--no-preparer] [--no-commit] [--max-iter N] [--preflight "<cmd>"] [--no-jev] [--run-dir <path>] [--no-tmux]
 [--seams propose|"<list>"] [--no-tdd] [--no-spec-review] [--allow-skipped "<substring>"]`.
 
@@ -346,11 +347,22 @@ The project wrapper runs it when the args carry `tickets`, with the same config 
   command run in each new worktree before its ticket starts (`pnpm install --frozen-lockfile`). That includes the
   gitignored files your preflight reads: in the first pilot, `private-terms.json` was missing from the worktrees, its
   check skipped, and both tickets blocked on that one undeclared SKIP (`cp /abs/path/private-terms.json .`). A ticket
-  set back to `ready-for-agent` after a block resumes in the worktree and branch it kept. Paths, branches and the merge message reach
-  the shell single-quoted, so a ticket title is text. A merge that landed counts as landed even when its worktree cannot
-  be removed. The brief asks you to tidy it.
+  set back to `ready-for-agent` after a block resumes in the worktree and branch it kept. Paths, branches and the merge
+  message reach the shell single-quoted, so a ticket title is text. A merge that landed counts as landed even when its
+  worktree cannot be removed. The brief asks you to tidy it.
 - **Final review.** Once something landed, a code seat and a spec seat review everything merged
   (`git diff <start>..HEAD`), in parallel and read-only. They look for what no single ticket's review could see.
+
+**On Pi** the same loop is `scripts/develop-spec-pi.js`. Pi runs each process with a cwd of its own, so most of what
+needs a seat on Claude is plain code there: reading the tickets, the plan, the worktrees
+(`.pi/worktrees/spec-<folder>-<id>`), the merges and the status lines. Each ticket runs the real `develop-phase-pi.js` inside its worktree. Its `## Seams` go
+to `--seams`, and every develop-phase-pi flag you pass reaches every ticket. The models are develop-phase-pi's seats and
+a final code + spec review from the same `pi` line-up. A ticket that adds a migration says so on a `Migration: yes` line,
+where the Claude read seat judges it from the prose. From the checkout the tickets merge into:
+`node scripts/develop-spec-pi.js --tickets docs/tickets/<folder> [--confirmed] [--max-parallel 2]
+[--worktree-setup "<cmd>"] [--integrate "<cmd with {branch}>"] [--prd <path>] [--preflight "<cmd>"]
+[--allow-skipped "<s>"]… [--max-iter N] [--no-tdd] [--no-spec-review] [--no-jev] [--no-preparer] [--no-tmux]`.
+Without `--confirmed` it prints the plan and changes nothing. Proven by stub seats in `validate.js`; no live run yet.
 
 **Why it is a built file.** A workflow runs another only one level deep, and the wrapper already spends that level, so
 develop-spec cannot call develop-phase. `scripts/build-workflows.js` inlines develop-phase's loop into it as a function,

@@ -3600,6 +3600,18 @@ check('develop-phase-pi: D25a on the spec seat — implementer\'s family or a Cl
 // develop-spec-pi.js is the waves loop on Pi: the scheduler, the worktrees, the merges and the status lines are code,
 // and each ticket runs the real develop-phase-pi.js inside its worktree. A fake `pi` answers per seat and per ticket
 // (the id is read from the prompt file), and its implementer traces start/end so a check can count tickets in flight.
+//
+// Negative controls (2026-10-14, each applied to develop-spec-pi.js, observed, reverted — all exit 1):
+//   the --confirmed gate disabled ......... "without --confirmed the run started a ticket" (got [0,…,6,"1"])
+//   Blocked by ignored by the frontier .... "a blocked ticket's dependent started" (got ["01:blocked 02:done 03:done",…])
+//   the migration exclusion removed ....... "two tickets that add a migration ran at once"
+//   the slot limit removed ................ "--max-parallel 1 still ran two tickets at once" (got 2)
+//   the dirty-checkout refusal disabled ... "a waves run started over the user's uncommitted work" (got ["complete",6])
+//   the duplicate-id refusal disabled ..... "two tickets with one id ran" (got ["complete",4,false])
+//   --worktree-setup never run ............ "--worktree-setup did not run in the worktree" (got ["01:blocked","01:blocked"])
+//   git merge --abort removed ............. "a merge conflict was not aborted" (got […,"2"])
+//   q() returning its argument unquoted ... the unquoted merge message fails first ("Command failed: sh -c cat t03.txt")
+// The one-merge queue has no control: merges run synchronously in one Node process, so they cannot interleave.
 check('develop-spec-pi: plan first, frontier by Blocked by, slots, one migration at a time, merges in code, a brief', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ds-pi-'));
   const bin = path.join(tmp, 'bin');

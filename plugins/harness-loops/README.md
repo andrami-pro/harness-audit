@@ -48,7 +48,7 @@ It returns a `handoff` (`complete | continue | blocked`) that is what the seats 
 it is `scripts/develop-phase-pi.js`, with seams, test-first, both axes and a tmux live view ([docs/loops.md](../../docs/loops.md#develop-phase-scout-analyst-and-a-reviewer-from-another-vendor)).
 Args with `tickets: "<folder>"` run **develop-spec**, the waves loop, with the same config: it plans waves from each
 ticket's `Status:` and `Blocked by:`, then with `confirmed: true` works two tickets at a time, each in its own
-worktree, and merges each approved one ([docs/loops.md](../../docs/loops.md#develop-spec-waves)).
+worktree, and merges each approved one; on Pi, `scripts/develop-spec-pi.js` ([docs/loops.md](../../docs/loops.md#develop-spec-waves)).
 
 ### Prerequisites
 
