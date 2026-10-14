@@ -221,6 +221,16 @@ async function main() {
         return { id: t.id, status: 'blocked', reason: why, workdir: null };
       }
     }
+    // A kept branch was cut from an older HEAD: what landed since (its blockers, a fix) is brought in before it resumes.
+    if (git(['merge-base', '--is-ancestor', branch, br], root).code !== 0) {
+      const up = git(['merge', '--no-edit', branch], workdir);
+      if (up.code !== 0) {
+        git(['merge', '--abort'], workdir);
+        const why = `the kept worktree could not take ${branch} (${(up.err || up.out).split('\n').pop()}) — merge it by hand in ${workdir}, then set the ticket back to ready-for-agent`;
+        await mark(t, why);
+        return { id: t.id, status: 'blocked', reason: why, workdir };
+      }
+    }
     const ex = fs.existsSync(exclude) ? fs.readFileSync(exclude, 'utf8') : '';
     if (!ex.split('\n').includes('.pi/worktrees/')) fs.appendFileSync(exclude, `${ex && !ex.endsWith('\n') ? '\n' : ''}.pi/worktrees/\n`);
     if (a.worktreeSetup) {

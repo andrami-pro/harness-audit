@@ -3627,6 +3627,9 @@ check('develop-phase-pi: --prd reaches scout and spec prompts, default stays doc
 });
 
 // Ticket 02: a rejection with no [FAIL] line stops at once, naming the axis, instead of burning max-iter rounds.
+// Built by develop-spec-pi's first live run; its final code review found the two gaps checked last. Controls, each
+// reverted alone (exit 1): the blocker back to the bare review ("got … \"blocker\":\"RECHAZADO\""); linesOf without
+// the bullet ("a bulleted \"- [FAIL]\" line did not reach the blocker").
 check('develop-phase-pi: reject without [FAIL] stops on the code axis', () => {
   const { run, done } = piLoop();
   const codeNoFail = run('code-no-fail', { env: { FAKE_REJECT_NOFAIL: 'code' }, args: ['--max-iter', '3'] });
@@ -3678,7 +3681,7 @@ case "$HARNESS_SEAT" in
   scout) echo "brief: x" ;;
   analyst) echo "1. x" ;;
   implementer-*) echo "S $ID" >> "$FAKE_TRACE"; sleep 0.4
-    if [ -n "$FAKE_CONFLICT" ]; then echo "$ID" > shared.txt; elif [ -f t01.txt ]; then echo "has01" > "t$ID.txt"; else echo "$ID" > "t$ID.txt"; fi
+    if [ -n "$FAKE_CONFLICT" ]; then echo "$ID" > shared.txt; elif [ -f base2.txt ]; then echo "base2" > "t$ID.txt"; elif [ -f t01.txt ]; then echo "has01" > "t$ID.txt"; else echo "$ID" > "t$ID.txt"; fi
     echo "E $ID" >> "$FAKE_TRACE"; echo "t$ID.txt" ;;
   reviewer-*) printf '[PASS] a — x\\nAPROBADO\\n' ;;
   spec-*) if [ "$ID" = "$FAKE_REJECT" ]; then printf '[FAIL] tarea — falta x\\nRECHAZADO\\n'; else printf '[PASS] tarea — x\\nAPROBADO\\n'; fi ;;
@@ -3694,15 +3697,17 @@ esac
   const three = { '01': T('01', { seams: '- f() — x' }), '02': T('02'), '03': T('03', { blockedBy: '01' }) };
   const GIT = { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' };
   let n = 0;
-  const run = (tickets, { args = [], env = {}, before } = {}) => {
-    const repo = path.join(tmp, `r${++n}`);
+  const run = (tickets, { args = [], env = {}, before, reuse } = {}) => {
+    const repo = reuse || path.join(tmp, `r${++n}`);
     let cwd = repo;
+    if (!reuse) {
     fs.mkdirSync(path.join(repo, 'docs/tickets/w'), { recursive: true });
     for (const [id, body] of Object.entries(tickets)) fs.writeFileSync(path.join(repo, 'docs/tickets/w', `${id.replace(/'$/, '')}-${id.endsWith("'") ? 'y' : 'x'}.md`), body);
     fs.writeFileSync(path.join(repo, '.gitignore'), 'secret.json\n');
     execFileSync('sh', ['-c', 'git init -q -b main && git add -A && git commit -qm init'], { cwd: repo, env: { ...process.env, ...GIT } });
+    }
     if (before) cwd = before(repo) || repo;
-    const trace = path.join(tmp, `trace-${n}`);
+    const trace = path.join(tmp, `trace-${++n}`);
     fs.writeFileSync(trace, '');
     const r = require('node:child_process').spawnSync('node', [path.join(ROOT, 'plugins/harness-loops/scripts/develop-spec-pi.js'),
       '--tickets', 'docs/tickets/w', '--no-jev', '--no-tmux', '--max-iter', '1', '--preflight', 'true', '--run-dir', path.join(tmp, `run-${n}`), ...args], {
@@ -3740,6 +3745,10 @@ esac
       before: (repo) => { execFileSync('git', ['worktree', 'add', '-q', '-b', 'lw', path.join(tmp, `lw${n}`)], { cwd: repo }); return path.join(tmp, `lw${n}`); } });
     const loose = run(three, { args: ['--confirmed'], before: (repo) => { fs.writeFileSync(path.join(repo, 'docs/tickets/w/04-x.md'), T('04')); } });
     const leftover = run({ '01': T('01') }, { args: ['--confirmed', '--worktree-setup', 'touch junk.txt'] });
+    // A ticket blocked once and set back to ready resumes in its kept worktree, after taking what landed since.
+    const resumed = run({ '01': T('01') }, { args: ['--confirmed'], env: { FAKE_REJECT: '01' } });
+    execFileSync('sh', ['-c', "echo b > base2.txt && sed -i 's/^Status: blocked$/Status: ready-for-agent/' docs/tickets/w/01-x.md && git add -A && git commit -qm base2"], { cwd: resumed.cwd, env: { ...process.env, ...GIT } });
+    const again = run({}, { args: ['--confirmed'], reuse: resumed.cwd });
     const lower = run({ '01': T('01').replace('Status:', 'status:') }, { args: ['--confirmed'] });
     const got = {
       plan: [plan.code, JSON.stringify(plan.out?.plan.waves), plan.order.length, plan.sh('git worktree list | wc -l')],
@@ -3762,6 +3771,7 @@ esac
       loose: [loose.out?.handoff.status, loose.order.length, /04-x\.md/.test(loose.out?.handoff.blocker)],
       leftover: [st(leftover), /junk\.txt/.test(leftover.out?.brief)],
       lower: [st(lower), lower.status('01-x.md')],
+      resumed: [st(resumed), st(again), again.sh('cat t01.txt'), again.sh('git worktree list | wc -l')],
     };
     const want = {
       plan: [[1, '[["01","02"],["03"]]', 0, '1'], 'without --confirmed the run started a ticket or made a worktree, or the planned waves are wrong'],
@@ -3781,6 +3791,7 @@ esac
       linked: [['01:done 02:blocked', false, '0'], 'a conflict in a run started from a linked worktree left the checkout mid-merge'],
       loose: [['blocked', 0, true], 'a ticket file that was never committed ran — its worktree, branched from HEAD, does not hold it'],
       leftover: [['01:blocked', true], "a file the worktree setup left, which git does not ignore, would have shipped in the ticket's commit"],
+      resumed: [['01:blocked', '01:done', 'base2', '1'], 'a resumed ticket did not take what landed on the branch since it was blocked (its implementer must see base2.txt)'],
       lower: [['01:done', 'done'], 'a lower-case status: line was read but never rewritten, so the ticket would run again'],
     };
     for (const [k, [v, why]] of Object.entries(want)) {
