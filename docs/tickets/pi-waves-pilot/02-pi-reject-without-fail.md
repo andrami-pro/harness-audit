@@ -1,5 +1,5 @@
 # 02 — Pi: stop on a rejection that names no [FAIL]
-Status: ready-for-agent
+Status: done
 Blocked by: 01
 
 PRD: `docs/prds/PRD-004-three-plugins-and-waves.md` §7 ("Pi parity").
@@ -36,3 +36,4 @@ The Claude loop. Changing how a rejection with `[FAIL]` lines is handled.
 ## Comments
 - 2026-10-14: develop-spec-pi: Ver /tmp/claude-1000/-home-andrami-Documents-harness-audit/5548565a-cbb4-4ffb-9761-5983a7c27527/scratchpad/pi-pilot/run/ticket-02/implementer*.err.txt — worktree kept at /home/andrami/Documents/harness-audit/.pi/worktrees/spec-pi-waves-pilot-02
 - 2026-10-14: set back to ready-for-agent: the first run lost its provider connection ("Connection error."), not a ticket problem.
+- 2026-10-14: merged by develop-spec-pi from spec/pi-waves-pilot-02
