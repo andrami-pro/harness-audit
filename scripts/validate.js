@@ -2114,6 +2114,50 @@ check('rubric-template and SKILL.md both carry the four Pillar-4 criteria, and t
   return '4 criteria in both files; ADR + postmortem rows ⚠';
 });
 
+// PRD-004 §5 names four criteria for a project the develop loops run: a glossary the loops point at, tickets
+// with blocking edges, a Spec axis with agreed seams, and a wrapper that calls the global script. Like the
+// Pillar-4 four, each lives twice — a `Check:` line in the rubric template and a row in the skill's audit
+// table — so each marker has to sit inside its own criterion: a `Check:` line there, a table row here. A
+// marker that only survives in surrounding prose would let the criterion itself be struck and stay green.
+// The Pi install ships both files as copies (install.sh --target pi), and a copy edited apart drifts.
+//
+// Negative controls (2026-10-14, each applied, observed, reverted by hand — all exit 1):
+//   'GLOSSARY-MAP.md' struck from the glossary Check: line in rubric-template.md .........................
+//     "rubric-template.md has no Check: line carrying the PRD-004 §5 marker 'GLOSSARY-MAP.md'" — the
+//     marker still sat in the "why" bullet below, and a whole-file includes() would have passed
+//   the Spec-axis row struck from SKILL.md ................................................................
+//     "SKILL.md has no audit-table row carrying the PRD-004 §5 marker 'specReview'"
+//   one byte appended to .pi/skills/harness-audit/rubric-template.md ......................................
+//     ".pi/skills/harness-audit/rubric-template.md drifted from plugins/harness-audit/skills/harness-audit/rubric-template.md"
+//   the "Tickets with blocking edges" row struck from SKILL.md ............................................
+//     FIRST RUN: exit 0. The control DID NOT BITE: the Spec-axis row listed tickets by their `Blocked by:`
+//     line, so 'Blocked by:' survived the struck criterion. Fixed twice: the Spec-axis command now lists
+//     tickets with `find`, and a line counts for a marker only when it carries no other §5 marker. Re-run:
+//     "SKILL.md has no audit-table row of its own carrying the PRD-004 §5 marker 'Blocked by:'"
+//   the tickets Check: line struck from rubric-template.md (same first-run escape, same fix) ..............
+//     "rubric-template.md has no Check: line of its own carrying the PRD-004 §5 marker 'Blocked by:'"
+check('rubric-template and SKILL.md both carry the four PRD-004 §5 criteria, and the Pi copies match', () => {
+  const dir = 'plugins/harness-audit/skills/harness-audit';
+  const lines = (f) => read(`${dir}/${f}`).split('\n');
+  const checks = lines('rubric-template.md').filter((l) => l.startsWith('Check:'));
+  const rows = lines('SKILL.md').filter((l) => l.startsWith('|'));
+  const markers = ['GLOSSARY-MAP.md', 'Blocked by:', 'specReview', 'workflow(ref'];
+  // A line counts for a marker only when it carries no other §5 marker: a command shared with a sibling
+  // criterion (the Spec-axis check once listed tickets by their `Blocked by:` line) would otherwise keep a
+  // struck criterion alive.
+  const own = (l, m) => l.includes(m) && markers.every((o) => o === m || !l.includes(o));
+  for (const m of markers) {
+    if (!checks.some((l) => own(l, m))) throw new Error(`rubric-template.md has no Check: line of its own carrying the PRD-004 §5 marker '${m}'`);
+    if (!rows.some((l) => own(l, m))) throw new Error(`SKILL.md has no audit-table row of its own carrying the PRD-004 §5 marker '${m}'`);
+  }
+  for (const f of ['rubric-template.md', 'SKILL.md']) {
+    if (read(`.pi/skills/harness-audit/${f}`) !== read(`${dir}/${f}`)) {
+      throw new Error(`.pi/skills/harness-audit/${f} drifted from ${dir}/${f} — edit the plugin copy, then cp it over`);
+    }
+  }
+  return `${markers.length} criteria in both files; Pi copies byte-identical`;
+});
+
 // F13 — the capability table is the authority on what the port destroys, and its whole purpose is that
 // install.sh and README §Compatibility stop being two independent retellings of the same caveats. So
 // every row has to reach the reader in both places: the README in prose, install.sh by printing the

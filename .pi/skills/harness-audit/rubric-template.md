@@ -165,6 +165,57 @@ Why each one is a criterion and not a preference:
   exits non-zero, and reverts, so the next person can re-run the proof instead of trusting the last one.
   The Good column above already asks for this in prose; this row asks for the file.
 
+## Criteria for a project run by the develop loops (PRD-004 §5)
+
+Emit these when the project has a `.claude/workflows/develop-phase.js`, the wrapper the harness-loops
+plugin installs. A project without one marks all four `applies: false`: the loops do not run there, so
+there is nothing for them to grade.
+
+```markdown
+## R<N> — A glossary exists and the loops point at it
+Check: `test -n "$(ls GLOSSARY.md GLOSSARY-MAP.md 2>/dev/null)" && grep -qE 'GLOSSARY(-MAP)?\.md' .claude/workflows/develop-phase.js; echo $?` → 0
+State: FAIL (actual: 1 — GLOSSARY.md exists, the wrapper's context never names it)
+Pillar: 4 · Fix cost: low
+
+## R<N+1> — Work is tracked as tickets with blocking edges, one file each
+Check: `T=$(find docs/tickets -name '*.md' ! -name README.md 2>/dev/null); [ -n "$T" ] && [ -z "$(echo "$T" | xargs grep -LE '^Status:')" ] && [ -z "$(echo "$T" | xargs grep -HcE '^Blocked by:' | grep -v ':1$')" ]; echo $?` → 0
+State: PASS
+Pillar: 4 · Fix cost: medium
+
+## R<N+2> — develop-phase carries a Spec axis and agreed seams
+Check: `W=.claude/workflows/develop-phase.js; test -f "$W" && [ "$(grep -E '(specReview|tdd): *false' "$W" | grep -vc '//')" -eq 0 ] && [ -z "$(find docs/tickets -name '*.md' ! -name README.md 2>/dev/null | xargs -r grep -L '^## Seams')" ]; echo $?` → 0
+State: FAIL (actual: 1 — `specReview: false` with no comment saying why)
+Pillar: 2 · Fix cost: low
+
+## R<N+3> — The project wrapper calls the global script, not a forked copy
+Check: `grep -c 'workflow(ref' .claude/workflows/develop-phase.js` → 1
+State: PASS
+Pillar: 2 · Fix cost: medium
+```
+
+Why each one is a criterion and not a preference:
+
+- **Glossary the loops read** — a scout, an implementer and two reviewers that each name the same thing
+  differently produce a diff the spec reviewer cannot match against the task. A glossary on disk is only
+  half of it: the loop reads what the wrapper's `context` lists, so the wrapper has to name the file.
+  `GLOSSARY-MAP.md` is the multi-context form (one map pointing at one glossary per context).
+- **Tickets with blocking edges** — a single growing task list has no frontier: nothing says which item
+  can start now and which waits on another. One file per ticket, each with `Status:` and exactly one
+  `Blocked by:` line (`None` counts), is the graph develop-spec walks wave by wave. A file carrying many
+  `Blocked by:` lines is that task list again under another name, and the check says so. The check
+  reads every `.md` under `docs/tickets/` (a `README.md` is skipped), so a ticket with no `Blocked by:`
+  line at all fails it as surely as one with two.
+- **Spec axis and agreed seams** — the code reviewer judges the diff against the rubric; only the spec
+  seat judges it against the task, so turning `specReview` (or `tdd`) off removes the half of the review
+  that catches the wrong feature built well. A switch-off is allowed, with its reason in a comment on the
+  same line. The check takes any `//` on that line as the reason, so it catches a bare switch-off, not a
+  thin reason: the auditor still reads the comment. The agreed seams come from the run's `seams:` or, for
+  a ticketed run, from each ticket's `## Seams` section, which the check requires of every ticket.
+- **Wrapper, not fork** — a project that copies `develop-phase.js` stops receiving every fix the plugin
+  ships, and nobody notices because the copy still runs. The wrapper holds only the project config and
+  hands it to the global script through `workflow(ref, merged)`; a count of 0 is a fork, and Step 0
+  migrates it.
+
 ## The golden rule
 
 Before closing the rubric, run this meta-check on each entry: *"Can an agent with no context run the Check and reach the same verdict I did?"* If the answer is no, rewrite the criterion or drop it.
