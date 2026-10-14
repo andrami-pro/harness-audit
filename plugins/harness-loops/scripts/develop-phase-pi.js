@@ -20,6 +20,11 @@
 // Usage (from the session's worktree):
 //   node develop-phase-pi.js --task "<task>" [--max-iter 5] [--no-preparer] [--no-commit]
 //                            [--preflight "<command>"] [--no-jev] [--run-dir <path>] [--no-tmux]
+//                            [--seams propose | --seams "<one per line>"] [--no-tdd] [--allow-skipped "<substring>"]…
+//   --seams propose   stop after the analyst and return its seams in the result, for the human to agree once
+//   --seams "<list>"  the agreed seams: the analyst copies them or stops on BLOQUEO/BLOCKER; every seat gets them
+//   --no-tdd          the implementer is not asked to work test-first (default: test-first, one test per seam)
+//   --allow-skipped   repeatable: a preflight SKIP line containing it (any case) is reported, not counted
 // Progress goes to stderr, one line per event; the result (handoff JSON) goes to stdout. Every seat's
 // prompt and full transcript are kept under the run dir printed at start:
 //   <name>.live.log  — that seat's actions as they happen (tool calls, thinking, final answer)
@@ -48,7 +53,7 @@ const READ_ONLY = 'read,grep,find,ls';
 
 // ── args ─────────────────────────────────────────────────────────────────────────────────────────────
 function parseArgs(argv) {
-  const a = { task: '', maxIter: 5, preparer: true, commit: true, preflight: null, jev: true, runDir: null, tmux: true };
+  const a = { task: '', maxIter: 5, preparer: true, commit: true, preflight: null, jev: true, runDir: null, tmux: true, seams: null, tdd: true, allowSkipped: [] };
   for (let i = 0; i < argv.length; i += 1) {
     const k = argv[i];
     if (k === '--task') a.task = argv[++i] || '';
@@ -59,12 +64,24 @@ function parseArgs(argv) {
     else if (k === '--no-jev') a.jev = false;
     else if (k === '--run-dir') a.runDir = argv[++i] || null;
     else if (k === '--no-tmux') a.tmux = false;
+    else if (k === '--seams') a.seams = argv[++i] || '';
+    else if (k === '--no-tdd') a.tdd = false;
+    else if (k === '--allow-skipped') a.allowSkipped.push(argv[++i] || '');
     else throw new Error(`unknown argument: ${k}`);
   }
   if (!a.task.trim()) throw new Error('--task is required');
   if (!Number.isInteger(a.maxIter) || a.maxIter < 1) throw new Error('--max-iter must be a positive integer');
+  if (a.allowSkipped.some((s) => !s.trim())) throw new Error('--allow-skipped needs a substring');
+  if (a.seams === 'propose' && !a.preparer) throw new Error('--seams propose needs the analyst: drop --no-preparer');
+  a.agreedSeams = a.seams === 'propose' ? [] : String(a.seams || '').split('\n').map((l) => l.trim()).filter(Boolean);
   return a;
 }
+
+// The test-first rule, word for word the one workflows/develop-phase.js gives its implementer.
+const TDD_RULES = `Work test-first, one vertical slice at a time. For each seam (none listed: each public interface the task
+touches), write one test that exercises it through that interface, run it and watch it fail for the expected reason,
+then write the least code that makes it pass; refactor only on green. If ~/.agents/skills/tdd/SKILL.md exists, read it first and follow it.
+In your report, name per seam the test and the command that ran it red, then green.`;
 
 const log = (line) => process.stderr.write(`${line}\n`);
 
@@ -231,6 +248,22 @@ function verdictOf(review) {
   return APROBADOS.includes(v);
 }
 
+// The seams are read from the plan with the rules of seamsOf() in workflows/develop-phase.js: a marker line is
+// read without its markdown (**SEAMS**:, - SEAMS:, > SEAMS (one per line):, END SEAMS:), and with no END line the
+// block ends at the first blank line, so the risks section is never read as seams.
+const marker = (l) => l.replace(/[*`_#>\s:-]/g, '').toUpperCase();
+function seamsOf(text) {
+  const lines = text.split('\n');
+  const start = lines.findIndex((l) => /^SEAMS(\(.*\))?$/.test(marker(l)));
+  if (start < 0) return [];
+  const out = [];
+  for (const l of lines.slice(start + 1)) {
+    if (marker(l) === 'ENDSEAMS' || (!l.trim() && out.length)) break;
+    if (l.trim()) out.push(l.trim());
+  }
+  return out;
+}
+
 // ── preflight ────────────────────────────────────────────────────────────────────────────────────────
 function preflightCommand(root, explicit) {
   if (explicit) return explicit;
@@ -244,18 +277,24 @@ function preflightCommand(root, explicit) {
   return null;
 }
 
-function runPreflight(cmd, runDir) {
-  if (!cmd) return { state: 'NO VERIFICADO (sin preflight en el repo)', passed: false, exitCode: null, skipped: [] };
+// A SKIP is not a PASS. The one exception is a skip the project declared with --allow-skipped (a live check with
+// no key here): a line containing one of those substrings, any case, is reported in allowedSkips, not counted.
+function runPreflight(cmd, runDir, allow = []) {
+  if (!cmd) return { state: 'NO VERIFICADO (sin preflight en el repo)', passed: false, exitCode: null, skipped: [], allowedSkips: [] };
   const r = spawnSync('sh', ['-c', cmd], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, timeout: 30 * 60 * 1000 });
   const output = `${r.stdout || ''}${r.stderr || ''}`;
   fs.writeFileSync(path.join(runDir, 'preflight.out.txt'), output);
-  const skipped = output.split('\n').map((l) => l.trim()).filter((l) => /^SKIP\b/.test(l));
+  const allowed = allow.map((s) => String(s).toLowerCase());
+  const isAllowed = (l) => allowed.some((s) => l.toLowerCase().includes(s));
+  const skips = output.split('\n').map((l) => l.trim()).filter((l) => /^SKIP\b/.test(l));
+  const skipped = skips.filter((l) => !isAllowed(l));
+  const allowedSkips = skips.filter(isAllowed);
   const exitCode = r.status;
   const passed = exitCode === 0 && !skipped.length;
   const state = passed ? 'PASS'
     : exitCode === 0 ? `NO VERIFICADO (${skipped.length} SKIP)`
       : `FAIL (exit ${exitCode ?? r.signal ?? '?'})`;
-  return { state, passed, exitCode, skipped };
+  return { state, passed, exitCode, skipped, allowedSkips };
 }
 
 // ── commit ───────────────────────────────────────────────────────────────────────────────────────────
@@ -325,7 +364,7 @@ async function main() {
   if (preparer && a.jev) {
     const s = await sizeTask(task);
     log(`sizing: ${s.note}`);
-    if (s.size === 'trivial') preparer = false;
+    if (s.size === 'trivial' && a.seams !== 'propose') preparer = false;
     else if (s.size === 'bounded') analystSeat = seats.implementer;
   }
 
@@ -334,7 +373,8 @@ async function main() {
   if (tmuxSession) log(`Vista en vivo: tmux attach -t ${tmuxSession}`);
   bus(`Tarea: ${task}`);
 
-  const result = (fields) => ({ task, branch, runDir, seats: { ...seats, analyst: preparer ? analystSeat : null }, ...fields });
+  let seamsOut = { agreed: false, list: [] };
+  const result = (fields) => ({ task, branch, runDir, seats: { ...seats, analyst: preparer ? analystSeat : null }, seams: seamsOut, ...fields });
   const crash = (who, iteration) => result({
     iterations: iteration, approved: false, preflightPassed: false, commit: null,
     handoff: { status: 'crash', summary: `El ${who} no devolvió resultado en la iteración ${iteration}`, evidence: [], blocker: `Ver ${runDir}/${who}*.err.txt` },
@@ -386,14 +426,21 @@ ${brief}
 Devuelve un plan de ≤ 300 palabras:
 1. Pasos ordenados, cada uno con el archivo que toca.
 2. Tests a añadir o ajustar (el reviewer exige regresión si cambia lógica existente).
-3. Riesgos y qué NO tocar (fuera del alcance).
-Si el brief no basta o hay una ambigüedad que bloquea, la PRIMERA línea es "BLOQUEO: <motivo>" y nada más.
+3. Riesgos y qué NO tocar (fuera del alcance). Cada riesgo que nombres obliga al implementer.
+4. Seams: las interfaces públicas que ejercitan los tests (una función, un endpoint, un comando CLI, las props de un
+   componente), una por línea como "- <interfaz> — <comportamiento que fija el test>", entre una línea SEAMS: y una
+   línea END SEAMS.
+${a.agreedSeams.length ? `El humano acordó estos seams antes de la ejecución: cópialos sin cambios en tu bloque SEAMS. Si la tarea no
+se puede construir detrás de ellos, la PRIMERA línea es "BLOQUEO: <por qué los seams acordados no encajan>".
+AGREED SEAMS:
+${a.agreedSeams.join('\n')}
+` : ''}Si el brief no basta o hay una ambigüedad que bloquea, la PRIMERA línea es "BLOQUEO: <motivo>" y nada más.
 Sin código completo: lo escribe el implementer.`,
       });
       if (!plan) { log('⚠ Analista sin resultado — el implementer parte solo del brief'); bus('Analista: sin resultado'); }
-      else if (/^\W*BLOQUEO:/.test(plan.trimStart())) {
+      else if (/^\W*(BLOQUEO|BLOCKER):/.test(plan.trimStart())) {
         log('⛔ El analista detectó un bloqueo — se corta antes del implementer');
-        bus(`Analista → BLOQUEO: ${TRUNC(plan.trim(), 300)}`);
+        bus(`Analista → ${TRUNC(plan.trim(), 300)}`);
         return finish(result({
           iterations: 0, approved: false, preflightPassed: false, commit: null,
           handoff: { status: 'blocked', summary: 'El analista pidió una decisión antes de implementar', evidence: [brief], blocker: plan.trim() },
@@ -402,6 +449,29 @@ Sin código completo: lo escribe el implementer.`,
       } else bus(`Analista → plan: ${TRUNC(plan.replace(/\n+/g, ' '), 300)}`);
     }
   }
+
+  // The seams are agreed once, before any code: a `--seams propose` run ends here and hands them to the human,
+  // who re-runs with the list they accept.
+  const proposedSeams = seamsOf(plan);
+  if (a.seams === 'propose') {
+    seamsOut = { agreed: false, list: proposedSeams };
+    const why = !plan ? 'El explorador o el analista no devolvió nada — relanzar, o pasar --seams con la lista'
+      : !proposedSeams.length ? 'El analista no propuso seams — leer el plan y relanzar con --seams "<uno por línea>"'
+        : 'Editar los seams si hace falta y relanzar con --seams "<uno por línea>"';
+    log(proposedSeams.length ? `Seams propuestos (${proposedSeams.length}) — se para para que el humano los acuerde` : '⛔ Sin seams propuestos');
+    bus(`Seams propuestos: ${proposedSeams.length}`);
+    return finish(result({
+      iterations: 0, approved: false, preflightPassed: false, commit: null,
+      handoff: { status: 'blocked', summary: proposedSeams.length ? 'Seams propuestos — acordarlos antes de que corra el implementer' : 'No hay seams propuestos', evidence: plan ? [plan] : brief ? [brief] : [], blocker: why },
+      nextStep: why,
+    }));
+  }
+  const seams = a.agreedSeams.length ? a.agreedSeams : proposedSeams;
+  seamsOut = { agreed: a.agreedSeams.length > 0, list: seams };
+  if (plan && !seams.length) log('⚠ El plan no nombra seams — el implementer prueba las interfaces públicas que toca');
+  const seamsBlock = seams.length
+    ? `SEAMS (${a.agreedSeams.length ? 'acordados por el humano — vinculantes' : 'propuestos por el analista'}):\n${seams.join('\n')}\n`
+    : '';
 
   const reads = [rubric && rel(rubric), implementerRole && rel(implementerRole)].filter(Boolean).join(', ');
   const context = brief
@@ -429,7 +499,7 @@ PROHIBIDO: desplegar, migraciones remotas, escribir o consultar en bucle la base
 hacer commit o push. La sesión principal integra y despliega después de la revisión.
 ${ponytail ? `Antes de escribir, lee ${ponytail} y aplícala (nivel full): el diff más corto que funcione,
 reutilizar lo que ya existe, sin dependencia nueva sin justificación.\n` : ''}${context}
-TAREA: ${task}${correction}
+${seamsBlock}${a.tdd ? `${TDD_RULES}\n` : ''}TAREA: ${task}${correction}
 Al terminar: lista archivos creados/modificados + descripción de cada cambio.`,
     });
     if (!lastImpl) { bus(`Implementer iter ${iteration}: sin resultado`); return finish(crash('implementer', iteration)); }
@@ -452,14 +522,15 @@ Default = FAIL hasta evidencia de PASS.
 ${rubric ? `\n## ${rel(rubric)}\n\n${fs.readFileSync(rubric, 'utf8')}\n` : '\n(No hay harness-rubric.md: juzga corrección, tests de regresión, alcance y diff mínimo.)\n'}
 ## Tarea
 ${task}
-
+${seamsBlock ? `\n${seamsBlock}` : ''}
 ## Lo que el implementer dice que hizo (afirmación a verificar, no evidencia)
 ${lastImpl.slice(0, 6000)}
 
 ## Cambios (git diff HEAD + archivos nuevos)
 ${changes.text}
-Puedes leer archivos del repositorio (read, grep, find, ls) para verificar una afirmación.
-Prohibido: leer fuera del repositorio, .env*, *secret*, y cualquier archivo ignorado por git.
+Solo lectura: lee archivos del repositorio (read, grep, find, ls) para verificar una afirmación; no edites nada, no ejecutes nada que escriba.
+Un control que necesite editar (un control negativo) va en tu informe como sugerencia para el implementer.
+Prohibido: leer fuera del repositorio, .env*, *secret*, y cualquier archivo ignorado por git.${a.tdd ? '\nEvalúa también:\n[PASS|FAIL] test-first — every seam the report names has a test that exercises it through its public interface' : ''}
 Formato: [PASS|FAIL] criterio — evidencia concreta
 Última línea, sola y sin texto extra: APROBADO o RECHAZADO`,
     });
@@ -473,7 +544,7 @@ Formato: [PASS|FAIL] criterio — evidencia concreta
 
   log('── Preflight');
   const cmd = preflightCommand(root, a.preflight);
-  const pf = runPreflight(cmd, runDir);
+  const pf = runPreflight(cmd, runDir, a.allowSkipped);
   log(`Preflight${cmd ? ` (${cmd})` : ''}: ${pf.state}`);
   bus(`Preflight${cmd ? ` (${cmd})` : ''} → ${pf.state}`);
 
@@ -497,7 +568,8 @@ Formato: [PASS|FAIL] criterio — evidencia concreta
       summary: approved
         ? `Reviewer aprobó tras ${iteration} iteración(es); preflight ${pf.state}${commit && commit.committed ? `; commit ${commit.hash}` : ''}`
         : `Reviewer sigue rechazando tras ${a.maxIter} iteración(es)`,
-      evidence: [...verdictLines, `preflight: ${pf.state}`, ...pf.skipped.map((l) => `preflight skip: ${l}`)],
+      evidence: [...verdictLines, `preflight: ${pf.state}`, ...pf.skipped.map((l) => `preflight skip: ${l}`),
+        ...pf.allowedSkips.map((l) => `preflight skip (declarada): ${l}`)],
       ...(approved ? {} : { blocker: openFails.join(' · ') || 'reviewer devolvió RECHAZADO sin línea [FAIL]' }),
     },
     nextStep: LABEL + (approved && pf.passed
@@ -512,4 +584,4 @@ if (require.main === module) {
   main().then((code) => process.exit(code), (e) => { log(`develop-phase-pi: ${e.stack || e}`); process.exit(1); });
 }
 
-module.exports = { parseArgs, verdictOf, preflightCommand, resolveSeats, SIZES };
+module.exports = { parseArgs, verdictOf, seamsOf, preflightCommand, runPreflight, resolveSeats, SIZES };
