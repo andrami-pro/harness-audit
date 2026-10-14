@@ -331,7 +331,12 @@ The project wrapper runs it when the args carry `tickets`, with the same config 
   with `{branch}`, or `git merge --no-ff`). It is marked `done` with a line under `## Comments`, and its worktree is
   removed. A ticket that does not converge, or does not merge, is marked `blocked` with the reason. Its worktree stays for
   you to inspect, its dependents wait, and the rest of the graph goes on.
-- **Refuses** a checkout with uncommitted changes, since it merges into it.
+- **Refuses** a checkout with uncommitted changes, since it merges into it, and two tickets that share an id.
+- **A worktree holds only what git tracks.** Dependencies and untracked files are not there. `worktreeSetup` names a
+  command run in each new worktree before its ticket starts (`pnpm install --frozen-lockfile`). A ticket set back to
+  `ready-for-agent` after a block resumes in the worktree and branch it kept. Paths, branches and the merge message reach
+  the shell single-quoted, so a ticket title is text. A merge that landed counts as landed even when its worktree cannot
+  be removed. The brief asks you to tidy it.
 - **Final review.** Once something landed, a code seat and a spec seat review everything merged
   (`git diff <start>..HEAD`), in parallel and read-only. They look for what no single ticket's review could see.
 

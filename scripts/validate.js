@@ -2964,6 +2964,9 @@ check('develop-phase workdir, allowSkipped and a read-only reviewer', () => {
 //   Blocked by ignored by the frontier .... "a blocked ticket's dependent started"
 //   the dirty-checkout refusal disabled ... "a waves run started over the user's uncommitted work" (got ["complete",3])
 //   develop-phase.js edited, not rebuilt .. "plugins/harness-loops/workflows/develop-spec.js is stale"
+//   the duplicate-id refusal disabled ..... "two tickets with one id ran as one" (got ["complete",2,false])
+//   q() returning its argument unquoted ... "… or a kept branch is not reused on retry" (the quoted commands fail first)
+//   done only when the cleanup succeeded .. "a merge that landed was reported not merged because its worktree could not be removed"
 check('develop-spec waves: plan first, frontier by Blocked by, slots, one migration and one merge at a time, a brief', () => {
   const build = runNode([path.join(ROOT, 'scripts/build-workflows.js'), '--check'], process.env, '');
   if (build.code !== 0) throw new Error(`plugins/harness-loops/workflows/develop-spec.js is stale — run node scripts/build-workflows.js (${build.err.trim()})`);
