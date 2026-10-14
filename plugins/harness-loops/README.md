@@ -16,6 +16,7 @@ checks every seat's output. Paths like `scripts/…` are relative to this plugin
 | "My skills should improve weekly, with proof" | 2 · Learning | `/skill-loop <skill>` | med-high | A/B gain ≤ +1 for 2 rounds (max 4) |
 | "Four specialist reviewers on this draft/PR" | 3 · Multi-agent review | `/orchestrate <paths>` | medium | no new blocker/major (max 3) |
 | "Deep audit of the whole app — rare, token-hungry" | 4 · Verification | `/review-loop [max-iter]` · plus the `develop-phase` workflow the audit generates per repo | high | score ≥ 90 ∧ 0 blockers (max 5) |
+| "Ship a folder of tickets, two at a time" | 4 · Verification (waves) | the `develop-spec` workflow: the wrapper with `tickets: "<folder>"` | high | every ticket landed or blocked; final review on both axes |
 | "Improve the *process* that builds the product" | 5 · Workflow improvement | `/iterate <task>` | high | score ≥ 90 ∧ optimizer out of proposals (max 5) |
 | "Improve how *I* drive the agent — fully local" | 6 · Operator | `/session-review [--since 30d]` | med-low | single pass; re-run weekly |
 
@@ -43,9 +44,8 @@ another model family: **code** against the rubric (a provider-qualified `reviewe
 `scripts/external-review.sh`) and **spec** against the task, PRD and seams; approval needs both → the
 project's **preflight** decides by exit code, and a `SKIP` is not a pass → an optional **commit** that
 stages the run's files by name, never your uncommitted work.
-It returns a `handoff` (`complete | continue | blocked`) that is what the seats report, labelled as such.
-On Pi the same loop is `scripts/develop-phase-pi.js`, with seams, test-first and a tmux live view (no spec axis yet) — see
-[docs/loops.md](../../docs/loops.md#develop-phase-scout-analyst-and-a-reviewer-from-another-vendor).
+It returns a `handoff` (`complete | continue | blocked`) that is what the seats report, labelled as such. On Pi
+it is `scripts/develop-phase-pi.js`, with seams, test-first, both axes and a tmux live view ([docs/loops.md](../../docs/loops.md#develop-phase-scout-analyst-and-a-reviewer-from-another-vendor)).
 Args with `tickets: "<folder>"` run **develop-spec**, the waves loop, with the same config: it plans waves from each
 ticket's `Status:` and `Blocked by:`, then with `confirmed: true` works two tickets at a time, each in its own
 worktree, and merges each approved one ([docs/loops.md](../../docs/loops.md#develop-spec-waves)).

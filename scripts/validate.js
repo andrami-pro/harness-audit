@@ -3014,6 +3014,7 @@ check('develop-phase workdir, allowSkipped and a read-only reviewer', () => {
 //   the duplicate-id refusal disabled ..... "two tickets with one id ran as one" (got ["complete",2,false])
 //   q() returning its argument unquoted ... "… or a kept branch is not reused on retry" (the quoted commands fail first)
 //   done only when the cleanup succeeded .. "a merge that landed was reported not merged because its worktree could not be removed"
+//   the leading-id strip removed .......... "a heading that starts with its id is said twice" (got [false,true])
 check('develop-spec waves: plan first, frontier by Blocked by, slots, one migration and one merge at a time, a brief', () => {
   const build = runNode([path.join(ROOT, 'scripts/build-workflows.js'), '--check'], process.env, '');
   if (build.code !== 0) throw new Error(`plugins/harness-loops/workflows/develop-spec.js is stale — run node scripts/build-workflows.js (${build.err.trim()})`);
