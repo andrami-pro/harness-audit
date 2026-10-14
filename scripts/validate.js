@@ -2973,7 +2973,8 @@ check('develop-phase workdir, allowSkipped and a read-only reviewer', () => {
         workdir: [wt.calls.every((c) => c.prompt.includes(IN)), wt.calls.find((c) => c.label === 'preflight').prompt.includes('cd /repo/.claude/worktrees/spec-01 && npm run preflight'),
           plain.calls.some((c) => c.prompt.includes('worktree of its own'))],
         allowed: [allowed.out.preflightPassed, allowed.out.handoff.status, allowed.out.handoff.evidence.filter((e) => e.startsWith('preflight skipped (allowed by config)')).length],
-        extra: [extra.out.preflightPassed, extra.out.handoff.evidence.includes('preflight skipped: SKIP: e2e — no browser')],
+        extra: [extra.out.preflightPassed, extra.out.handoff.evidence.includes('preflight skipped: SKIP: e2e — no browser'),
+          extra.out.nextStep.includes('SKIP: e2e — no browser')],
         none: none.out.preflightPassed,
         readOnly: /Read-only: read files and run the tests, edit nothing/.test(plain.calls.find((c) => c.label.startsWith('review')).prompt),
       }));
@@ -2985,7 +2986,7 @@ check('develop-phase workdir, allowSkipped and a read-only reviewer', () => {
   const want = {
     workdir: [[true, true, false], 'a seat of a worktree run was not told to work in it (or the preflight does not cd there), or a plain run was told about a worktree'],
     allowed: [[true, 'complete', 2], 'a skip the project declared in allowSkipped still blocked the run, or was dropped from the evidence instead of reported'],
-    extra: [[false, true], 'a skip outside allowSkipped passed — only the declared skips are accepted'],
+    extra: [[false, true, true], 'a skip outside allowSkipped passed, or nextStep does not name it — only the declared skips are accepted, and the pilot run had to dig the undeclared one out of its journal'],
     none: [false, 'without allowSkipped a skipped check passed — a SKIP is not a PASS'],
     readOnly: [true, 'the code reviewer is not told it is read-only — the first live run saw it edit files to replay controls'],
   };

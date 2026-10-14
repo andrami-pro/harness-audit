@@ -338,7 +338,9 @@ The project wrapper runs it when the args carry `tickets`, with the same config 
   you to inspect, its dependents wait, and the rest of the graph goes on.
 - **Refuses** a checkout with uncommitted changes, since it merges into it, and two tickets that share an id.
 - **A worktree holds only what git tracks.** Dependencies and untracked files are not there. `worktreeSetup` names a
-  command run in each new worktree before its ticket starts (`pnpm install --frozen-lockfile`). A ticket set back to
+  command run in each new worktree before its ticket starts (`pnpm install --frozen-lockfile`). That includes the
+  gitignored files your preflight reads: in the first pilot, `private-terms.json` was missing from the worktrees, its
+  check skipped, and both tickets blocked on that one undeclared SKIP (`cp /abs/path/private-terms.json .`). A ticket set back to
   `ready-for-agent` after a block resumes in the worktree and branch it kept. Paths, branches and the merge message reach
   the shell single-quoted, so a ticket title is text. A merge that landed counts as landed even when its worktree cannot
   be removed. The brief asks you to tidy it.

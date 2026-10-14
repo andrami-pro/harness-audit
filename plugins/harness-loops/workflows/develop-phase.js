@@ -521,7 +521,7 @@ return {
   seams: { agreed: agreedSeams.length > 0, list: seams },
   nextStep: LABEL + (approved && preflightPassed
     ? (commit?.committed ? `committed ${commit.hash}${integrate}` : `${cfg.doneStep ?? 'git add -p && git commit'}${integrate}`)
-    : approved && preflight?.exitCode === 0 ? 'Preflight skipped checks — supply what they need and re-run; a SKIP is not a PASS'
+    : approved && preflight?.exitCode === 0 ? `Preflight skipped checks outside allowSkipped: ${skipped.join(' · ')} — supply what they need and re-run; a SKIP is not a PASS`
     : approved ? 'Preflight failed — fix before commit'
     : `Did not converge — review remaining [FAIL] after ${maxIter} iter and report to the human`),
 }
