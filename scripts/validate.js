@@ -3457,14 +3457,16 @@ case "$HARNESS_SEAT" in
     else echo "1. sum.js"; fi ;;
   implementer-*) echo "module.exports = 2;" > sum.js; echo "sum.js cambiado" ;;
   reviewer-*) printf '[PASS] a — x\\n**APROBADO**\\n' ;;
+  spec-*) if [ -n "$FAKE_SPEC_REJECT" ]; then printf '[FAIL] tarea — falta x\\nRECHAZADO\\n'; else printf '[PASS] tarea — x\\nAPROBADO\\n'; fi ;;
   commit) echo "fix: ajusta sum" ;;
 esac
 `, { mode: 0o755 });
-  const lineup = (reviewer) => {
-    const f = path.join(tmp, `lineup-${reviewer}.json`);
+  const lineup = (reviewer, spec) => {
+    const f = path.join(tmp, `lineup-${reviewer}-${spec || 'none'}.json`);
     const e = (model) => ({ provider: 'fake', model });
     fs.writeFileSync(f, JSON.stringify({ version: 1, defaults: {}, harness: { pi: {
       scout: e('scout-1'), architect: e('arch-1'), orchestrator: e('orch-1'), implementer: e('impl-1'), reviewer: e(reviewer),
+      ...(spec ? { spec: e(spec) } : {}),
     } } }));
     return f;
   };
@@ -3474,11 +3476,11 @@ esac
     execFileSync('sh', ['-c', 'git init -q && echo "module.exports = 1;" > sum.js && git add -A && git -c user.email=t@t -c user.name=t commit -qm init'], { cwd: d });
     return d;
   };
-  const run = (name, { reviewer = 'rev-1', preflight = 'true', env = {}, args = [] } = {}) => {
+  const run = (name, { reviewer = 'rev-1', spec = null, preflight = 'true', env = {}, args = [] } = {}) => {
     const cwd = repo(name);
     const r = require('node:child_process').spawnSync('node', [path.join(ROOT, 'plugins/harness-loops/scripts/develop-phase-pi.js'), '--task', 't', '--max-iter', '1', '--no-jev', '--no-tmux', '--preflight', preflight, ...args], {
       cwd, encoding: 'utf8',
-      env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, MODEL_LINEUP_PATH: lineup(reviewer), GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t', ...env },
+      env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, MODEL_LINEUP_PATH: lineup(reviewer, spec), GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t', ...env },
     });
     let out = null;
     try { out = JSON.parse(r.stdout); } catch { /* refused runs print no JSON */ }
@@ -3548,6 +3550,47 @@ check('develop-phase-pi: seams propose stops before the implementer, agreed seam
   }
   done();
   return 'propose → blocked at 0 iter, seams.list = the analyst\'s block · propose + --no-preparer → exit 2 · agreed seams → analyst + implementer, test-first · BLOCKER stops · --no-tdd drops the rule · declared SKIP reported, another still blocks';
+});
+
+// PRD-004 §3.2 and §7, ticket 03: the Pi loop has the spec axis too — a second read-only seat that judges the change
+// against the task, the PRD, the plan and the seams. Approval needs both axes; a rejected spec blocks an approved code review.
+check('develop-phase-pi: spec axis — spec REJECTED blocks a code APPROVED, axes side by side, own correction section, --no-spec-review', () => {
+  const { run, done } = piLoop();
+  const rej = run('spec-reject', { env: { FAKE_SPEC_REJECT: '1' }, args: ['--max-iter', '2', '--seams', 'uno: sum()'] });
+  if (rej.code !== 1 || !rej.out || rej.out.approved || rej.out.handoff.status !== 'blocked' || rej.log.length !== 1) {
+    throw new Error(`a spec REJECTED next to a code APPROVED was approved or committed: exit ${rej.code} ${rej.err.slice(-300)}`);
+  }
+  const ax = rej.out.axes || {};
+  if (!ax.code || ax.code.approved !== true || !ax.spec || ax.spec.approved !== false) throw new Error(`axes reported as ${JSON.stringify(rej.out.axes)} — want code approved, spec rejected`);
+  if (!rej.out.handoff.evidence.some((l) => l.startsWith('spec: [FAIL]')) || !/spec: \[FAIL\]/.test(rej.out.handoff.blocker || '')) throw new Error('the spec [FAIL] is not in the evidence (prefixed "spec: ") or the blocker');
+  const sp = rej.prompt('spec-1') || '';
+  if (!sp.includes('uno: sum()') || !/TAREA: t\n/.test(sp) || !/Default = FAIL/.test(sp) || !/Solo lectura: .*no edites nada/.test(sp) || !/docs\/prds\//.test(sp)) throw new Error('the spec prompt lacks the task, the PRD path, the seams, the default-FAIL mandate or the read-only line');
+  const impl2 = rej.prompt('implementer-2') || '';
+  if (!/spec reviewer RECHAZÓ/.test(impl2) || /code reviewer RECHAZÓ/.test(impl2) || !impl2.includes('[FAIL] tarea — falta x')) throw new Error('the rejected spec axis did not reach the implementer as its own section');
+  if (rej.out.seats.spec !== rej.out.seats.reviewer || ax.spec.model !== 'fake/rev-1') throw new Error(`with no spec role the spec seat is ${rej.out.seats.spec} — want the reviewer's model`);
+  const off = run('spec-off', { env: { FAKE_SPEC_REJECT: '1' }, args: ['--no-spec-review'] });
+  if (off.code !== 0 || off.out.handoff.status !== 'complete' || off.out.axes.spec !== null || off.prompt('spec-1') !== null) throw new Error(`--no-spec-review still ran or counted the spec seat: exit ${off.code}`);
+  const pinned = run('spec-pinned', { spec: 'spec-1' });
+  if (pinned.code !== 0 || pinned.out.seats.spec !== 'fake/spec-1' || !pinned.out.axes.spec.approved) throw new Error(`a pinned spec model was not used or both approvals did not complete: exit ${pinned.code} ${pinned.err.slice(-200)}`);
+  done();
+  return 'spec ✗ + code ✓ → blocked, axes { code ✓, spec ✗ }, spec: [FAIL] in evidence · own correction section · no spec role → reviewer\'s model · --no-spec-review → no spec seat';
+});
+
+// D25a binds the spec seat as it binds the code reviewer: a spec model of the implementer's family, or a Claude one,
+// refuses the run before any seat — nothing is written to the run dir. With --no-spec-review the role is not read.
+check('develop-phase-pi: D25a on the spec seat — implementer\'s family or a Claude model refuses before any seat', () => {
+  const { tmp, run, done } = piLoop();
+  const runDir = path.join(tmp, 'fam-run');
+  const fam = run('spec-family', { spec: 'impl-3', args: ['--run-dir', runDir] });
+  if (fam.code !== 2 || fam.out || !/spec.*(D25a|family)/.test(fam.err)) throw new Error(`a spec model of the implementer's family was not refused: exit ${fam.code} ${fam.err.slice(-200)}`);
+  const written = fs.existsSync(runDir) ? fs.readdirSync(runDir).filter((f) => f.endsWith('.prompt.md')) : [];
+  if (written.length) throw new Error(`the refused run still ran seat(s): ${written.join(', ')}`);
+  const cl = run('spec-claude', { spec: 'claude-fable-5' });
+  if (cl.code !== 2 || cl.out || !/non-Claude.*spec=/.test(cl.err)) throw new Error(`a Claude spec model on Pi was not refused: exit ${cl.code}`);
+  const off = run('spec-family-off', { spec: 'impl-3', args: ['--no-spec-review'] });
+  if (off.code !== 0 || off.out.seats.spec !== null) throw new Error(`--no-spec-review still refused on the spec role: exit ${off.code}`);
+  done();
+  return 'spec = implementer\'s family → exit 2, no seat ran · Claude spec → exit 2 · --no-spec-review → role not read';
 });
 
 const GLYPH = { pass: '✓', fail: '✗', skip: '⊘' };
