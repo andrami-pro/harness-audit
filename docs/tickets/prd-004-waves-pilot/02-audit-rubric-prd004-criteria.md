@@ -1,6 +1,6 @@
 # 02 — Audit rubric: the four PRD-004 §5 criteria
 
-Status: ready-for-agent
+Status: blocked
 Blocked by: None
 
 PRD: `docs/prds/PRD-004-three-plugins-and-waves.md` §5.
@@ -35,3 +35,4 @@ PRD-004 §5 names four criteria the audit should grade, and only one of them ("w
 Any loop code. Changing existing criteria.
 
 ## Comments
+- 2026-10-14: develop-spec: Reported by the implementer/reviewer seats — not independently certified: Preflight skipped checks — supply what they need and re-run; a SKIP is not a PASS — worktree kept at /home/andrami/Documents/harness-audit/.claude/worktrees/spec-prd-004-waves-pilot-02
