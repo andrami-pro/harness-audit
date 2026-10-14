@@ -363,6 +363,7 @@ tickets merge into: `node scripts/develop-spec-pi.js --tickets docs/tickets/<fol
 "<s>"]… [--max-iter N] [--no-tdd] [--no-spec-review] [--no-jev] [--no-preparer] [--no-tmux]`. Without `--confirmed` it
 prints the plan and changes nothing. It refuses a ticket file that was never committed (the worktrees are branched from
 HEAD), and a `--worktree-setup` that leaves files git does not ignore, since develop-phase-pi commits with `git add -A`.
+A ticket set back to `ready-for-agent` resumes in its kept worktree after merging what landed since.
 A merge conflict is aborted and the ticket marked blocked: resolve it by hand in the kept worktree. Proven by stub seats
 in `validate.js`; no live run yet.
 

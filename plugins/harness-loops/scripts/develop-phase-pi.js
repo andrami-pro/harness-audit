@@ -50,7 +50,9 @@ const { spawn, spawnSync } = require('node:child_process');
 
 const lineupMod = require('./model-lineup.js');
 
-const SEAT_TIMEOUT_S = { scout: 900, analyst: 900, implementer: 2400, reviewer: 1200, commit: 300 };
+// DEVELOP_PHASE_PI_SEAT_TIMEOUT_S caps every seat at that many seconds (tests use it to exercise the limit quickly).
+const CAP_S = Number(process.env.DEVELOP_PHASE_PI_SEAT_TIMEOUT_S) || Infinity;
+const SEAT_TIMEOUT_S = Object.fromEntries(Object.entries({ scout: 900, analyst: 900, implementer: 2400, reviewer: 1200, commit: 300 }).map(([k, v]) => [k, Math.min(v, CAP_S)]));
 const MAX_DIFF_BYTES = 300_000;
 const MAX_UNTRACKED_BYTES = 20_000;
 const JEV_MIN_CONFIDENCE = 0.5;
@@ -199,7 +201,13 @@ function runSeat({ name, model, tools, prompt, runDir, timeoutS }) {
   const started = Date.now();
   return new Promise((resolve) => {
     const child = spawn('pi', ['-p', '--mode', 'json', '--no-session', '--model', model, '--tools', tools, `@${promptFile}`, 'Haz la tarea descrita arriba.'],
-      { cwd: process.cwd(), env: { ...process.env, HARNESS_SEAT: name }, stdio: ['ignore', 'pipe', 'pipe'] });
+      { cwd: process.cwd(), env: { ...process.env, HARNESS_SEAT: name }, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
+    // The seat runs in a process group of its own. pi starts helpers (MCP servers) that inherit its stdout; one that
+    // outlives pi keeps the pipe open, so 'close' never fires and a SIGTERM to pi alone does nothing. In the first live
+    // develop-spec-pi run a commit seat with a 300 s limit held its ticket for three hours that way.
+    const killGroup = (sig) => { try { process.kill(-child.pid, sig); } catch { /* already gone */ } };
+    const graceMs = Math.min(10, timeoutS) * 1000;
+    let killedAfter = null;
     let raw = '';
     let jsonSeen = false;
     let lastText = '';
@@ -223,10 +231,21 @@ function runSeat({ name, model, tools, prompt, runDir, timeoutS }) {
       }
     });
     child.stderr.on('data', (c) => { err += c; });
-    const timer = setTimeout(() => child.kill('SIGTERM'), timeoutS * 1000);
+    let hardKill = null;
+    const timer = setTimeout(() => {
+      killedAfter = timeoutS;
+      killGroup('SIGTERM');
+      hardKill = setTimeout(() => killGroup('SIGKILL'), graceMs);
+    }, timeoutS * 1000);
+    // pi itself exited: whatever of its group still holds the pipe gets a moment to flush, then goes.
+    let linger = null;
+    child.on('exit', () => { linger = setTimeout(() => killGroup('SIGKILL'), Math.min(graceMs, 5000)); });
     child.on('error', (e) => { err += String(e.message); });
     child.on('close', (code, signal) => {
       clearTimeout(timer);
+      clearTimeout(hardKill);
+      clearTimeout(linger);
+      killGroup('SIGTERM');
       // A binary on PATH that isn't pi (a test double, most often) never emits parseable JSON: fall back
       // to the old contract, the whole of stdout, so nothing here depends on --mode json existing.
       const out = jsonSeen ? lastText : raw;
@@ -234,7 +253,7 @@ function runSeat({ name, model, tools, prompt, runDir, timeoutS }) {
       if (err.trim()) fs.writeFileSync(path.join(runDir, `${name}.err.txt`), err);
       const secs = Math.round((Date.now() - started) / 1000);
       if (code !== 0 || !out.trim()) {
-        const line = `✗ murió: ${signal ? `killed ${signal} after ${secs}s` : `exit ${code}`} — ${seatError || err.trim().split('\n').pop() || 'empty output'}`;
+        const line = `✗ murió: ${killedAfter ? `killed after its ${killedAfter}s limit` : signal ? `killed ${signal} after ${secs}s` : `exit ${code}`} — ${seatError || err.trim().split('\n').pop() || 'empty output'}`;
         fs.appendFileSync(liveFile, `${line}\n`);
         lastSeatFailure = line.replace('✗ murió: ', '');
         log(`  ${line.replace('✗ murió', `✗ ${name} (${model}) murió`)}`);

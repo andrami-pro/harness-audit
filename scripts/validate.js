@@ -3463,7 +3463,9 @@ case "$HARNESS_SEAT" in
     echo "module.exports = 2;" > sum.js; echo "sum.js cambiado" ;;
   reviewer-*) if [ "$FAKE_REJECT_NOFAIL" = "code" ]; then printf 'RECHAZADO\\n'; else printf '[PASS] a — x\\n**APROBADO**\\n'; fi ;;
   spec-*) if [ "$FAKE_REJECT_NOFAIL" = "spec" ]; then printf 'RECHAZADO\\n'; elif [ -n "$FAKE_SPEC_BULLET" ]; then printf -- '- [FAIL] tarea — falta y\\nRECHAZADO\\n'; elif [ -n "$FAKE_SPEC_REJECT" ]; then printf '[FAIL] tarea — falta x\\nRECHAZADO\\n'; else printf '[PASS] tarea — x\\nAPROBADO\\n'; fi ;;
-  commit) [ -z "$FAKE_COMMIT_EMPTY" ] && echo "fix: ajusta sum" ;;
+  commit) if [ -n "$FAKE_HANG" ]; then trap '' TERM; sleep 60 & sleep 60; fi
+    if [ -n "$FAKE_LINGER" ]; then (sleep 60 &); fi
+    [ -z "$FAKE_COMMIT_EMPTY" ] && echo "fix: ajusta sum" ;;
 esac
 `, { mode: 0o755 });
   const lineup = (reviewer, spec) => {
@@ -3519,6 +3521,16 @@ check('develop-phase-pi: loop in code — pass commits, D25a refuses, BLOQUEO st
   if (conn.code !== 1 || conn.out.handoff.status !== 'crash' || !/Connection error/.test(conn.out.handoff.blocker)) throw new Error(`a seat whose provider failed (pi exits 0 with an error event) was not reported as such: ${conn.out && conn.out.handoff.blocker}`);
   const nomsg = run('nomsg', { env: { FAKE_COMMIT_EMPTY: '1' }, args: ['--task', 'Implement ticket 01 — x. The ticket is docs/t.md: read it'] });
   if (!nomsg.out.commit.committed || nomsg.out.commit.message !== 'chore: Implement ticket 01 — x') throw new Error(`with no message from the commit seat, the fallback was not the task's first sentence: ${nomsg.out.commit.message}`);
+  // pi's helpers inherit its stdout: a seat that ignores SIGTERM, or one that exits while a child still holds the pipe,
+  // must not hold the run. The first live run lost three hours to a commit seat that way.
+  let t0 = Date.now();
+  const hang = run('hang', { env: { FAKE_HANG: '1', DEVELOP_PHASE_PI_SEAT_TIMEOUT_S: '2' } });
+  const hangS = (Date.now() - t0) / 1000;
+  if (hangS > 20 || !hang.out.commit.committed || !/^chore: t/.test(hang.out.commit.message)) throw new Error(`a seat that ignores SIGTERM held the run ${Math.round(hangS)}s (limit 2s), or the commit did not fall back: ${hang.out && hang.out.commit.message}`);
+  t0 = Date.now();
+  const linger = run('linger', { env: { FAKE_LINGER: '1' } });
+  const lingerS = (Date.now() - t0) / 1000;
+  if (lingerS > 20 || linger.out.commit.message !== 'fix: ajusta sum') throw new Error(`a seat whose child kept stdout open held the run ${Math.round(lingerS)}s after it answered`);
   if (glyph.code !== 1 || glyph.out.preflightPassed || !/⊘ jev live smoke/.test(glyph.out.nextStep)) throw new Error('exit 0 with a ⊘ line (validate.js marks a skip so) counted as a pass, or nextStep does not name it');
   done();
   return 'pass → complete + commit · same family → exit 2 · BLOQUEO → blocked at 0 iter · SKIP → continue, no commit';
@@ -3669,6 +3681,7 @@ check('develop-phase-pi: reject without [FAIL] stops on the code axis', () => {
 //   the setup-leftover refusal off ........ "a file the worktree setup left … would have shipped" (got ["01:done",false])
 //   setStatus case-sensitive again ........ "a lower-case status: line was read but never rewritten"
 //   the final verdict ignored by allDone .. "a final review that rejects still let the run report complete"
+//   a kept worktree not brought up to date  "a resumed ticket did not take what landed on the branch since it was blocked"
 // The one-merge queue has no control: merges run synchronously in one Node process, so they cannot interleave.
 check('develop-spec-pi: plan first, frontier by Blocked by, slots, one migration at a time, merges in code, a brief', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ds-pi-'));
