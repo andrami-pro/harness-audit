@@ -1,6 +1,6 @@
 # 01 — Pi: seams, test-first, declared skips and a read-only reviewer
 
-Status: blocked
+Status: done
 Blocked by: None
 
 PRD: `docs/prds/PRD-004-three-plugins-and-waves.md` §3 and §7 ("Pi parity").
@@ -42,3 +42,4 @@ The spec review axis on Pi (ticket 03). `workflows/develop-phase.js` itself.
 ## Comments
 
 - 2026-10-14: develop-spec: Reported by the implementer/reviewer seats — not independently certified: Preflight skipped checks — supply what they need and re-run; a SKIP is not a PASS — worktree kept at /home/andrami/Documents/harness-audit/.claude/worktrees/spec-prd-004-waves-pilot-01
+- 2026-10-14: landed by hand as 1def897 after the pilot run wf_7e6efbb6-227: both axes approved; the only blocker was an undeclared preflight SKIP (private-terms.json is gitignored, so the worktree lacked it). With the file copied in, validate.js is 69/72, 3 NOT VERIFIED (JEV_LIVE).
