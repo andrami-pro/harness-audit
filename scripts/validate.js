@@ -2896,6 +2896,12 @@ check('develop-phase TDD + Spec axis: seams proposed then agreed, test-first, ap
 // develop-spec runs each ticket in a worktree of its own, so every seat of that ticket has to work there; and a
 // project whose gate always skips a live check would never pass unattended, so it names the skips it accepts —
 // each one still reported. The first live run also showed a code reviewer editing files to replay controls.
+//
+// Negative controls (2026-10-14, each applied, observed, reverted — all exit 1):
+//   IN_WORKDIR dropped from SEAT_RULES ...............................................................
+//     "a seat of a worktree run was not told to work in it" (develop-spec's check fails with it)
+//   the allowSkipped filter replaced by a hard-coded one ...............................................
+//     "a skip the project declared in allowSkipped still blocked the run" (got [false,"continue",2])
 check('develop-phase workdir, allowSkipped and a read-only reviewer', () => {
   const harness = (file) => {
     const src = require('fs').readFileSync(file, 'utf8').replace(/^export /m, '');
@@ -2950,6 +2956,14 @@ check('develop-phase workdir, allowSkipped and a read-only reviewer', () => {
 // code before the human approved the breakdown, a dependent started before its blocker merged, more tickets in
 // flight than asked, two migrations at once, two merges into one checkout at once, a blocked ticket whose dependents
 // start anyway, a run over the user's uncommitted work, or a built file that no longer carries the current loop.
+//
+// Negative controls (2026-10-14, each applied to workflow-src/develop-spec.js and rebuilt, observed, reverted — all exit 1):
+//   the `confirmed` gate disabled ......... "without confirmed: true the run started a ticket"
+//   the merge seat taken off the queue .... "… the slots or the one-merge queue were not honoured"
+//   the migration exclusion removed ....... "two tickets that add a migration ran in the same wave" (got [2, …])
+//   Blocked by ignored by the frontier .... "a blocked ticket's dependent started"
+//   the dirty-checkout refusal disabled ... "a waves run started over the user's uncommitted work" (got ["complete",3])
+//   develop-phase.js edited, not rebuilt .. "plugins/harness-loops/workflows/develop-spec.js is stale"
 check('develop-spec waves: plan first, frontier by Blocked by, slots, one migration and one merge at a time, a brief', () => {
   const build = runNode([path.join(ROOT, 'scripts/build-workflows.js'), '--check'], process.env, '');
   if (build.code !== 0) throw new Error(`plugins/harness-loops/workflows/develop-spec.js is stale — run node scripts/build-workflows.js (${build.err.trim()})`);
