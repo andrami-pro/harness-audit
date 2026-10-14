@@ -121,7 +121,7 @@ function planWaves(tickets) {
 // A `Status:` line rewritten and one line appended under `## Comments` (created at the end when missing).
 function setStatus(file, status, comment) {
   const today = new Date().toISOString().slice(0, 10);
-  let text = fs.readFileSync(file, 'utf8').replace(/^Status:.*$/m, `Status: ${status}`);
+  let text = fs.readFileSync(file, 'utf8').replace(/^\s*Status:.*$/im, `Status: ${status}`);
   if (!/^## Comments\s*$/m.test(text)) text = `${text.replace(/\n*$/, '')}\n\n## Comments\n`;
   text = `${text.replace(/\n*$/, '')}\n- ${today}: ${comment}\n`;
   fs.writeFileSync(file, text);
@@ -139,7 +139,9 @@ async function main() {
   const TICKETS = path.relative(root, ticketsDir) || '.';
   const branch = git(['branch', '--show-current'], root).out;
   const head = git(['rev-parse', '--short', 'HEAD'], root).out;
-  const runDir = a.runDir || fs.mkdtempSync(path.join(os.tmpdir(), 'develop-spec-pi-'));
+  // Absolute: each ticket's run dir is handed to a child that works in its worktree, where a relative one would be
+  // created, then swept into the ticket's commit.
+  const runDir = a.runDir ? path.resolve(a.runDir) : fs.mkdtempSync(path.join(os.tmpdir(), 'develop-spec-pi-'));
   fs.mkdirSync(runDir, { recursive: true });
 
   const print = (r) => { process.stdout.write(`${JSON.stringify(r, null, 2)}\n`); return r.handoff.status === 'complete' ? 0 : 1; };
@@ -150,6 +152,9 @@ async function main() {
   const read = readTickets(ticketsDir);
   if (read.error) return blocked('The tickets could not be read', read.error);
   const { tickets } = read;
+  // A worktree is branched from HEAD: a ticket file that was never committed is not there for its seats to read.
+  const untracked = tickets.filter((t) => git(['ls-files', '--error-unmatch', '--', path.join(ticketsDir, t.file)], root).code !== 0).map((t) => t.file);
+  if (untracked.length) return blocked('Ticket files are not committed', `Commit them first: each ticket's worktree is branched from HEAD and would not hold ${untracked.join(', ')}`);
   // Everything below keys on the id: two files with one id would run as one and both read as landed.
   const dupes = [...new Set(tickets.map((t) => t.id).filter((id, i, all) => all.indexOf(id) !== i))];
   if (dupes.length) return blocked('Two tickets share an id', `Renumber them: ${dupes.map((id) => tickets.filter((t) => t.id === id).map((t) => t.file).join(' and ')).join(' · ')}`);
@@ -224,6 +229,13 @@ async function main() {
         await mark(t, why);
         return { id: t.id, status: 'blocked', reason: why, workdir };
       }
+      // develop-phase-pi commits with `git add -A`: a file the setup copied in that git does not ignore would ship.
+      const left = git(['ls-files', '--others', '--exclude-standard'], workdir).out.split('\n').filter(Boolean);
+      if (left.length) {
+        const why = `worktree setup left files git does not ignore, which the ticket's commit would carry: ${left.slice(0, 5).join(', ')} — gitignore them — worktree kept at ${workdir}`;
+        await mark(t, why);
+        return { id: t.id, status: 'blocked', reason: why, workdir };
+      }
     }
     const { code, res, error } = await runPhase(t, workdir);
     if (res?.handoff?.status !== 'complete' || !res.commit?.committed) {
@@ -245,8 +257,8 @@ async function main() {
       const m = spawnSync('sh', ['-c', cmd], { cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
       if (m.status !== 0) {
         const conflicts = git(['diff', '--name-only', '--diff-filter=U'], root).out.split('\n').filter(Boolean);
-        if (fs.existsSync(path.join(root, git(['rev-parse', '--git-dir'], root).out, 'MERGE_HEAD'))) git(['merge', '--abort'], root);
-        const why = `approved and committed on ${br}, but not merged: ${conflicts.length ? `conflict in ${conflicts.join(', ')}` : `${`${m.stderr || ''}${m.stdout || ''}`.trim().split('\n').pop()}`}`;
+        if (fs.existsSync(path.resolve(root, git(['rev-parse', '--git-path', 'MERGE_HEAD'], root).out))) git(['merge', '--abort'], root);
+        const why = `approved and committed on ${br}, but not merged: ${conflicts.length ? `conflict in ${conflicts.join(', ')} — resolve it by hand (merge ${branch} into ${br} in its worktree), then merge ${br}` : `${`${m.stderr || ''}${m.stdout || ''}`.trim().split('\n').pop()}`}`;
         commitStatus(t, 'blocked', `develop-spec-pi: ${why}`);
         return { id: t.id, status: 'blocked', reason: why, workdir, run: res };
       }
@@ -288,7 +300,7 @@ async function main() {
   if (landed.length) {
     const phase = require('./develop-phase-pi.js');
     let seats = null;
-    try { seats = phase.resolveSeats(root); } catch (e) { log(`final review: line-up refused — ${e.message}`); }
+    try { seats = phase.resolveSeats(root, { spec: !a.phase.includes('--no-spec-review') }); } catch (e) { log(`final review: line-up refused — ${e.message}`); }
     const diff = git(['diff', `${head}..HEAD`], root).out;
     const common = `Solo lectura: lee archivos del repositorio (read, grep, find, ls); no edites nada. El cambio a revisar es todo lo que
 esta ejecución fusionó: \`git diff ${head}..HEAD\`. Tickets fusionados: ${landed.map((t) => `${TICKETS}/${t.file}`).join(', ')}.

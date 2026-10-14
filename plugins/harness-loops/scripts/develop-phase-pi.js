@@ -67,7 +67,7 @@ function parseArgs(argv) {
     else if (k === '--no-commit') a.commit = false;
     else if (k === '--preflight') a.preflight = argv[++i] || null;
     else if (k === '--no-jev') a.jev = false;
-    else if (k === '--run-dir') a.runDir = argv[++i] || null;
+    else if (k === '--run-dir') a.runDir = argv[i + 1] ? path.resolve(argv[++i]) : (i += 1, null); // before main() chdirs to the root
     else if (k === '--no-tmux') a.tmux = false;
     else if (k === '--seams') a.seams = argv[++i] || '';
     else if (k === '--no-tdd') a.tdd = false;
@@ -303,7 +303,7 @@ function preflightCommand(root, explicit) {
   return null;
 }
 
-// A SKIP is not a PASS. The one exception is a skip the project declared with --allow-skipped (a live check with
+// A SKIP is not a PASS: a line starting with SKIP, or with ⊘ (the mark this repository's validate.js prints). The one exception is a skip the project declared with --allow-skipped (a live check with
 // no key here): a line containing one of those substrings, any case, is reported in allowedSkips, not counted.
 function runPreflight(cmd, runDir, allow = []) {
   if (!cmd) return { state: 'NO VERIFICADO (sin preflight en el repo)', passed: false, exitCode: null, skipped: [], allowedSkips: [] };
@@ -312,7 +312,7 @@ function runPreflight(cmd, runDir, allow = []) {
   fs.writeFileSync(path.join(runDir, 'preflight.out.txt'), output);
   const allowed = allow.map((s) => String(s).toLowerCase());
   const isAllowed = (l) => allowed.some((s) => l.toLowerCase().includes(s));
-  const skips = output.split('\n').map((l) => l.trim()).filter((l) => /^SKIP\b/.test(l));
+  const skips = output.split('\n').map((l) => l.trim()).filter((l) => /^(SKIP\b|⊘)/.test(l));
   const skipped = skips.filter((l) => !isAllowed(l));
   const allowedSkips = skips.filter(isAllowed);
   const exitCode = r.status;
@@ -366,7 +366,7 @@ async function main() {
   let seats;
   try { seats = resolveSeats(root, { spec: a.spec }); } catch (e) { log(`develop-phase-pi: line-up refused — ${e.message}`); return e.code || 2; }
 
-  const runDir = a.runDir || fs.mkdtempSync(path.join(os.tmpdir(), 'develop-phase-pi-'));
+  const runDir = a.runDir ? path.resolve(a.runDir) : fs.mkdtempSync(path.join(os.tmpdir(), 'develop-phase-pi-'));
   fs.mkdirSync(runDir, { recursive: true });
   const busPath = path.join(runDir, 'bus.log');
   const bus = (line) => fs.appendFileSync(busPath, `[${new Date().toISOString().slice(11, 19)}] ${line}\n`);

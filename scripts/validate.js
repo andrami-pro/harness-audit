@@ -3510,6 +3510,8 @@ check('develop-phase-pi: loop in code — pass commits, D25a refuses, BLOQUEO st
   if (block.code !== 1 || block.out.handoff.status !== 'blocked' || block.out.iterations !== 0) throw new Error('BLOQUEO did not stop before the implementer');
   const skipRun = run('skip', { preflight: 'echo "SKIP notion:verify"; exit 0' });
   if (skipRun.code !== 1 || skipRun.out.preflightPassed || skipRun.out.commit || skipRun.out.handoff.status !== 'continue') throw new Error('exit 0 with a SKIP line counted as a pass');
+  const glyph = run('glyph', { preflight: 'echo "⊘ jev live smoke — set JEV_LIVE=1"; exit 0' });
+  if (glyph.code !== 1 || glyph.out.preflightPassed || !/⊘ jev live smoke/.test(glyph.out.nextStep)) throw new Error('exit 0 with a ⊘ line (validate.js marks a skip so) counted as a pass, or nextStep does not name it');
   done();
   return 'pass → complete + commit · same family → exit 2 · BLOQUEO → blocked at 0 iter · SKIP → continue, no commit';
 });
@@ -3627,7 +3629,7 @@ case "$HARNESS_SEAT" in
     echo "E $ID" >> "$FAKE_TRACE"; echo "t$ID.txt" ;;
   reviewer-*) printf '[PASS] a — x\\nAPROBADO\\n' ;;
   spec-*) if [ "$ID" = "$FAKE_REJECT" ]; then printf '[FAIL] tarea — falta x\\nRECHAZADO\\n'; else printf '[PASS] tarea — x\\nAPROBADO\\n'; fi ;;
-  final-*) printf '[PASS] todo — x\\nAPROBADO\\n' ;;
+  final-*) if [ -n "$FAKE_FINAL_REJECT" ]; then printf '[FAIL] todo — falta y\\nRECHAZADO\\n'; else printf '[PASS] todo — x\\nAPROBADO\\n'; fi ;;
   commit) echo "feat: ticket $ID" ;;
 esac
 `, { mode: 0o755 });
@@ -3640,12 +3642,13 @@ esac
   const GIT = { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' };
   let n = 0;
   const run = (tickets, { args = [], env = {}, before } = {}) => {
-    const cwd = path.join(tmp, `r${++n}`);
-    fs.mkdirSync(path.join(cwd, 'docs/tickets/w'), { recursive: true });
-    for (const [id, body] of Object.entries(tickets)) fs.writeFileSync(path.join(cwd, 'docs/tickets/w', `${id.replace(/'$/, '')}-${id.endsWith("'") ? 'y' : 'x'}.md`), body);
-    fs.writeFileSync(path.join(cwd, '.gitignore'), 'secret.json\n');
-    execFileSync('sh', ['-c', 'git init -q -b main && git add -A && git commit -qm init'], { cwd, env: { ...process.env, ...GIT } });
-    if (before) before(cwd);
+    const repo = path.join(tmp, `r${++n}`);
+    let cwd = repo;
+    fs.mkdirSync(path.join(repo, 'docs/tickets/w'), { recursive: true });
+    for (const [id, body] of Object.entries(tickets)) fs.writeFileSync(path.join(repo, 'docs/tickets/w', `${id.replace(/'$/, '')}-${id.endsWith("'") ? 'y' : 'x'}.md`), body);
+    fs.writeFileSync(path.join(repo, '.gitignore'), 'secret.json\n');
+    execFileSync('sh', ['-c', 'git init -q -b main && git add -A && git commit -qm init'], { cwd: repo, env: { ...process.env, ...GIT } });
+    if (before) cwd = before(repo) || repo;
     const trace = path.join(tmp, `trace-${n}`);
     fs.writeFileSync(trace, '');
     const r = require('node:child_process').spawnSync('node', [path.join(ROOT, 'plugins/harness-loops/scripts/develop-spec-pi.js'),
@@ -3659,7 +3662,7 @@ esac
     const order = fs.readFileSync(trace, 'utf8').split('\n').filter(Boolean);
     for (const l of order) { active += l.startsWith('S ') ? 1 : -1; maxActive = Math.max(maxActive, active); }
     const sh = (c) => execFileSync('sh', ['-c', c], { cwd, encoding: 'utf8' }).trim();
-    const status = (f) => (fs.readFileSync(path.join(cwd, 'docs/tickets/w', f), 'utf8').match(/^Status: (.*)$/m) || [])[1];
+    const status = (f) => (fs.readFileSync(path.join(cwd, 'docs/tickets/w', f), 'utf8').match(/^\s*status: (.*)$/im) || [])[1];
     return { code: r.status, out, err: r.stderr, cwd, sh, status, order, maxActive };
   };
   const st = (r) => (r.out ? r.out.tickets.map((t) => `${t.id}:${t.status}`).join(' ') : `exit ${r.code} ${r.err.slice(-300)}`);
@@ -3678,6 +3681,13 @@ esac
     const nosetup = run({ '01': T('01') }, { args: ['--confirmed', '--preflight', 'test -f secret.json'] });
     const evil = run({ '01': T('01', { title: "x $(touch pwned) it's" }) }, { args: ['--confirmed'] });
     const usage = run(three, { args: ['--seams', 'propose'] });
+    const finalReject = run({ '01': T('01') }, { args: ['--confirmed'], env: { FAKE_FINAL_REJECT: '1' } });
+    const relRun = run({ '01': T('01') }, { args: ['--confirmed', '--run-dir', 'runs'] });
+    const linked = run({ '01': T('01'), '02': T('02') }, { args: ['--confirmed'], env: { FAKE_CONFLICT: '1' },
+      before: (repo) => { execFileSync('git', ['worktree', 'add', '-q', '-b', 'lw', path.join(tmp, `lw${n}`)], { cwd: repo }); return path.join(tmp, `lw${n}`); } });
+    const loose = run(three, { args: ['--confirmed'], before: (repo) => { fs.writeFileSync(path.join(repo, 'docs/tickets/w/04-x.md'), T('04')); } });
+    const leftover = run({ '01': T('01') }, { args: ['--confirmed', '--worktree-setup', 'touch junk.txt'] });
+    const lower = run({ '01': T('01').replace('Status:', 'status:') }, { args: ['--confirmed'] });
     const got = {
       plan: [plan.code, JSON.stringify(plan.out?.plan.waves), plan.order.length, plan.sh('git worktree list | wc -l')],
       full: [st(full), full.code, full.out?.handoff.status, full.maxActive, full.order.indexOf('S 03') > full.order.indexOf('E 01'),
@@ -3693,6 +3703,12 @@ esac
       setup: [st(setup), st(nosetup)],
       quoted: [st(evil), fs.existsSync(path.join(evil.cwd, 'pwned')), evil.sh('git log --format=%s | grep "^merge: "')],
       usage: usage.code,
+      finalReject: [finalReject.code, finalReject.out?.handoff.status, /final code review: \[FAIL\] todo/.test(finalReject.out?.brief)],
+      relRun: [st(relRun), relRun.sh("git log --name-only --format= | grep -c '^runs/' || true"), relRun.sh('git worktree list | wc -l')],
+      linked: [st(linked), fs.existsSync(linked.sh('git rev-parse --git-path MERGE_HEAD')), linked.sh('git status --short --untracked-files=no | wc -l')],
+      loose: [loose.out?.handoff.status, loose.order.length, /04-x\.md/.test(loose.out?.handoff.blocker)],
+      leftover: [st(leftover), /junk\.txt/.test(leftover.out?.brief)],
+      lower: [st(lower), lower.status('01-x.md')],
     };
     const want = {
       plan: [[1, '[["01","02"],["03"]]', 0, '1'], 'without --confirmed the run started a ticket or made a worktree, or the planned waves are wrong'],
@@ -3707,6 +3723,12 @@ esac
       setup: [['01:done', '01:blocked'], '--worktree-setup did not run in the worktree before its ticket (the gitignored file the preflight reads must be copied in), or a missing one did not block'],
       quoted: [['01:done', false, "merge: 01 — x $(touch pwned) it's"], 'a ticket title reached the shell unquoted'],
       usage: [2, '--seams is per ticket and must be refused'],
+      finalReject: [[1, 'blocked', true], 'a final review that rejects still let the run report complete'],
+      relRun: [['01:done', '0', '1'], "a relative --run-dir was created inside the ticket's worktree and swept into its commit (or kept the worktree from being removed)"],
+      linked: [['01:done 02:blocked', false, '0'], 'a conflict in a run started from a linked worktree left the checkout mid-merge'],
+      loose: [['blocked', 0, true], 'a ticket file that was never committed ran — its worktree, branched from HEAD, does not hold it'],
+      leftover: [['01:blocked', true], "a file the worktree setup left, which git does not ignore, would have shipped in the ticket's commit"],
+      lower: [['01:done', 'done'], 'a lower-case status: line was read but never rewritten, so the ticket would run again'],
     };
     for (const [k, [v, why]] of Object.entries(want)) {
       if (JSON.stringify(got[k]) !== JSON.stringify(v)) throw new Error(`${why} (got ${JSON.stringify(got[k])})`);

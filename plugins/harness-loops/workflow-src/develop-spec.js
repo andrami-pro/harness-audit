@@ -38,6 +38,8 @@ const blocked = (summary, blocker, extra = {}) => ({
   nextStep: blocker,
 })
 if (!TICKETS) return blocked('No tickets folder', 'Pass args.tickets: the folder with one file per ticket')
+// Paths, branches and messages reach a shell through a seat: single-quoted, so a title's $(…) stays text.
+const q = (v) => `'${String(v).replace(/'/g, "'\\''")}'`
 
 phase('Read')
 const READ_SCHEMA = {
@@ -71,7 +73,8 @@ const READ_SCHEMA = {
 }
 const read = await agent(
   `${SEAT}Read-only: change nothing. Run \`git rev-parse --show-toplevel\` (root), \`git branch --show-current\` (branch),
-\`git rev-parse --short HEAD\` (head) and \`git status --short --untracked-files=no\` (dirty: every line, verbatim).
+\`git rev-parse --short HEAD\` (head), \`git status --short --untracked-files=no\` and \`git status --short -- ${q(TICKETS)}\`
+(dirty: every line of both, verbatim — a ticket file never committed is not in the worktrees branched from HEAD).
 Then read every .md file in ${TICKETS} and return one entry per ticket:
 - id: the leading number of the file name, as written ("01")
 - file: the file name
@@ -148,8 +151,6 @@ const MERGE_SCHEMA = {
 // Every write to this checkout goes through one queue: two tickets that finish together never merge at once.
 let queue = Promise.resolve()
 const serial = (fn) => { const p = queue.then(fn); queue = p.catch(() => {}); return p }
-// Paths, branches and messages reach a shell through a seat: single-quoted, so a title's $(…) stays text.
-const q = (v) => `'${String(v).replace(/'/g, "'\\''")}'`
 const ticketPath = (t) => `${TICKETS}/${t.file}`
 const statusLine = (t, status, comment) => `In ${read.root}, edit ${ticketPath(t)}: set the \`Status:\` line to ${status}, and append under
 \`## Comments\` (create the heading at the end if missing) one line "- <today's date, YYYY-MM-DD>: ${comment}", in ${language}.
