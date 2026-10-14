@@ -190,6 +190,7 @@ function translateEvent(d) {
   return { line: null };
 }
 
+let lastSeatFailure = ''; // why the last seat died, for the crash handoff
 function runSeat({ name, model, tools, prompt, runDir, timeoutS }) {
   const promptFile = path.join(runDir, `${name}.prompt.md`);
   const liveFile = path.join(runDir, `${name}.live.log`);
@@ -204,6 +205,7 @@ function runSeat({ name, model, tools, prompt, runDir, timeoutS }) {
     let lastText = '';
     let buf = '';
     let err = '';
+    let seatError = ''; // pi reports a dead provider ("Connection error.") as an event and still exits 0
     child.stdout.on('data', (c) => {
       raw += c;
       buf += c;
@@ -216,6 +218,7 @@ function runSeat({ name, model, tools, prompt, runDir, timeoutS }) {
         jsonSeen = true;
         const t = translateEvent(d);
         if (t.line) fs.appendFileSync(liveFile, `${t.line}\n`);
+        if (t.line && t.line.startsWith('✗ ')) seatError = t.line.slice(2);
         if (t.text) lastText = t.text; // overwritten on every assistant turn; the LAST one wins, as before
       }
     });
@@ -231,8 +234,9 @@ function runSeat({ name, model, tools, prompt, runDir, timeoutS }) {
       if (err.trim()) fs.writeFileSync(path.join(runDir, `${name}.err.txt`), err);
       const secs = Math.round((Date.now() - started) / 1000);
       if (code !== 0 || !out.trim()) {
-        const line = `✗ murió: ${signal ? `killed ${signal} after ${secs}s` : `exit ${code}`} — ${err.trim().split('\n').pop() || 'empty output'}`;
+        const line = `✗ murió: ${signal ? `killed ${signal} after ${secs}s` : `exit ${code}`} — ${seatError || err.trim().split('\n').pop() || 'empty output'}`;
         fs.appendFileSync(liveFile, `${line}\n`);
+        lastSeatFailure = line.replace('✗ murió: ', '');
         log(`  ${line.replace('✗ murió', `✗ ${name} (${model}) murió`)}`);
         return resolve('');
       }
@@ -346,7 +350,7 @@ ${stat}`,
   });
   const line = raw.split('\n').map((l) => l.trim().replace(/^["'`]+|["'`]+$/g, '')).find(Boolean) || '';
   const message = /^(feat|fix|chore|refactor|docs|test|perf|style|build|ci)(\([^)]+\))?!?: .{3,}/.test(line) && line.length <= 100
-    ? line : `chore: ${task.replace(/\s+/g, ' ').slice(0, 80)}`;
+    ? line : `chore: ${task.replace(/\s+/g, ' ').split(/\.\s/)[0].slice(0, 80)}`; // the task's first sentence, not a cut mid-word
   const add = git(['add', '-A']);
   if (add.code !== 0) return { committed: false, hash: null, message, note: `git add falló: ${add.err.trim()}` };
   const c = git(['commit', '-m', message]);
@@ -404,7 +408,7 @@ async function main() {
   const result = (fields) => ({ task, branch, runDir, seats: { ...seats, analyst: preparer ? analystSeat : null }, seams: seamsOut, ...fields });
   const crash = (who, iteration) => result({
     iterations: iteration, approved: false, preflightPassed: false, commit: null,
-    handoff: { status: 'crash', summary: `El ${who} no devolvió resultado en la iteración ${iteration}`, evidence: [], blocker: `Ver ${runDir}/${who}*.err.txt` },
+    handoff: { status: 'crash', summary: `El ${who} no devolvió resultado en la iteración ${iteration}`, evidence: [], blocker: `${lastSeatFailure ? `${lastSeatFailure} — ` : ''}ver ${runDir}/${who}*.live.log` },
     nextStep: 'Cambios del implementer posiblemente a medias: git status antes de relanzar',
   });
   const finish = (r) => { process.stdout.write(`${JSON.stringify(r, null, 2)}\n`); return r.approved && r.preflightPassed ? 0 : 1; };

@@ -3459,10 +3459,11 @@ case "$HARNESS_SEAT" in
   analyst) if [ -n "$FAKE_BLOCK" ]; then echo "$FAKE_BLOCK: falta decidir";
     elif [ -n "$FAKE_SEAMS" ]; then printf '1. sum.js\\n**SEAMS**:\\n- sum() — devuelve 2\\n- node sum.js — imprime 2\\n\\nRiesgos: x\\n';
     else echo "1. sum.js"; fi ;;
-  implementer-*) echo "module.exports = 2;" > sum.js; echo "sum.js cambiado" ;;
+  implementer-*) if [ -n "$FAKE_CONN_ERR" ]; then echo '{"type":"message_end","message":{"role":"assistant","content":[],"errorMessage":"Connection error."}}'; exit 0; fi
+    echo "module.exports = 2;" > sum.js; echo "sum.js cambiado" ;;
   reviewer-*) printf '[PASS] a — x\\n**APROBADO**\\n' ;;
   spec-*) if [ -n "$FAKE_SPEC_REJECT" ]; then printf '[FAIL] tarea — falta x\\nRECHAZADO\\n'; else printf '[PASS] tarea — x\\nAPROBADO\\n'; fi ;;
-  commit) echo "fix: ajusta sum" ;;
+  commit) [ -z "$FAKE_COMMIT_EMPTY" ] && echo "fix: ajusta sum" ;;
 esac
 `, { mode: 0o755 });
   const lineup = (reviewer, spec) => {
@@ -3511,6 +3512,10 @@ check('develop-phase-pi: loop in code — pass commits, D25a refuses, BLOQUEO st
   const skipRun = run('skip', { preflight: 'echo "SKIP notion:verify"; exit 0' });
   if (skipRun.code !== 1 || skipRun.out.preflightPassed || skipRun.out.commit || skipRun.out.handoff.status !== 'continue') throw new Error('exit 0 with a SKIP line counted as a pass');
   const glyph = run('glyph', { preflight: 'echo "⊘ jev live smoke — set JEV_LIVE=1"; exit 0' });
+  const conn = run('conn', { env: { FAKE_CONN_ERR: '1' } });
+  if (conn.code !== 1 || conn.out.handoff.status !== 'crash' || !/Connection error/.test(conn.out.handoff.blocker)) throw new Error(`a seat whose provider failed (pi exits 0 with an error event) was not reported as such: ${conn.out && conn.out.handoff.blocker}`);
+  const nomsg = run('nomsg', { env: { FAKE_COMMIT_EMPTY: '1' }, args: ['--task', 'Implement ticket 01 — x. The ticket is docs/t.md: read it'] });
+  if (!nomsg.out.commit.committed || nomsg.out.commit.message !== 'chore: Implement ticket 01 — x') throw new Error(`with no message from the commit seat, the fallback was not the task's first sentence: ${nomsg.out.commit.message}`);
   if (glyph.code !== 1 || glyph.out.preflightPassed || !/⊘ jev live smoke/.test(glyph.out.nextStep)) throw new Error('exit 0 with a ⊘ line (validate.js marks a skip so) counted as a pass, or nextStep does not name it');
   done();
   return 'pass → complete + commit · same family → exit 2 · BLOQUEO → blocked at 0 iter · SKIP → continue, no commit';
