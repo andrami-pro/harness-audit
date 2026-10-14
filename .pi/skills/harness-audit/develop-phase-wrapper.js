@@ -8,6 +8,8 @@ export const meta = {
 // reaches every project at once. Change the config here; never copy the loop into the project.
 // Per-run args override any key below: { task, seams, maxIter, preparer, reviewerModel, analystModel, commit, routeByJev, … }
 // A first run with seams: 'propose' stops after the analyst and returns the seams; re-run with the ones you agree.
+// Args with `tickets` (a folder of tickets) run the waves loop, develop-spec, with this same config: the first run
+// returns the plan, and { tickets, confirmed: true } works it.
 const CONFIG = {
   lang: '__LANG__',
   preflight: '__PREFLIGHT__',
@@ -20,19 +22,20 @@ const CONFIG = {
   routeByJev: false,
 }
 
-// Where the global script is. workflow() only loads a file the session can already read, so first the copy
-// harness-loops keeps inside this project (.claude/harness/, ignored by git), then the one under $HOME
-// (readable when that directory is added to the session; workflow() does not expand `~`), then the plugin's
-// own workflow by name.
-const GLOBAL = [
-  { scriptPath: '.claude/harness/develop-phase.js' },
-  { scriptPath: '__HOME__/.claude/harness/develop-phase.js' },
-  'harness-loops:develop-phase',
-]
 // A run launched by hand may pass its args as a JSON string; anything else that is a string is the task.
 const parsed = typeof args === 'string' && /^\s*\{/.test(args) ? (() => { try { return JSON.parse(args) } catch { return null } })() : null
 const runArgs = parsed ?? (args && typeof args === 'object' ? args : typeof args === 'string' ? { task: args } : {})
 const merged = { ...CONFIG, ...runArgs, models: { ...CONFIG.models, ...(runArgs.models ?? {}) } }
+// Where the global script is. workflow() only loads a file the session can already read, so first the copy
+// harness-loops keeps inside this project (.claude/harness/, ignored by git), then the one under $HOME
+// (readable when that directory is added to the session; workflow() does not expand `~`), then the plugin's
+// own workflow by name.
+const NAME = merged.tickets ? 'develop-spec' : 'develop-phase'
+const GLOBAL = [
+  { scriptPath: `.claude/harness/${NAME}.js` },
+  { scriptPath: `__HOME__/.claude/harness/${NAME}.js` },
+  `harness-loops:${NAME}`,
+]
 for (const ref of GLOBAL) {
   try {
     return await workflow(ref, merged)
@@ -46,7 +49,7 @@ return {
   task: merged.task, iterations: 0, approved: false, preflightPassed: false, commit: null,
   handoff: {
     status: 'blocked',
-    summary: 'The global develop-phase script was not found',
+    summary: `The global ${NAME} script was not found`,
     evidence: [],
     blocker: 'Install the harness-loops plugin and start a new session in this project (it copies the loop to .claude/harness/), or run install.sh --target claude from the harness-audit repository',
   },

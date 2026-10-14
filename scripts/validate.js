@@ -3183,6 +3183,7 @@ check('develop-phase wrapper: config + per-run args reach the loop, a missing co
       const outside = await run({ task: 'T' }, (ref, a, n) => (n < 3 ? (n === 1 ? notFound(ref) : unreadable(ref)) : { via: ref }));
       const none = await run({ task: 'T' }, notFound);
       const inner = await run({ task: 'T' }, () => { throw new Error('agent crashed inside the loop'); });
+      const waves = await run({ tickets: 'docs/tickets/prd-9', confirmed: true }, (ref, a, n) => (n < 3 ? notFound(ref) : { via: ref, a }));
       console.log(JSON.stringify({
         merged: [direct.out.lang, direct.out.preflight, direct.out.task, direct.out.models.reviewer, direct.out.models.implementer, direct.out.forbidden[0]],
         path: direct.tried,
@@ -3192,6 +3193,7 @@ check('develop-phase wrapper: config + per-run args reach the loop, a missing co
         outside: [outside.out && outside.out.via, outside.tried.length],
         none: none.out && none.out.handoff.status,
         inner: [Boolean(inner.threw), inner.tried.length],
+        waves: [waves.tried, waves.out && waves.out.a.tickets, waves.out && waves.out.a.lang, direct.tried[0]],
       }));
     })().catch((e) => console.log('THREW ' + e.message));
   };
@@ -3207,6 +3209,8 @@ check('develop-phase wrapper: config + per-run args reach the loop, a missing co
     outside: [['harness-loops:develop-phase', 3], 'a copy the session may not read did not fall back to the plugin workflow'],
     none: ['blocked', 'with neither route the wrapper did not return a blocked handoff'],
     inner: [[true, 1], 'an error from inside the loop fell through to the next route — the seats would run twice'],
+    waves: [[['.claude/harness/develop-spec.js', '/home/u/.claude/harness/develop-spec.js', 'harness-loops:develop-spec'], 'docs/tickets/prd-9', 'fr', '.claude/harness/develop-phase.js'],
+      "args with tickets did not route to develop-spec through the same three places with the project's config, or a plain run left develop-phase"],
   };
   for (const [k, [v, why]] of Object.entries(want)) {
     if (JSON.stringify(r[k]) !== JSON.stringify(v)) throw new Error(`${why} (got ${JSON.stringify(r[k])})`);
