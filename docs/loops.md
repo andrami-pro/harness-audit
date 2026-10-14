@@ -355,11 +355,11 @@ The project wrapper runs it when the args carry `tickets`, with the same config 
 
 **On Pi** the same loop is `scripts/develop-spec-pi.js`. Pi runs each process with a cwd of its own, so most of what
 needs a seat on Claude is plain code there: reading the tickets, the plan, the worktrees
-(`.pi/worktrees/spec-<folder>-<id>`), the merges and the status lines. Each ticket runs the real `develop-phase-pi.js` inside its worktree. Its `## Seams` go
-to `--seams`; `--max-iter`, `--preflight`, `--allow-skipped`, `--no-tdd`, `--no-spec-review`, `--no-jev`,
-`--no-preparer` and `--no-tmux` reach every ticket (the run always commits). The models are develop-phase-pi's seats and
-a final code + spec review from the same `pi` line-up. A ticket that adds a migration says so on a `Migration: yes` line,
-where the Claude read seat judges it from the prose. From the checkout the tickets merge into:
+(`.pi/worktrees/spec-<folder>-<id>`), the merges and the status lines. Each ticket runs the real `develop-phase-pi.js`
+inside its worktree. Its `## Seams` go to `--seams`; `--max-iter`, `--preflight`, `--allow-skipped`, `--no-tdd`,
+`--no-spec-review`, `--no-jev`, `--no-preparer` and `--no-tmux` reach every ticket (the run always commits). The models
+are develop-phase-pi's seats and a final code + spec review from the same `pi` line-up. A ticket that adds a migration
+says so on a `Migration: yes` line, where the Claude read seat judges it from the prose. From the checkout the tickets merge into:
 `node scripts/develop-spec-pi.js --tickets docs/tickets/<folder> [--confirmed] [--max-parallel 2]
 [--worktree-setup "<cmd>"] [--integrate "<cmd with {branch}>"] [--prd <path>] [--preflight "<cmd>"]
 [--allow-skipped "<s>"]… [--max-iter N] [--no-tdd] [--no-spec-review] [--no-jev] [--no-preparer] [--no-tmux]`.
