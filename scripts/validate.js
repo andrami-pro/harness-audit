@@ -2771,6 +2771,12 @@ check('develop-phase loop honours every wrapper config key a fork used to hard-c
 //     "the spec seat started only after the code review returned — the two axes ran one after the other"
 //   the marker parser keeps markdown (strips only spaces and colons) .................................
 //     "a SEAMS block written in markdown (bold, bulleted, quoted, no END line) was not read" (got [0,0,0])
+//   `seams` dropped from stop() ......................................................................
+//     "an early exit returned without axes: null or seams { agreed, list } …" (got "missing" on all 7 exits)
+//   `axes: null` dropped from stop() .................................................................
+//     "seams: 'propose' … or returned without axes: null" (the propose result spreads stop())
+//   the normal result's `list: seams` read as `list: agreedSeams` ......................................
+//     "a run that went through the loop no longer reports both axes side by side and the seams it worked against"
 check('develop-phase TDD + Spec axis: seams proposed then agreed, test-first, approval needs both axes, reported side by side', () => {
   const harness = (file) => {
     const src = require('fs').readFileSync(file, 'utf8').replace(/^export /m, '');
@@ -2805,6 +2811,8 @@ check('develop-phase TDD + Spec axis: seams proposed then agreed, test-first, ap
       const off = await run({ specReview: false }, { spec: () => 'REJECTED' });
       const same = await run({ models: { spec: 'opus' } });
       const qualified = await run({ models: { spec: 'openrouter/acme/x' } });
+      const agreedSame = await run({ seams: '- a() — x', models: { spec: 'opus' } });
+      const agreedBlocker = await run({ seams: '- a() — x' }, { analyst: () => 'BLOCKER: a() cannot carry it' });
       const extOpus = await run({ reviewerModel: 'openrouter/acme/model-x' }, { review: () => ({ output: OK }) });
       const extFable = await run({ reviewerModel: 'openrouter/acme/model-x', models: { implementer: 'fable' } }, { review: () => ({ output: OK }) });
       // Parallel: the code review resolves only once the spec seat has started. Run one after the other, it times out.
@@ -2814,8 +2822,10 @@ check('develop-phase TDD + Spec axis: seams proposed then agreed, test-first, ap
         tick();
       }) });
       const spec2 = specNo.by('spec', 1);
+      const shape = (o) => ['axes' in o && o.axes === null, o.seams ?? 'missing'];
       console.log(JSON.stringify({
-        propose: [propose.out.handoff.status, propose.n('impl'), propose.out.seams && propose.out.seams.list.length, propose.out.seams && propose.out.seams.agreed, /Seams proposed/.test(propose.out.handoff.summary)],
+        propose: [propose.out.handoff.status, propose.n('impl'), propose.out.seams && propose.out.seams.list.length, propose.out.seams && propose.out.seams.agreed, /Seams proposed/.test(propose.out.handoff.summary),
+          'axes' in propose.out && propose.out.axes === null],
         noSeams: [noSeams.out.handoff.status, noSeams.n('impl'), /no seams/.test(noSeams.out.handoff.summary)],
         noPrep: [noPrep.out.handoff.status, noPrep.calls.length],
         marked,
@@ -2837,6 +2847,11 @@ check('develop-phase TDD + Spec axis: seams proposed then agreed, test-first, ap
         family: [same.out.handoff.status, same.calls.length, qualified.out.handoff.status, qualified.calls.length],
         defaultModel: [unset.by('spec').model, extOpus.by('spec').model, extFable.by('spec').model],
         parallel: parallel.out.approved,
+        shape: { noPrep: shape(noPrep.out), noSeams: shape(noSeams.out), same: shape(same.out), specDead: shape(specDead.out),
+          specBare: shape(specBare.out), agreedSame: shape(agreedSame.out), agreedBlocker: shape(agreedBlocker.out) },
+        normal: [unset.out.axes, unset.out.seams, agreed.out.seams],
+        shapeExits: [/spec reviewer cannot take/.test(agreedSame.out.handoff.summary), agreedSame.calls.length,
+          /analyst needs a decision/.test(agreedBlocker.out.handoff.summary), agreedBlocker.n('impl')],
       }));
     })().catch((e) => console.log('THREW ' + e.stack));
   };
@@ -2844,7 +2859,7 @@ check('develop-phase TDD + Spec axis: seams proposed then agreed, test-first, ap
   if (out.startsWith('THREW')) throw new Error(`the develop-phase loop throws with seams or the spec axis — ${out.slice(6)}`);
   const r = JSON.parse(out);
   const want = {
-    propose: [['blocked', 0, 2, false, true], "seams: 'propose' let the implementer run, or did not hand the analyst's seams back — the human agrees them before any code"],
+    propose: [['blocked', 0, 2, false, true, true], "seams: 'propose' let the implementer run, did not hand the analyst's seams back, or returned without axes: null — the human agrees them before any code"],
     noSeams: [['blocked', 0, true], 'a plan without a SEAMS block was taken as an empty agreement — it must stop and say no seams were proposed'],
     marked: [[2, 2, 2], 'a SEAMS block written in markdown (bold, bulleted, quoted, no END line) was not read — the seams are lost without a word'],
     noPrep: [['blocked', 0], "seams: 'propose' with preparer:false started a seat — there is no analyst to propose them"],
@@ -2860,11 +2875,22 @@ check('develop-phase TDD + Spec axis: seams proposed then agreed, test-first, ap
     family: [['blocked', 0, 'blocked', 0], "a spec seat of the implementer's family, or on a provider-qualified model, started — D25a binds the second reviewer too"],
     defaultModel: [['fable', 'fable', 'opus'], "the spec seat's default model is not the Claude reviewer, or with an external reviewer not the first Claude tier outside the implementer's family"],
     parallel: [true, 'the spec seat started only after the code review returned — the two axes ran one after the other'],
+    shape: [(() => {
+      const none = [true, { agreed: false, list: [] }];
+      const planned = [true, { agreed: false, list: ['- addItem(cart, sku) — returns the new total', '- GET /cart — lists items'] }];
+      const agreedOne = [true, { agreed: true, list: ['- a() — x'] }];
+      return { noPrep: none, noSeams: none, same: none, specDead: planned, specBare: planned, agreedSame: agreedOne, agreedBlocker: agreedOne };
+    })(), 'an early exit returned without axes: null or seams { agreed, list } holding the seams known at that point — the caller cannot read one shape'],
+    normal: [[{ code: { approved: true, model: 'fable' }, spec: { approved: true, model: 'fable' } },
+      { agreed: false, list: ['- addItem(cart, sku) — returns the new total', '- GET /cart — lists items'] },
+      { agreed: true, list: ['- addItem(cart, sku) — returns the new total', '- removeItem(cart, sku)'] }],
+      'a run that went through the loop no longer reports both axes side by side and the seams it worked against'],
+    shapeExits: [[true, 0, true, 0], 'the agreed-seams runs did not stop at the spec-family guard and the analyst BLOCKER — the shape check above would test another exit'],
   };
   for (const [k, [v, why]] of Object.entries(want)) {
     if (JSON.stringify(r[k]) !== JSON.stringify(v)) throw new Error(`${why} (got ${JSON.stringify(r[k])})`);
   }
-  return "propose → stop with the seams, 0 implementer · agreed seams binding · test-first prompted + reviewed · spec REJECTED blocks a code APPROVED · axes side by side · D25a on the spec seat · both axes in parallel";
+  return "propose → stop with the seams, 0 implementer · agreed seams binding · test-first prompted + reviewed · spec REJECTED blocks a code APPROVED · axes side by side · D25a on the spec seat · both axes in parallel · every early exit carries axes: null and the seams known";
 });
 
 // The wrapper is the one file the audit writes into every project, and the only route to the loop.

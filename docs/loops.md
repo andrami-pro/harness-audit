@@ -269,7 +269,8 @@ that need not be an Anthropic model:
   stay side by side: `axes: { code, spec }` in the result, spec lines prefixed `spec: ` in the evidence, and a rejected
   axis reaches the implementer as its own section. The spec seat runs on a Claude model outside the implementer's family
   (D25a): the reviewer's model when that is a Claude one, else the first of fable, opus, sonnet that qualifies;
-  `models.spec` overrides it.
+  `models.spec` overrides it. Every result carries `axes` and `seams`: an early exit returns `axes: null` and
+  `seams: { agreed, list }` with the seams known when it stopped (the agreed ones, or `[]` before the analyst ran).
 - **Route** (opt-in, `routeByJev: true`, off by default). Before any other seat, a Haiku seat runs
   `node ~/.claude/harness/jev.js route --configured <implementer>` (sync-workflows keeps that copy current; `jevScript`
   points elsewhere) with the task on stdin. `jev.js decideTier()` decides: Jev's tier at or above

@@ -92,9 +92,14 @@ ${NO_GIT_WRITE}
 log(`Task: "${task}" · max ${maxIter} iter · ${preparer ? `Scout=${MODELS.scout} · Analyst=${MODELS.analyst} · ` : ''}Implementer=${MODELS.implementer} · Reviewer=${MODELS.reviewer}`)
 
 let routing = null
-// Every early exit is a 'blocked' handoff, never an exception: the caller reads one contract.
+// The seams known so far: the agreed ones from args until the loop resolves them. stop() reads this, never
+// `seams`, `proposedSeams` or `axes`: those are declared after the first exits (temporal dead zone).
+let knownSeams = agreedSeams
+// Every early exit is a 'blocked' handoff, never an exception: the caller reads one contract, the normal
+// result's shape with axes: null.
 const stop = (summary, blocker, iterations = 0, evidence = []) => ({
-  task, iterations, approved: false, preflightPassed: false, commit: null, routing,
+  task, iterations, approved: false, preflightPassed: false, commit: null, routing, axes: null,
+  seams: { agreed: agreedSeams.length > 0, list: [...knownSeams] },
   handoff: { status: 'blocked', summary, evidence, blocker },
   nextStep: blocker,
 })
@@ -267,6 +272,7 @@ if (proposeSeams) {
   }
 }
 const seams = agreedSeams.length ? agreedSeams : proposedSeams
+knownSeams = seams
 const seamsBlock = seams.length
   ? `SEAMS (${agreedSeams.length ? 'agreed by the human — binding' : "proposed by the analyst"}):\n${seams.join('\n')}\n`
   : ''
