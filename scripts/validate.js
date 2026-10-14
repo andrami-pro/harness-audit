@@ -2946,6 +2946,8 @@ check('develop-phase TDD + Spec axis: seams proposed then agreed, test-first, ap
 //     "a seat of a worktree run was not told to work in it" (develop-spec's check fails with it)
 //   the allowSkipped filter replaced by a hard-coded one ...............................................
 //     "a skip the project declared in allowSkipped still blocked the run" (got [false,"continue",2])
+//   nextStep back to the generic "Preflight skipped checks" (the pilot's brief) .........................
+//     "… or nextStep does not name it" (got [false,true,false])
 check('develop-phase workdir, allowSkipped and a read-only reviewer', () => {
   const harness = (file) => {
     const src = require('fs').readFileSync(file, 'utf8').replace(/^export /m, '');
