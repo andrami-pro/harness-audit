@@ -613,7 +613,8 @@ Una línea por criterio, como [PASS|FAIL] criterio — evidencia que cita la spe
         bus(`Review iter ${iteration} → ${axis} RECHAZADO sin [FAIL]`);
         return finish(result({
           iterations: iteration, approved: false, preflightPassed: false, commit: null, axes,
-          handoff: { status: 'blocked', summary: `El eje ${axis} rechazó sin nombrar [FAIL]`, blocker: text.trim().slice(0, 400), evidence: [] },
+          handoff: { status: 'blocked', summary: `El eje ${axis} rechazó sin nombrar [FAIL]`, evidence: [],
+            blocker: `El eje ${axis} rechazó sin nombrar [FAIL] — leer la review antes de re-lanzar (y git status, git log: un asiento pudo actuar fuera de su prompt): ${text.trim().slice(0, 400)}` },
           nextStep: 'Reportado por implementer/reviewer — no certificado de forma independiente: revisar la review y re-lanzar con instrucciones claras',
         }));
       }
@@ -640,7 +641,8 @@ Una línea por criterio, como [PASS|FAIL] criterio — evidencia que cita la spe
   }
 
   // The two axes stay side by side: the spec lines carry a "spec: " prefix, and the blocker names the FAILs of both.
-  const linesOf = (text) => text.split('\n').filter((l) => /^\s*\[(PASS|FAIL)\]/.test(l)).map((l) => l.trim());
+  // A bulleted "- [FAIL] x" counts here as it does in FAIL_LINE, so the stop and the handoff read the same lines.
+  const linesOf = (text) => text.split('\n').filter((l) => /^\s*(?:[-*]\s*)?\[(PASS|FAIL)\]/.test(l)).map((l) => l.trim().replace(/^[-*]\s*/, ''));
   const verdictLines = linesOf(lastReview);
   const specLines = a.spec ? linesOf(lastSpec).map((l) => `spec: ${l}`) : [];
   const openFails = [...verdictLines, ...specLines].filter((l) => /^(spec: )?\[FAIL\]/.test(l));

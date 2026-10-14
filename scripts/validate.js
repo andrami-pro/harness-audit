@@ -3462,7 +3462,7 @@ case "$HARNESS_SEAT" in
   implementer-*) if [ -n "$FAKE_CONN_ERR" ]; then echo '{"type":"message_end","message":{"role":"assistant","content":[],"errorMessage":"Connection error."}}'; exit 0; fi
     echo "module.exports = 2;" > sum.js; echo "sum.js cambiado" ;;
   reviewer-*) if [ "$FAKE_REJECT_NOFAIL" = "code" ]; then printf 'RECHAZADO\\n'; else printf '[PASS] a — x\\n**APROBADO**\\n'; fi ;;
-  spec-*) if [ "$FAKE_REJECT_NOFAIL" = "spec" ]; then printf 'RECHAZADO\\n'; elif [ -n "$FAKE_SPEC_REJECT" ]; then printf '[FAIL] tarea — falta x\\nRECHAZADO\\n'; else printf '[PASS] tarea — x\\nAPROBADO\\n'; fi ;;
+  spec-*) if [ "$FAKE_REJECT_NOFAIL" = "spec" ]; then printf 'RECHAZADO\\n'; elif [ -n "$FAKE_SPEC_BULLET" ]; then printf -- '- [FAIL] tarea — falta y\\nRECHAZADO\\n'; elif [ -n "$FAKE_SPEC_REJECT" ]; then printf '[FAIL] tarea — falta x\\nRECHAZADO\\n'; else printf '[PASS] tarea — x\\nAPROBADO\\n'; fi ;;
   commit) [ -z "$FAKE_COMMIT_EMPTY" ] && echo "fix: ajusta sum" ;;
 esac
 `, { mode: 0o755 });
@@ -3630,16 +3630,19 @@ check('develop-phase-pi: --prd reaches scout and spec prompts, default stays doc
 check('develop-phase-pi: reject without [FAIL] stops on the code axis', () => {
   const { run, done } = piLoop();
   const codeNoFail = run('code-no-fail', { env: { FAKE_REJECT_NOFAIL: 'code' }, args: ['--max-iter', '3'] });
-  if (codeNoFail.code !== 1 || !codeNoFail.out || codeNoFail.out.iterations !== 1 || codeNoFail.out.handoff.status !== 'blocked' || !/code/i.test(codeNoFail.out.handoff.summary) || !/RECHAZADO/.test(codeNoFail.out.handoff.blocker)) {
+  if (codeNoFail.code !== 1 || !codeNoFail.out || codeNoFail.out.iterations !== 1 || codeNoFail.out.handoff.status !== 'blocked' || !/code/i.test(codeNoFail.out.handoff.summary) || !/El eje code/.test(codeNoFail.out.handoff.blocker) || !/RECHAZADO/.test(codeNoFail.out.handoff.blocker)) {
     throw new Error(`code reviewer RECHAZADO without [FAIL] did not stop after one round: exit ${codeNoFail.code} ${JSON.stringify(codeNoFail.out && codeNoFail.out.handoff)}`);
   }
   const specNoFail = run('spec-no-fail', { env: { FAKE_REJECT_NOFAIL: 'spec' }, args: ['--max-iter', '3'] });
-  if (specNoFail.code !== 1 || !specNoFail.out || specNoFail.out.iterations !== 1 || specNoFail.out.handoff.status !== 'blocked' || !/spec/i.test(specNoFail.out.handoff.summary) || !/RECHAZADO/.test(specNoFail.out.handoff.blocker)) {
+  if (specNoFail.code !== 1 || !specNoFail.out || specNoFail.out.iterations !== 1 || specNoFail.out.handoff.status !== 'blocked' || !/spec/i.test(specNoFail.out.handoff.summary) || !/El eje spec/.test(specNoFail.out.handoff.blocker) || !/RECHAZADO/.test(specNoFail.out.handoff.blocker)) {
     throw new Error(`spec reviewer RECHAZADO without [FAIL] did not stop after one round: exit ${specNoFail.code} ${JSON.stringify(specNoFail.out && specNoFail.out.handoff)}`);
   }
   if (specNoFail.prompt('implementer-2') !== null) throw new Error('a second implementer round ran after the spec reviewer rejected without [FAIL]');
+  // From the final review of the live run: a bulleted [FAIL] keeps the loop going (FAIL_LINE) and must reach the handoff too.
+  const bullet = run('spec-bullet', { env: { FAKE_SPEC_BULLET: '1' }, args: ['--max-iter', '1'] });
+  if (bullet.out.handoff.blocker !== 'spec: [FAIL] tarea — falta y') throw new Error(`a bulleted "- [FAIL]" line did not reach the blocker: ${bullet.out.handoff.blocker}`);
   done();
-  return 'code reject without [FAIL] → blocked at iter 1 · spec reject without [FAIL] → blocked at iter 1, no implementer-2';
+  return 'code reject without [FAIL] → blocked at iter 1, axis named · spec likewise, no implementer-2 · a bulleted [FAIL] reaches the blocker';
 });
 
 // develop-spec-pi.js is the waves loop on Pi: the scheduler, the worktrees, the merges and the status lines are code,
