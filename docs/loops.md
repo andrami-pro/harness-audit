@@ -286,7 +286,7 @@ that need not be an Anthropic model:
 skips, a read-only reviewer and the spec axis, as above. The loop is code, not a prompt:
 each seat is one `pi -p --mode json --no-session` call with its own tool allowlist, every model comes from the `pi`
 column of the line-up at run time (the analyst sits in `architect`, the new `scout` role feeds the brief), D25a is
-re-checked before any seat, preflight is the project's own gate run through the shell (a `SKIP` line is not a pass),
+re-checked before any seat, preflight is the project's own gate run through the shell (a `SKIP` or `⊘` line is not a pass),
 and the commit message is the only thing a model writes in the commit step. With a TypeSafe key, Jev sizes the task
 first: `trivial` skips scout and analyst, `bounded` gives the analyst the implementer's model. `--seams propose` stops
 after the analyst with its seams in the result's `seams.list`; `--seams "<one per line>"` passes the agreed ones, which the
@@ -356,13 +356,17 @@ The project wrapper runs it when the args carry `tickets`, with the same config 
 **On Pi** the same loop is `scripts/develop-spec-pi.js`. Pi runs each process with a cwd of its own, so most of what
 needs a seat on Claude is plain code there: reading the tickets, the plan, the worktrees
 (`.pi/worktrees/spec-<folder>-<id>`), the merges and the status lines. Each ticket runs the real `develop-phase-pi.js` inside its worktree. Its `## Seams` go
-to `--seams`, and every develop-phase-pi flag you pass reaches every ticket. The models are develop-phase-pi's seats and
+to `--seams`; `--max-iter`, `--preflight`, `--allow-skipped`, `--no-tdd`, `--no-spec-review`, `--no-jev`,
+`--no-preparer` and `--no-tmux` reach every ticket (the run always commits). The models are develop-phase-pi's seats and
 a final code + spec review from the same `pi` line-up. A ticket that adds a migration says so on a `Migration: yes` line,
 where the Claude read seat judges it from the prose. From the checkout the tickets merge into:
 `node scripts/develop-spec-pi.js --tickets docs/tickets/<folder> [--confirmed] [--max-parallel 2]
 [--worktree-setup "<cmd>"] [--integrate "<cmd with {branch}>"] [--prd <path>] [--preflight "<cmd>"]
 [--allow-skipped "<s>"]… [--max-iter N] [--no-tdd] [--no-spec-review] [--no-jev] [--no-preparer] [--no-tmux]`.
-Without `--confirmed` it prints the plan and changes nothing. Proven by stub seats in `validate.js`; no live run yet.
+Without `--confirmed` it prints the plan and changes nothing. It refuses a ticket file that was never committed (the
+worktrees are branched from HEAD), and a `--worktree-setup` that leaves files git does not ignore, since
+develop-phase-pi commits with `git add -A`. A merge conflict is aborted and the ticket marked blocked: resolve it by
+hand in the kept worktree. Proven by stub seats in `validate.js`; no live run yet.
 
 **Why it is a built file.** A workflow runs another only one level deep, and the wrapper already spends that level, so
 develop-spec cannot call develop-phase. `scripts/build-workflows.js` inlines develop-phase's loop into it as a function,

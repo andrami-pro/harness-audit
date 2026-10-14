@@ -3613,6 +3613,13 @@ check('develop-phase-pi: D25a on the spec seat — implementer\'s family or a Cl
 //   --worktree-setup never run ............ "--worktree-setup did not run in the worktree" (got ["01:blocked","01:blocked"])
 //   git merge --abort removed ............. "a merge conflict was not aborted" (got […,"2"])
 //   q() returning its argument unquoted ... the unquoted merge message fails first ("Command failed: sh -c cat t03.txt")
+//   From the independent review (each fix reverted alone):
+//   MERGE_HEAD found via --git-dir ........ "a conflict in a run started from a linked worktree left the checkout mid-merge"
+//   --run-dir kept relative ............... "a relative --run-dir was … swept into its commit" (got ["01:done","20","2"])
+//   the uncommitted-ticket refusal off .... "a ticket file that was never committed ran" (got ["complete",8,false])
+//   the setup-leftover refusal off ........ "a file the worktree setup left … would have shipped" (got ["01:done",false])
+//   setStatus case-sensitive again ........ "a lower-case status: line was read but never rewritten"
+//   the final verdict ignored by allDone .. "a final review that rejects still let the run report complete"
 // The one-merge queue has no control: merges run synchronously in one Node process, so they cannot interleave.
 check('develop-spec-pi: plan first, frontier by Blocked by, slots, one migration at a time, merges in code, a brief', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ds-pi-'));
