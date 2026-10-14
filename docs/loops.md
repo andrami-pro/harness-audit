@@ -307,3 +307,38 @@ the two log files are still there, readable with a plain `tail -f`.
 Where the saving comes from: the reviewer seat first, then an implementer that no longer reads the repo. Where it does not:
 a trivial task, and any plan whose limit counts tokens without weighting them by model, because the scout reads a lot on a
 cheap tier.
+
+## develop-spec: waves
+
+`plugins/harness-loops/workflows/develop-spec.js` works a folder of tickets without a human between them (PRD-004 §4).
+The project wrapper runs it when the args carry `tickets`, with the same config as develop-phase:
+`/develop-phase {"tickets": "docs/tickets/prd-008-…"}`.
+
+- **Tickets.** One file per ticket, a `Status:` line (`ready-for-agent`, `claimed`, `done`, `blocked`) and a
+  `Blocked by:` line (`None`, or ticket numbers). A `## Seams` section is the ticket's agreed seams. A ticket without
+  one runs with the analyst's own, without stopping.
+- **Two human checkpoints.** The first run reads the tickets and returns the plan (waves, warnings such as a cycle or a
+  missing blocker) and changes nothing. `confirmed: true` works it. At the end, one brief: what landed, what is blocked
+  and why, what waits on it, and the decisions left to you. The brief is assembled from what the seats returned. No seat
+  writes it.
+- **The frontier** is every `ready-for-agent` ticket whose blockers are all `done`, first by number. Up to `maxParallel`
+  (default 2) run at once. When one finishes, the frontier is recomputed, so a dependent starts the moment its blocker
+  merges. Two tickets that add a migration never run at the same time.
+- **One ticket, one worktree.** `.claude/worktrees/spec-<folder>-<id>` on branch `spec/<folder>-<id>`, from the current
+  branch. The whole develop-phase loop runs inside it (`workdir`): seams, test-first, code and spec review, preflight,
+  commit. `agent({isolation: 'worktree'})` would give each seat a fresh worktree, so the seats are told where to work.
+- **Merges, one at a time.** An approved, committed ticket merges into the checkout the run started from (`integrate`
+  with `{branch}`, or `git merge --no-ff`). It is marked `done` with a line under `## Comments`, and its worktree is
+  removed. A ticket that does not converge, or does not merge, is marked `blocked` with the reason. Its worktree stays for
+  you to inspect, its dependents wait, and the rest of the graph goes on.
+- **Refuses** a checkout with uncommitted changes, since it merges into it.
+- **Final review.** Once something landed, a code seat and a spec seat review everything merged
+  (`git diff <start>..HEAD`), in parallel and read-only. They look for what no single ticket's review could see.
+
+**Why it is a built file.** A workflow runs another only one level deep, and the wrapper already spends that level, so
+develop-spec cannot call develop-phase. `scripts/build-workflows.js` inlines develop-phase's loop into it as a function,
+from `workflow-src/develop-spec.js`. Edit those two sources and rebuild. `validate.js` fails while the built file is stale.
+
+**Size.** Each ticket costs about seven agents per round. Two tickets in flight with both review axes is about four
+concurrent seats, within the runtime's per-workflow concurrency cap. Raise `maxParallel` only if the session's workflow
+size setting (`/config`, "Dynamic workflow size") allows the agent count.

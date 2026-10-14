@@ -131,7 +131,8 @@ the ones that do not fit), then replace the file with the wrapper. Pilot: `notio
   read"); the probe had passed only because its session could read `~/.claude`. The hook now also writes a
   git-ignored copy into `.claude/harness/` of every project with a wrapper, and the wrapper reads it first.
 - **Pi parity.** `scripts/develop-phase-pi.js` needs the same three gains or a documented gap.
-- **Workflow size.** A wave of four tickets is already more than ten agents; document the `/config` setting.
+- **Workflow size.** A wave of four tickets is already more than ten agents. Documented in docs/loops.md §develop-spec;
+  the default is two tickets in flight.
 
 ## 8. Order
 
@@ -147,7 +148,9 @@ the ones that do not fit), then replace the file with the wrapper. Pilot: `notio
    implementer (`tdd`), a parallel spec seat (`specReview`) under D25a; approval needs both axes, reported side by side.
    Proven by stub seats in `validate.js` with negative controls, and by a first live run on this repository
    ([2026-10-14](../harness-dev/loop-runs/2026-10-14-develop-phase-seams-spec.md)). Pi: not yet (§7).
-4. develop-spec (waves); pilot on one PRD. Not started.
+4. develop-spec (waves); pilot on one PRD. **Built** in loops 1.4.0: `workflows/develop-spec.js`, generated with
+   develop-phase inlined (`scripts/build-workflows.js`), reached through the same wrapper when the args carry
+   `tickets`. Proven by stub seats in `validate.js` with negative controls; pilot pending.
 5. Migrate the remaining projects. **Partial**: READMEs are under 150 lines and the root README has the
    "which plugin do I need?" table. Of the projects that held a fork, 7 call the wrapper on their branch,
    3 have it applied but not committed, and 6 wait until their owner's work in progress lands

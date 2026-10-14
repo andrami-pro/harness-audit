@@ -19,9 +19,8 @@ checks every seat's output. Paths like `scripts/…` are relative to this plugin
 | "Improve the *process* that builds the product" | 5 · Workflow improvement | `/iterate <task>` | high | score ≥ 90 ∧ optimizer out of proposals (max 5) |
 | "Improve how *I* drive the agent — fully local" | 6 · Operator | `/session-review [--since 30d]` | med-low | single pass; re-run weekly |
 
-Plus one thing that is not a loop: **`/dashboard-harness`**, the free observer the six are watched through.
-It reads your local transcripts and reports how the driving went. See
-[Watch them run](../harness-guards/README.md#watch-them-run--dashboard-harness).
+Plus one thing that is not a loop: **`/dashboard-harness`**, the free observer that reads your local transcripts
+and reports how the driving went — see [Watch them run](../harness-guards/README.md#watch-them-run--dashboard-harness).
 
 **Honesty rule for this table:** a loop only gets a row once it has at least one real, recorded run — a findings
 JSON (or, for the process loop, a settled prediction) in the operating repo's `docs/harness-dev/loop-runs/`.
@@ -47,6 +46,9 @@ stages the run's files by name, never your uncommitted work.
 It returns a `handoff` (`complete | continue | blocked`) that is what the seats report, labelled as such.
 On Pi the same loop is `scripts/develop-phase-pi.js`, with a tmux live view — see
 [docs/loops.md](../../docs/loops.md#develop-phase-scout-analyst-and-a-reviewer-from-another-vendor).
+Args with `tickets: "<folder>"` run **develop-spec**, the waves loop, with the same config: it plans waves from each
+ticket's `Status:` and `Blocked by:`, then with `confirmed: true` works two tickets at a time, each in its own
+worktree, and merges each approved one ([docs/loops.md](../../docs/loops.md#develop-spec-waves)).
 
 ### Prerequisites
 
