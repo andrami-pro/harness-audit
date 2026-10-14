@@ -1,6 +1,5 @@
 # 01 — Pi: a PRD path for develop-phase-pi
-
-Status: ready-for-agent
+Status: done
 Blocked by: None
 
 PRD: `docs/prds/PRD-004-three-plugins-and-waves.md` §3.2 and §7 ("Pi parity").
@@ -35,3 +34,4 @@ gives it to its final review, never to the tickets' runs.
 The Claude loop. Any other flag.
 
 ## Comments
+- 2026-10-14: merged by develop-spec-pi from spec/pi-waves-pilot-01
