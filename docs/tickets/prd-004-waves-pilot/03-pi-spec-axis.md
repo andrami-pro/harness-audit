@@ -1,6 +1,6 @@
 # 03 — Pi: the spec review axis
 
-Status: ready-for-agent
+Status: done
 Blocked by: 01
 
 PRD: `docs/prds/PRD-004-three-plugins-and-waves.md` §3.2 and §7.
@@ -36,3 +36,5 @@ against the task, the PRD, the plan and the seams. The Pi loop has one reviewer.
 `workflows/develop-phase.js`.
 
 ## Comments
+
+- 2026-10-14: merged by develop-spec from spec/prd-004-waves-pilot-03
