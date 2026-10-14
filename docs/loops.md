@@ -296,8 +296,7 @@ read-only `spec-<n>` seat runs in parallel with the code reviewer, with the task
 `docs/prds/`), the plan, the seams and the diff; approval needs both, the result carries `axes: { code, spec }` and
 `spec: ` evidence lines, and each rejected axis reaches the implementer as its own section. Its model is
 `harness.pi.spec` (never `defaults`), or the reviewer's when unset, refused like the reviewer's when Claude or the
-implementer's family (D25a); `--no-spec-review` turns it off. What Pi still lacks: the stop on a rejection with no
-`[FAIL]` line. `--allow-skipped "<substring>"`, repeatable, makes a matching `SKIP` line reported, not counted. From a
+implementer's family (D25a); `--no-spec-review` turns it off. `--allow-skipped "<substring>"`, repeatable, makes a matching `SKIP` line reported, not counted. From a
 Pi session, a small extension can expose it as `/develop-phase <task>`; from a shell: `node scripts/develop-phase-pi.js
 --task "…" [--no-preparer] [--no-commit] [--max-iter N] [--preflight "<cmd>"] [--no-jev] [--run-dir <path>] [--no-tmux]
 [--seams propose|"<list>"] [--no-tdd] [--no-spec-review] [--allow-skipped "<substring>"] [--prd <path>]`.
