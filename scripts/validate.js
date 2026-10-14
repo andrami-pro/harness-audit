@@ -3497,6 +3497,9 @@ esac
 
 // Four runs: a clean pass that commits, a same-family line-up refused before any seat, an analyst BLOQUEO
 // that stops before the implementer, and a gate that exits 0 with a SKIP line, which must not count as a pass.
+// From the first live develop-spec-pi run (2026-10-14): a provider that drops ("Connection error.") while pi exits 0, and
+// a commit seat that returns nothing. Controls, each reverted alone (exit 1): the crash without the seat's error event
+// ("… was not reported as such: exit 0 — empty output"); the fallback cut at 80 characters ("… not the task's first sentence").
 check('develop-phase-pi: loop in code — pass commits, D25a refuses, BLOQUEO stops, SKIP is not a PASS', () => {
   const { run, done } = piLoop();
   const pass = run('pass');
