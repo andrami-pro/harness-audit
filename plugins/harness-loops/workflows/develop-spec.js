@@ -607,7 +607,10 @@ if (read.dirty.length) {
     `Commit or stash them first: the waves merge every ticket into this checkout (${read.dirty.slice(0, 5).join(' · ')})`)
 }
 
-const tickets = [...read.tickets].sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }))
+// A heading that already starts with its id ("# 01 — Pi: …") would read "01 — 01 — Pi" in every message.
+const tickets = [...read.tickets]
+  .map((t) => ({ ...t, title: t.title.replace(new RegExp(`^${t.id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*[—–:.-]\\s*`), '') }))
+  .sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }))
 // Everything below keys on the id: two files with one id would run as one and both read as landed.
 const dupes = [...new Set(tickets.map((t) => t.id).filter((id, i, all) => all.indexOf(id) !== i))]
 if (dupes.length) {

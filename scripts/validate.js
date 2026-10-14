@@ -3072,6 +3072,7 @@ check('develop-spec waves: plan first, frontier by Blocked by, slots, one migrat
       const dupes = await run({ confirmed: true }, [T('01'), T('01', { file: '01-y.md' }), T('02')]);
       const evil = await run({ confirmed: true, worktreeSetup: 'pnpm install --frozen-lockfile' }, [T('01', { title: "x $(touch /tmp/p) it's" })]);
       const untidy = await run({ confirmed: true }, three(), { untidy: '01' });
+      const titled = await run({ confirmed: true }, [T('01', { title: '01 — Pi: x' })]);
       const st = (r) => r.out.tickets.map((t) => `${t.id}:${t.status}`).join(' ');
       console.log(JSON.stringify({
         plan: [JSON.stringify(plan.out.plan.waves), plan.started.length, plan.out.handoff.status, /approve the ticket breakdown/.test(plan.out.handoff.summary)],
@@ -3090,6 +3091,7 @@ check('develop-spec waves: plan first, frontier by Blocked by, slots, one migrat
         quoted: [evil.by('01:merge').prompt.includes("-m 'merge: 01 — x $(touch /tmp/p) it'\\''s'"), evil.by('01:worktree').prompt.includes('pnpm install --frozen-lockfile')],
         untidy: [st(untidy), /01 landed, tidy up by hand: .*worktree has untracked files/.test(untidy.out.brief), untidy.at('01:merge') < untidy.at('03:worktree')],
         doneDep: st(doneDep),
+        titled: [titled.by('01:merge').prompt.includes("-m 'merge: 01 — Pi: x'"), /01 — 01/.test(JSON.stringify(titled.calls.map((c) => c.prompt)) + titled.out.brief)],
       }));
     })().catch((e) => console.log('THREW ' + e.stack));
   };
@@ -3111,6 +3113,7 @@ check('develop-spec waves: plan first, frontier by Blocked by, slots, one migrat
     quoted: [[true, true], "a ticket title reaches the merge seat's shell unquoted (its $(…) would run), or worktreeSetup did not reach the new worktree"],
     untidy: [['01:done 02:done 03:done', true, true], 'a merge that landed was reported not merged because its worktree could not be removed'],
     doneDep: ['01:done 02:done', 'a ticket already done did not count as a met blocker'],
+    titled: [[true, false], 'a heading that starts with its id is said twice ("01 — 01 — Pi") in the merge message or the brief, as in the first pilot'],
   };
   for (const [k, [v, why]] of Object.entries(want)) {
     if (JSON.stringify(r[k]) !== JSON.stringify(v)) throw new Error(`${why} (got ${JSON.stringify(r[k])})`);
