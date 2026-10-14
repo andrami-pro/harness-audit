@@ -8,8 +8,10 @@
 //     `pi -p --no-session` call with its own model and its own tool allowlist; nothing else is a model.
 //   - Every seat's model comes from the line-up (~/.agents/model-lineup.json, harness `pi`, merged with the
 //     project's .agents/model-lineup.json) resolved at run time — there is no stamped copy to drift. The
-//     analyst sits in the `architect` role. D25a is re-checked here: a line-up whose reviewer shares the
-//     implementer's family refuses to run.
+//     analyst sits in the `architect` role. D25a is re-checked here: a line-up whose reviewer, or spec
+//     reviewer, shares the implementer's family refuses to run.
+//   - Two reviewers judge each diff in parallel (PRD-004 §3.2): the code reviewer against the rubric, the spec
+//     reviewer against the task, the PRD, the plan and the seams. Approval needs both.
 //   - Preflight is the project's own gate run through the shell. Its exit code and its SKIP lines are read
 //     by code; a SKIP is not a PASS.
 //   - Jev (scripts/jev.js), when a TypeSafe key is present, sizes the task before any seat runs:
@@ -20,10 +22,13 @@
 // Usage (from the session's worktree):
 //   node develop-phase-pi.js --task "<task>" [--max-iter 5] [--no-preparer] [--no-commit]
 //                            [--preflight "<command>"] [--no-jev] [--run-dir <path>] [--no-tmux]
-//                            [--seams propose | --seams "<one per line>"] [--no-tdd] [--allow-skipped "<substring>"]…
+//                            [--seams propose | --seams "<one per line>"] [--no-tdd] [--no-spec-review]
+//                            [--allow-skipped "<substring>"]…
 //   --seams propose   stop after the analyst and return its seams in the result, for the human to agree once
 //   --seams "<list>"  the agreed seams: the analyst copies them or stops on BLOQUEO/BLOCKER; every seat gets them
 //   --no-tdd          the implementer is not asked to work test-first (default: test-first, one test per seam)
+//   --no-spec-review  no spec axis: the code reviewer alone approves (default: both axes, the spec model from
+//                     harness.pi.spec or, unset, the reviewer's)
 //   --allow-skipped   repeatable: a preflight SKIP line containing it (any case) is reported, not counted
 // Progress goes to stderr, one line per event; the result (handoff JSON) goes to stdout. Every seat's
 // prompt and full transcript are kept under the run dir printed at start:
@@ -53,7 +58,7 @@ const READ_ONLY = 'read,grep,find,ls';
 
 // ── args ─────────────────────────────────────────────────────────────────────────────────────────────
 function parseArgs(argv) {
-  const a = { task: '', maxIter: 5, preparer: true, commit: true, preflight: null, jev: true, runDir: null, tmux: true, seams: null, tdd: true, allowSkipped: [] };
+  const a = { task: '', maxIter: 5, preparer: true, commit: true, preflight: null, jev: true, runDir: null, tmux: true, seams: null, tdd: true, allowSkipped: [], spec: true };
   for (let i = 0; i < argv.length; i += 1) {
     const k = argv[i];
     if (k === '--task') a.task = argv[++i] || '';
@@ -66,6 +71,7 @@ function parseArgs(argv) {
     else if (k === '--no-tmux') a.tmux = false;
     else if (k === '--seams') a.seams = argv[++i] || '';
     else if (k === '--no-tdd') a.tdd = false;
+    else if (k === '--no-spec-review') a.spec = false;
     else if (k === '--allow-skipped') a.allowSkipped.push(argv[++i] || '');
     else throw new Error(`unknown argument: ${k}`);
   }
@@ -90,11 +96,12 @@ function readJson(p) {
   try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return null; }
 }
 
-function resolveSeats(root) {
+function resolveSeats(root, { spec = true } = {}) {
   const global = readJson(process.env.MODEL_LINEUP_PATH || path.join(os.homedir(), '.agents', 'model-lineup.json'));
   const project = readJson(path.join(root, '.agents', 'model-lineup.json'));
   if (!global && !project) throw Object.assign(new Error('no line-up found (~/.agents/model-lineup.json)'), { code: 2 });
-  const { resolved } = lineupMod.resolveLineup(lineupMod.mergeLineups(global, project), 'pi');
+  const merged = lineupMod.mergeLineups(global, project);
+  const { resolved } = lineupMod.resolveLineup(merged, 'pi');
   const hard = lineupMod.hardViolation(resolved);
   if (hard) throw Object.assign(new Error(hard), { code: 2 });
   const need = ['scout', 'architect', 'implementer', 'reviewer', 'orchestrator'];
@@ -105,7 +112,26 @@ function resolveSeats(root) {
   // fallback, or any Claude/Anthropic id, refuses the run instead of silently spending on Claude.
   const claude = need.filter((r) => !resolved[r].provider || /claude|anthropic/i.test(`${resolved[r].provider}/${resolved[r].model}`));
   if (claude.length) throw Object.assign(new Error(`seat(s) not pinned to a non-Claude model in harness.pi: ${claude.map((r) => `${r}=${resolved[r].stamp}`).join(', ')}`), { code: 2 });
-  return Object.fromEntries(Object.entries(resolved).map(([role, e]) => [role, e.stamp]));
+  const seats = Object.fromEntries(Object.entries(resolved).map(([role, e]) => [role, e.stamp]));
+  // The spec reviewer is a second reviewer, so D25a binds it too. ROLES in model-lineup.js has no `spec` (that file
+  // is shared by both plugins and the line-up UI), so the role is read from the `pi` column directly — never from
+  // `defaults` — under the same non-Claude rule; with no `spec` pinned it takes the reviewer's model.
+  seats.spec = null;
+  if (spec) {
+    const entry = merged.harness?.pi?.spec;
+    const stamp = entry ? `${String(entry.provider || '').trim()}/${String(entry.model || '').trim()}` : seats.reviewer;
+    if (entry && (!entry.provider || !entry.model || /claude|anthropic/i.test(stamp))) {
+      throw Object.assign(new Error(`seat(s) not pinned to a non-Claude model in harness.pi: spec=${stamp}`), { code: 2 });
+    }
+    const family = entry ? lineupMod.familyOf(entry) : resolved.reviewer.family;
+    if (family === resolved.implementer.family) {
+      throw Object.assign(new Error(`spec reviewer (${stamp}, family ${family}) and implementer (${resolved.implementer.model}, family `
+        + `${resolved.implementer.family}) share a model family — the independence property (D25a) forbids this. Pin another `
+        + 'family in harness.pi.spec, or run with --no-spec-review.'), { code: 2 });
+    }
+    seats.spec = stamp;
+  }
+  return seats;
 }
 
 // ── Jev sizing ───────────────────────────────────────────────────────────────────────────────────────
@@ -338,7 +364,7 @@ async function main() {
   process.chdir(root);
 
   let seats;
-  try { seats = resolveSeats(root); } catch (e) { log(`develop-phase-pi: line-up refused — ${e.message}`); return e.code || 2; }
+  try { seats = resolveSeats(root, { spec: a.spec }); } catch (e) { log(`develop-phase-pi: line-up refused — ${e.message}`); return e.code || 2; }
 
   const runDir = a.runDir || fs.mkdtempSync(path.join(os.tmpdir(), 'develop-phase-pi-'));
   fs.mkdirSync(runDir, { recursive: true });
@@ -369,7 +395,7 @@ async function main() {
   }
 
   log(`Task: "${task}" · branch ${branch} · max ${a.maxIter} iter · run dir ${runDir}`);
-  log(`Seats: ${preparer ? `scout=${seats.scout} · analyst=${analystSeat} · ` : ''}implementer=${seats.implementer} · reviewer=${seats.reviewer}`);
+  log(`Seats: ${preparer ? `scout=${seats.scout} · analyst=${analystSeat} · ` : ''}implementer=${seats.implementer} · reviewer=${seats.reviewer}${a.spec ? ` · spec=${seats.spec}` : ''}`);
   if (tmuxSession) log(`Vista en vivo: tmux attach -t ${tmuxSession}`);
   bus(`Tarea: ${task}`);
 
@@ -486,12 +512,18 @@ ${reads ? `Lee: ${reads}.` : ''}`
   let approved = false;
   let lastImpl = '';
   let lastReview = '';
+  let lastSpec = '';
+  let axes = null;
   let iteration = 0;
 
   while (!approved && iteration < a.maxIter) {
     iteration += 1;
     log(`── Iteración ${iteration}/${a.maxIter} · Implement`);
-    const correction = iteration > 1 ? `\n\n⚠ El reviewer RECHAZÓ. Razones:\n${lastReview}\n\nCorrige SOLO los [FAIL].` : '';
+    // Each rejected axis reaches the implementer as its own section; an approved one is left out.
+    const correction = iteration > 1
+      ? `\n\n⚠ La revisión RECHAZÓ. Corrige SOLO los [FAIL].${!axes || !axes.code.approved ? `\n\n## El code reviewer RECHAZÓ (rúbrica). Razones:\n${lastReview}` : ''}${
+        axes && axes.spec && !axes.spec.approved ? `\n\n## El spec reviewer RECHAZÓ (tarea, PRD, seams). Razones:\n${lastSpec}` : ''}`
+      : '';
     lastImpl = await runSeat({
       name: `implementer-${iteration}`, model: seats.implementer, tools: 'read,bash,edit,write,grep,find,ls', runDir, timeoutS: SEAT_TIMEOUT_S.implementer,
       prompt: `${implementerRole ? `${stripFrontmatter(fs.readFileSync(implementerRole, 'utf8'))}\n\n---\n\n` : ''}Eres el implementer de un loop de desarrollo.
@@ -508,13 +540,15 @@ Al terminar: lista archivos creados/modificados + descripción de cada cambio.`,
     const changes = changeSet();
     if (changes.empty) {
       lastReview = '[FAIL] diff — el implementer no dejó ningún cambio en el worktree\nRECHAZADO';
+      lastSpec = '';
+      axes = null; // no review ran: the correction carries the diff [FAIL] as the code section
       log('  ✗ sin cambios en el worktree — cuenta como RECHAZADO');
       bus(`Implementer iter ${iteration} → sin cambios en el worktree (RECHAZADO)`);
       continue;
     }
     const touched = git(['diff', '--name-only', 'HEAD']).out.trim().split('\n').filter(Boolean);
     bus(`Implementer iter ${iteration} → diff (${touched.length} archivo(s)): ${touched.join(', ')}`);
-    lastReview = await runSeat({
+    const codeReview = runSeat({
       name: `reviewer-${iteration}`, model: seats.reviewer, tools: READ_ONLY, runDir, timeoutS: SEAT_TIMEOUT_S.reviewer,
       prompt: `${reviewerRole ? `${stripFrontmatter(fs.readFileSync(reviewerRole, 'utf8'))}\n\n---\n\n` : ''}Eres el revisor adversarial de un loop de desarrollo.
 Recibes SOLO artefactos — nunca el razonamiento del implementer. Mandato: busca razones para RECHAZAR.
@@ -534,11 +568,42 @@ Prohibido: leer fuera del repositorio, .env*, *secret*, y cualquier archivo igno
 Formato: [PASS|FAIL] criterio — evidencia concreta
 Última línea, sola y sin texto extra: APROBADO o RECHAZADO`,
     });
+    // The spec axis (PRD-004 §3.2): the code reviewer judges the diff against the rubric; this seat, in parallel,
+    // judges only whether the change does what was asked — the intent of SPEC_PROMPT in workflows/develop-phase.js.
+    const specReview = a.spec ? runSeat({
+      name: `spec-${iteration}`, model: seats.spec, tools: READ_ONLY, runDir, timeoutS: SEAT_TIMEOUT_S.reviewer,
+      prompt: `Eres el spec reviewer de un loop de desarrollo. Juzgas si el cambio hace lo que se pidió — no la calidad del
+código, eso lo juzga otro asiento. Mandato: encuentra dónde el cambio se aparta de la spec.
+Default = FAIL hasta evidencia de PASS.
+LA SPEC — cítala en tu evidencia:
+TAREA: ${task}
+PRD: docs/prds/ (el PRD activo; lee la parte que esta tarea implementa)
+${plan ? `PLAN:\n${plan}\n` : ''}${seamsBlock}
+## Lo que el implementer dice que hizo (afirmación a verificar, no evidencia)
+${lastImpl.slice(0, 6000)}
+
+## Cambios (git diff HEAD + archivos nuevos)
+${changes.text}
+Solo lectura: lee archivos del repositorio (read, grep, find, ls) para verificar una afirmación; no edites nada, no ejecutes nada que escriba.
+Prohibido: leer fuera del repositorio, .env*, *secret*, y cualquier archivo ignorado por git.
+Una línea por criterio, como [PASS|FAIL] criterio — evidencia que cita la spec y el código:
+- cada requisito de la tarea y de la parte del PRD que implementa está (una línea por requisito)
+- ningún comportamiento que la spec no pidió
+- nada implementado en contra de la spec${seams.length ? '\n- cada seam existe como está listado y un test lo ejercita por esa interfaz' : ''}
+Última línea, sola y sin texto extra: APROBADO o RECHAZADO`,
+    }) : null;
+    [lastReview, lastSpec] = await Promise.all([codeReview, specReview]);
+    lastSpec = lastSpec || '';
     if (!lastReview) { bus(`Reviewer iter ${iteration}: sin resultado`); return finish(crash('reviewer', iteration)); }
-    approved = verdictOf(lastReview);
-    const fails = lastReview.split('\n').filter((l) => /^\s*\[FAIL\]/.test(l)).length;
-    log(approved ? `✓ APROBADO iter ${iteration}` : '✗ RECHAZADO — corrigiendo');
-    bus(`Reviewer iter ${iteration} → ${approved ? 'APROBADO' : `RECHAZADO (${fails} FAIL)`}`);
+    if (a.spec && !lastSpec) { bus(`Spec reviewer iter ${iteration}: sin resultado`); return finish(crash('spec', iteration)); }
+    axes = {
+      code: { approved: verdictOf(lastReview), model: seats.reviewer },
+      spec: a.spec ? { approved: verdictOf(lastSpec), model: seats.spec } : null,
+    };
+    approved = axes.code.approved && (!axes.spec || axes.spec.approved);
+    const fails = `${lastReview}\n${lastSpec}`.split('\n').filter((l) => /^\s*\[FAIL\]/.test(l)).length;
+    log(approved ? `✓ APROBADO iter ${iteration}` : `✗ RECHAZADO (code ${axes.code.approved ? '✓' : '✗'}${axes.spec ? ` · spec ${axes.spec.approved ? '✓' : '✗'}` : ''}) — corrigiendo`);
+    bus(`Review iter ${iteration} → ${approved ? 'APROBADO' : `RECHAZADO (code ${axes.code.approved ? '✓' : '✗'}${axes.spec ? ` · spec ${axes.spec.approved ? '✓' : '✗'}` : ''} · ${fails} FAIL)`}`);
   }
   if (!approved) { log(`⚠ No convergió tras ${a.maxIter} iter — escalar al humano`); bus(`No convergió tras ${a.maxIter} iteración(es)`); }
 
@@ -556,19 +621,22 @@ Formato: [PASS|FAIL] criterio — evidencia concreta
     bus(commit.committed ? `Commit → ${commit.hash} — ${commit.message}` : `Commit → no hecho: ${commit.note}`);
   }
 
-  const verdictLines = lastReview.split('\n').filter((l) => /^\s*\[(PASS|FAIL)\]/.test(l)).map((l) => l.trim());
-  const openFails = verdictLines.filter((l) => l.startsWith('[FAIL]'));
+  // The two axes stay side by side: the spec lines carry a "spec: " prefix, and the blocker names the FAILs of both.
+  const linesOf = (text) => text.split('\n').filter((l) => /^\s*\[(PASS|FAIL)\]/.test(l)).map((l) => l.trim());
+  const verdictLines = linesOf(lastReview);
+  const specLines = a.spec ? linesOf(lastSpec).map((l) => `spec: ${l}`) : [];
+  const openFails = [...verdictLines, ...specLines].filter((l) => /^(spec: )?\[FAIL\]/.test(l));
   const LABEL = 'Reportado por implementer/reviewer — no certificado de forma independiente: ';
   const status = approved && pf.passed ? 'complete' : approved ? 'continue' : 'blocked';
   bus(`Fin: ${status}`);
   return finish(result({
-    iterations: iteration, approved, preflightPassed: pf.passed, commit,
+    iterations: iteration, approved, preflightPassed: pf.passed, commit, axes,
     handoff: {
       status,
       summary: approved
-        ? `Reviewer aprobó tras ${iteration} iteración(es); preflight ${pf.state}${commit && commit.committed ? `; commit ${commit.hash}` : ''}`
+        ? `${a.spec ? 'Code y spec reviewer aprobaron' : 'Reviewer aprobó'} tras ${iteration} iteración(es); preflight ${pf.state}${commit && commit.committed ? `; commit ${commit.hash}` : ''}`
         : `Reviewer sigue rechazando tras ${a.maxIter} iteración(es)`,
-      evidence: [...verdictLines, `preflight: ${pf.state}`, ...pf.skipped.map((l) => `preflight skip: ${l}`),
+      evidence: [...verdictLines, ...specLines, `preflight: ${pf.state}`, ...pf.skipped.map((l) => `preflight skip: ${l}`),
         ...pf.allowedSkips.map((l) => `preflight skip (declarada): ${l}`)],
       ...(approved ? {} : { blocker: openFails.join(' · ') || 'reviewer devolvió RECHAZADO sin línea [FAIL]' }),
     },
