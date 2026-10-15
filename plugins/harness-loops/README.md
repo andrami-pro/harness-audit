@@ -78,7 +78,7 @@ audit marks the Graphify criterion FAIL but does not abort the install.
 |---|---|---|
 | `prompt-router` | `UserPromptSubmit` | Off without a TypeSafe key. One advisory line: which skill and which subagent tier (haiku/sonnet/opus/fable) fit the prompt |
 | `jev-nudge` | `SessionStart` | While no key is present, says once a day that Jev is off. Silent with a key |
-| `sync-workflows` | `SessionStart` | Copies `develop-phase.js` to `~/.claude/harness/` and to `.claude/harness/` (git-ignored) of a project with a wrapper, only when it changed |
+| `sync-workflows` | `SessionStart` | Copies `develop-phase.js` to `~/.claude/harness/` and to `.claude/harness/` (git-ignored) of a project with a wrapper, only when it changed; one line when the project's develop-phase is a fork or an older wrapper |
 
 ## Jev — the optional System One classifier
 

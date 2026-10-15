@@ -3,6 +3,7 @@ export const meta = {
   description: 'Project wrapper around the global develop-phase loop (harness-loops): this file is the project config, the loop lives in the plugin.',
 }
 
+// harness wrapper v2 — the template's version; harness-loops says at session start when a project's copy is older.
 // This file is the project's config, and only that. The loop (scout → analyst → implementer → reviewer →
 // preflight → commit) is one global script that the harness-loops plugin keeps current, so an improvement
 // reaches every project at once. Change the config here; never copy the loop into the project.

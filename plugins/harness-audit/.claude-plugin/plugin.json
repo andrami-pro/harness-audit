@@ -1,7 +1,7 @@
 {
   "name": "harness-audit",
   "description": "Audit any repo's agent harness against four pillars (harness-in-code, role separation, automatic verification, loop design) and emit an executable rubric a loop can converge against, plus the independent-verifier protocol and the model line-up resolver that keeps reviewer and implementer in different families.",
-  "version": "3.1.0",
+  "version": "3.1.1",
   "author": {
     "name": "Andrés Ramírez · andrami",
     "url": "https://andrami.pro"

@@ -3318,10 +3318,34 @@ check('sync-workflows keeps the stable copy equal to the shipped loop, and only 
     if (fs.readFileSync(path.join(proj, '.claude', 'harness', 'develop-phase.js'), 'utf8') !== read(DEVELOP_PHASE)) throw new Error('a project with a wrapper got no copy of the loop it can read');
     if (!/^\*$/m.test(fs.readFileSync(path.join(proj, '.claude', 'harness', '.gitignore'), 'utf8'))) throw new Error("the project copy is not ignored by git — someone's git add -A would commit it");
     if (fs.existsSync(path.join(plain, '.claude', 'harness'))) throw new Error('a project without a wrapper got a copy it never asked for');
+    // The one thing it says: a forked loop, or a wrapper older than the template, gets one line asking the session to
+    // offer the update; a current wrapper, or a project with no develop-phase, gets nothing.
+    const say = (name, body) => {
+      const cwd = path.join(dir, name);
+      if (body !== null) { fs.mkdirSync(path.join(cwd, '.claude', 'workflows'), { recursive: true }); fs.writeFileSync(path.join(cwd, '.claude', 'workflows', 'develop-phase.js'), body); } else fs.mkdirSync(cwd, { recursive: true });
+      const o = execFileSync('node', [hook], { input: JSON.stringify({ hook_event_name: 'SessionStart', source: 'startup', cwd }), env, encoding: 'utf8' });
+      return o ? JSON.parse(o).hookSpecificOutput.additionalContext : '';
+    };
+    const tpl = read('plugins/harness-audit/skills/harness-audit/develop-phase-wrapper.js');
+    const tplVersion = Number((tpl.match(/harness wrapper v(\d+)/) || [])[1]);
+    if (tplVersion !== require(hook).WRAPPER_VERSION) throw new Error(`the template says "harness wrapper v${tplVersion}" and sync-workflows expects v${require(hook).WRAPPER_VERSION} — bump both together`);
+    fs.mkdirSync(path.join(dir, '.agents', 'harness-migrations', 'v1-ready'), { recursive: true });
+    fs.writeFileSync(path.join(dir, '.agents', 'harness-migrations', 'v1-ready', 'develop-phase.js'), '// prepared');
+    const said = {
+      fork: /forked copy/.test(say('fork', '// a fork: the loop itself')),
+      v1: /older than the harness-audit template/.test(say('v1', 'for (const ref of GLOBAL) { await workflow(ref, merged) }')),
+      ready: say('v1-ready', 'for (const ref of GLOBAL) { await workflow(ref, merged) }').includes(path.join(dir, '.agents', 'harness-migrations', 'v1-ready', 'develop-phase.js')),
+      markedOld: /older than/.test(say('marked', '// harness wrapper v1\nconst NAME = merged.tickets ? "develop-spec" : "develop-phase"; await workflow(ref, merged)')),
+      current: say('current', tpl),
+      unmarkedCurrent: say('unmarked', "const NAME = merged.tickets ? 'develop-spec' : 'develop-phase'; await workflow(ref, merged)"),
+      none: say('none', null),
+    };
+    const wantSaid = { fork: true, v1: true, ready: true, markedOld: true, current: '', unmarkedCurrent: '', none: '' };
+    if (JSON.stringify(said) !== JSON.stringify(wantSaid)) throw new Error(`the stale-wrapper notice is wrong: ${JSON.stringify(said)} — want a line for a fork, an old wrapper (naming a prepared file when one exists) and an explicit older version; nothing for a current wrapper or no develop-phase`);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
-  return 'copies on first start · leaves an identical copy alone · replaces a stale one · atomic · silent · project copy only behind a wrapper, git-ignored';
+  return 'copies on first start · leaves an identical copy alone · replaces a stale one · atomic · project copy only behind a wrapper, git-ignored · one line for a fork or an older wrapper, nothing otherwise';
 });
 
 // The dedupe's thresholds were chosen, not measured; the eval is what measures them. Offline this

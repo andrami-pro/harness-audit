@@ -51,7 +51,7 @@ three with `harness-loops`:
 | `loop-telemetry` | `SubagentStop`, `Stop` | Appends one ndjson line per agent boundary for `/dashboard-harness`. Local file, never sent anywhere |
 | `prompt-router` | `UserPromptSubmit` | **Off unless a TypeSafe key is present.** Suggests which installed skill and which subagent tier fit the prompt, in one advisory line. Sends the first 1500 chars of the prompt — see [§Jev](plugins/harness-loops/README.md#jev--the-optional-system-one-classifier) |
 | `jev-nudge` | `SessionStart` | While no key is present, says once a day that Jev is off and names `bin/jev-setup`. Silent with a key |
-| `sync-workflows` | `SessionStart` | Keeps a copy of the global `develop-phase` loop in `~/.claude/harness/`, and in `.claude/harness/` (git-ignored) of each project that has a wrapper. Writes nothing else |
+| `sync-workflows` | `SessionStart` | Keeps a copy of the global `develop-phase` loop in `~/.claude/harness/`, and in `.claude/harness/` (git-ignored) of each project that has a wrapper. Writes nothing else; says one line when a project's develop-phase is a fork or an older wrapper |
 
 ### Option 2 — skill only (Claude Code, no hooks)
 

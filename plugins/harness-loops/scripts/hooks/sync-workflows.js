@@ -13,6 +13,10 @@
 // script path this tool returned, or a file you can already read"). ~/.claude/harness/ is neither, so the
 // wrapper reads the project copy first. That copy ignores itself (.claude/harness/.gitignore = *).
 //
+// The one thing it says: when the project's develop-phase is a forked copy of the loop, or a wrapper older than the
+// template (WRAPPER_VERSION), one line of additionalContext asks the session to offer the user the update. It decides
+// nothing; the session asks, and the harness-audit skill does the work. Every other start prints nothing.
+//
 // jev.js rides along to ~/.claude/harness/ only: develop-phase's routeByJev seat runs it from a shell, which
 // reads $HOME whatever the session may load, so the project copy does not need it.
 //
@@ -25,6 +29,10 @@ const os = require('node:os');
 const path = require('node:path');
 
 const SRC = path.join(__dirname, '..', '..', 'workflows');
+// The template's version (plugins/harness-audit/skills/harness-audit/develop-phase-wrapper.js, its "harness wrapper
+// vN" line; validate.js keeps the two equal). Bump both when a wrapper written before would miss something.
+// v2: args with `tickets` go to develop-spec (loops 1.4.0).
+const WRAPPER_VERSION = 2;
 const JEV = path.join(__dirname, '..', 'jev.js');
 
 function destDir() {
@@ -38,6 +46,30 @@ function projectDir(cwd) {
     const wrapper = fs.readFileSync(path.join(cwd, '.claude', 'workflows', 'develop-phase.js'), 'utf8');
     return /workflow\(ref/.test(wrapper) ? path.join(cwd, '.claude', 'harness') : null;
   } catch { return null; }
+}
+
+// 'fork' (the loop itself), 'stale' (a wrapper older than the template), or null (current, or no develop-phase here).
+// A wrapper written before the version line existed is v2 when it already routes to develop-spec, v1 otherwise.
+function wrapperState(cwd) {
+  let text;
+  try { text = fs.readFileSync(path.join(cwd, '.claude', 'workflows', 'develop-phase.js'), 'utf8'); } catch { return null; }
+  if (!/workflow\(ref/.test(text)) return 'fork';
+  const m = text.match(/harness wrapper v(\d+)/);
+  const v = m ? Number(m[1]) : /develop-spec/.test(text) ? 2 : 1;
+  return v < WRAPPER_VERSION ? 'stale' : null;
+}
+
+function notice(cwd) {
+  const state = cwd && wrapperState(cwd);
+  if (!state) return null;
+  const ready = path.join(os.homedir(), '.agents', 'harness-migrations', path.basename(cwd), 'develop-phase.js');
+  const what = state === 'fork'
+    ? "this project's .claude/workflows/develop-phase.js is a forked copy of the loop, so no loop improvement reaches it"
+    : "this project's develop-phase wrapper is older than the harness-audit template (it misses what the template added since, such as sending args with `tickets` to develop-spec)";
+  return `harness-loops: ${what}. Tell the user in one line and offer to bring it up to date; do it only if they agree, `
+    + `with the harness-audit skill (a fork: its Step 0 migration; an older wrapper: keep the CONFIG block, take the rest `
+    + `from the skill's develop-phase-wrapper.js)${fs.existsSync(ready) ? `, or by copying the file already prepared at ${ready} after comparing its CONFIG with the current one` : ''}. `
+    + 'Commit only that file, with no Co-Authored-By line.';
 }
 
 function copyIfChanged(src, dest) {
@@ -71,10 +103,15 @@ if (require.main === module) {
   process.stdin.on('end', () => {
     try {
       const p = JSON.parse(raw || '{}');
-      if (!p.hook_event_name || p.hook_event_name === 'SessionStart') sync(p.cwd || process.env.CLAUDE_PROJECT_DIR);
+      if (!p.hook_event_name || p.hook_event_name === 'SessionStart') {
+        const cwd = p.cwd || process.env.CLAUDE_PROJECT_DIR;
+        sync(cwd);
+        const text = notice(cwd);
+        if (text) process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: text } }));
+      }
     } catch { /* never worth failing a session start over */ }
     process.exit(0);
   });
 }
 
-module.exports = { sync, destDir, projectDir, SRC, JEV };
+module.exports = { sync, destDir, projectDir, wrapperState, notice, WRAPPER_VERSION, SRC, JEV };
