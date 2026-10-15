@@ -11,7 +11,7 @@ harness stays.
 | If you want to… | Install | What you get |
 |---|---|---|
 | Know what your repo is missing before you let agents loose on it | `harness-audit` | An audit against four pillars, an **executable rubric** (`harness-rubric.md`, every row a command), a stack-tailored plan, and a `develop-phase` wrapper for the project |
-| Let agents ship work with an independent reviewer and real stop conditions | `harness-loops` | `/orchestrate`, `/review-loop`, `/iterate`, `/skill-loop`, the seven critic/scorer agents, and the global `develop-phase` loop: scout → analyst → implementer → reviewer from another model family → preflight → commit |
+| Let agents ship work with an independent reviewer and real stop conditions | `harness-loops` | `/orchestrate`, `/review-loop`, `/iterate`, `/skill-loop`, the seven critic/scorer agents, the global `develop-phase` loop (scout → analyst → test-first implementer → code and spec reviewers from another model family → preflight → commit), and `develop-spec`, which works a folder of tickets in waves |
 | Stop dangerous commands and see how your sessions actually go | `harness-guards` | Four write-time guards, local telemetry, `/dashboard-harness` and `/session-review` — nothing leaves your machine |
 
 They work alone and together: the audit writes the rubric and the wrapper, the loops converge against
@@ -71,7 +71,9 @@ The audit skill follows the open [Agent Skills](https://agentskills.io) standard
 ```
 
 The loops port to OpenCode, Kilo Code and Pi too (`--target opencode | kilo-loops | pi`), with real
-losses on the way — read [docs/compatibility.md](docs/compatibility.md) first. The guards and the
+losses on the way — read [docs/compatibility.md](docs/compatibility.md) first. On Pi, `develop-phase`
+and `develop-spec` run as plain Node scripts, `scripts/develop-phase-pi.js` and
+`scripts/develop-spec-pi.js`, with every seat on a non-Claude model from your line-up. The guards and the
 dashboard are Claude Code only.
 
 ## How it works, in one minute
@@ -84,10 +86,15 @@ dashboard are Claude Code only.
 2. **Wrap.** The audit writes `.claude/workflows/develop-phase.js`, a wrapper that holds only the
    project's config: language, models, preflight command, what the agents must never run.
 3. **Loop.** `/develop-phase <task>` runs one global loop (it ships with `harness-loops`, so an
-   improvement reaches every project): a cheap scout reads the repo, an analyst plans or stops on a
-   blocker, the implementer builds, a reviewer **from another model family** looks for reasons to
-   reject, the project's preflight decides, and the commit holds only the files the run touched.
-4. **Watch.** `/dashboard-harness` reads your local transcripts and tells you which tools failed, which
+   improvement reaches every project): a cheap scout reads the repo, an analyst plans and names the
+   seams to test (or stops on a blocker), the implementer builds test-first, and two reviewers **from
+   another model family** look for reasons to reject, one against the rubric and one against the spec.
+   The project's preflight decides, and the commit holds only the files the run touched.
+4. **Waves.** Given a folder of tickets (`Status:`, `Blocked by:`), the same wrapper runs `develop-spec`:
+   it shows the plan first, then works two tickets at a time, each in its own git worktree, merges each
+   approved one, and starts a dependent the moment its blocker lands. One brief at the end says what
+   landed, what is blocked and why.
+5. **Watch.** `/dashboard-harness` reads your local transcripts and tells you which tools failed, which
    guards fired, which skills you installed and never used — for free, without leaving your machine.
 
 An independent reviewer beats self-critique; the often-cited ~62% → ~89% figures are directional, not

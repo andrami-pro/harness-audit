@@ -50,6 +50,7 @@ different rates. Read this before assuming a layer "just works" on a harness you
 | The 7 agents | ✅ native | ✅ native | ✅ native | ✅ via the same third-party extension |
 | Manual-only guardrail (`disable-model-invocation`) | ✅ enforced | ❌ **no equivalent — dropped** | ❌ **no equivalent — dropped** | ✅ **preserved by construction — see below** |
 | Deterministic loop gate (`loop-gate.js`) | ✅ native | ⚠️ **degraded to a hand-check** | ⚠️ **degraded to a hand-check** | ⚠️ **degraded to a hand-check** |
+| `develop-phase` and `develop-spec` (waves) | ✅ native (Workflow) | ❌ not ported (no Workflow runtime) | ❌ not ported (no Workflow runtime) | ✅ as Node scripts: `develop-phase-pi.js`, `develop-spec-pi.js` (seats through `pi -p`, merges in code) — see [docs/loops.md](loops.md#develop-spec-waves) |
 | Hooks + dashboard (`/dashboard-harness`, `loop-stats.js`) | ✅ native | 📖 documented, not automated | 📖 documented, not automated | 📖 documented, not automated |
 
 **Loops on Pi, in full — read this before you install:** Pi's core ships with no sub-agent support at
