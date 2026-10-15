@@ -3283,6 +3283,9 @@ check('develop-phase wrapper: config + per-run args reach the loop, a missing co
   return 'placeholders documented · run args override config · project copy, then $HOME copy, then plugin name · falls through on not-found and on unreadable · blocked when none · inner error never retried';
 });
 
+// Negative controls for the stale-wrapper notice (2026-10-15, each applied to sync-workflows.js, observed, reverted —
+// all exit 1): notice() always null ("the stale-wrapper notice is wrong: {\"fork\":false,…}"); every unmarked wrapper
+// read as v1 ("…\"unmarkedCurrent\":\"harness-loops: …"); WRAPPER_VERSION bumped alone ("bump both together").
 check('sync-workflows keeps the stable copy equal to the shipped loop, and only rewrites it when it differs', () => {
   const hook = path.join(ROOT, 'plugins/harness-loops/scripts/hooks/sync-workflows.js');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-sync-'));
