@@ -88,5 +88,5 @@ naming the corrected id. The failure it exists for is silent: a line-up reading
 and surfaces only as a dispatch that hangs and exits 1 with no mention of the model. On a machine without
 `pi` installed the check reports SKIPPED rather than failing a line-up it cannot verify.
 
-The weekly line-up advisor (rankings × price × data policy, `bin/lineup-advise`) is described in
+The daily line-up advisor (rankings × price × data policy, `bin/lineup-advise`) is described in
 [docs/lineup-advisor.md](../../docs/lineup-advisor.md).

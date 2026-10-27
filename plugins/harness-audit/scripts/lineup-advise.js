@@ -66,6 +66,12 @@ const PROFILES = {
   judge:        { metrics: ['intelligence'],                                   json: true,      price: 0.3 },
   preflight:    { metrics: [],                                                 tools: true,     price: 2.0 },
   explainer:    { metrics: ['intelligence'],                                   minCtx: 256_000, price: 2.0 },
+  // creativo (PRD-005 D5) — el asiento de diseño: pantallas, layouts, pulido visual. Manda LMArena
+  // WebDev (lm_webdev), con inteligencia y código como apoyo: "el mejor programando" y "el mejor
+  // diseñando UI" no son el mismo ranking, y el frente OpenCode Go de diseño se mueve cada semana.
+  // `sensitive` y las reglas de proveedor/cuota de rankRole aplican igual: un diseño también ve
+  // material del cliente, y una tarde de diseño no cabe en una cuota gratuita.
+  creativo:     { metrics: ['lm_webdev', 'intelligence', 'coding'],            price: 0.7, sensitive: true },
 };
 
 // ── util ──────────────────────────────────────────────────────────────────────────────────────────
