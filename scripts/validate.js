@@ -1285,7 +1285,7 @@ check('lineup-advise produces a report from pinned fixtures and honours privacy 
   // Pinned here, NOT read from the script's PROFILES: a mutation that drops `sensitive` from a profile
   // would otherwise drop the assertion with it and the check would pass for the wrong reason (it did,
   // the first time).
-  const CODE_FACING = new Set(['architect', 'orchestrator', 'implementer', 'reviewer', 'critic']);
+  const CODE_FACING = new Set(['architect', 'orchestrator', 'implementer', 'reviewer', 'critic', 'creativo']);
   const { familyOf } = require(path.join(ROOT, 'plugins/harness-audit/scripts/model-lineup.js'));
   for (const [role, list] of Object.entries(json.suggestions)) {
     for (const s of list) {
@@ -1307,7 +1307,18 @@ check('lineup-advise produces a report from pinned fixtures and honours privacy 
   }
   if (!md.includes('stealth/ox-alpha') || !md.includes('RETIENE')) throw new Error('the free-models table must list ox-alpha with its retention note');
 
-  return `report rendered · ${Object.keys(json.suggestions).length} roles · retains never on code roles · NIM/free only on short roles · reviewer ${familyOf({ model: rev.model })} ≠ implementer ${familyOf({ model: impl.model })}`;
+  // creativo is the design seat (PRD-005 D5): it must be ranked like every other role, and its
+  // WebDev evidence must be a real number out of the LMArena fixture. A PROFILES entry that merely
+  // names `lm_webdev` while no fixture row carries it would rank on intelligence/coding alone and
+  // still call itself WebDev-driven — a label is not evidence.
+  const creativo = json.suggestions.creativo;
+  if (!creativo || !creativo.length) throw new Error('creativo has no suggestion — the design seat is unranked');
+  if (!md.includes('creativo')) throw new Error('the report never names creativo in the role tables');
+  if (!creativo.some((s) => typeof s.metrics.lm_webdev === 'number' && Number.isFinite(s.metrics.lm_webdev))) {
+    throw new Error('creativo ranking carries no real WebDev metric — lm_webdev is a label, not evidence');
+  }
+
+  return `report rendered · ${Object.keys(json.suggestions).length} roles · creativo ranked on real lm_webdev (${Math.round(creativo[0].metrics.lm_webdev)}) · retains never on code roles · NIM/free only on short roles · reviewer ${familyOf({ model: rev.model })} ≠ implementer ${familyOf({ model: impl.model })}`;
 });
 
 // The shipped `model:` values in agents/*.md are the exact thing a reader opening one of those files
@@ -2436,6 +2447,35 @@ check('prompt-router emits one advisory UserPromptSubmit context under budget an
 // Negative control (2026-10-10, applied, observed, reverted — exit 1):
 //   frontmatterDescription() returns the key's own line, block scalar or not ...........................
 //     "plugins/harness-guards/scripts/skill-inventory.js: folded (>) read as ">" — the text is on the indented lines below the key"
+// PRD-005 — the confirmed mission router. The decisions are pure (mission-router.js) so every route
+// and every fail-open gate is pinned by fixtures without a TUI, a lineup file or a TypeSafe key. The
+// extension is thin on purpose; the seams the consent model depends on are pinned textually here:
+// a loop dispatch goes through the `input` handler's `handled` ONLY after
+// `pi.sendUserMessage(..., { expandPromptTemplates: true })`, so the original submission is consumed
+// and never paid for twice, and `/mission` is the session switch.
+check('mission-router routes every mission shape, fails open on every bypass, and the Pi extension dispatches loops with `handled` only after sendUserMessage', () => {
+  const script = path.join(ROOT, 'plugins/harness-loops/scripts/mission-router.js');
+  mustExist('plugins/harness-loops/scripts/mission-router.js');
+  mustExist('scripts/fixtures/mission/decisions.json');
+  execFileSync('node', ['--check', script], { stdio: 'pipe' });
+  const r = runNode([script, 'decide'], jevEnv().env, read('scripts/fixtures/mission/decisions.json'));
+  if (r.code !== 0) throw new Error(`mission-router fixtures failed:\n${r.out}${r.err}`);
+  const cases = JSON.parse(read('scripts/fixtures/mission/decisions.json'));
+  if (cases.length < 18) throw new Error(`only ${cases.length} mission-router fixtures — the route/bypass matrix is not covered`);
+  if (!/\d+\/\d+ mission-router cases passed/.test(r.out)) throw new Error(`no fixture summary in: ${r.out.slice(-200)}`);
+
+  const ext = 'plugins/harness-loops/pi/jev-router.ts';
+  mustExist(ext);
+  const src = read(ext);
+  for (const seam of ['mission-router.js', 'expandPromptTemplates', 'sendUserMessage', '"handled"', 'registerCommand("mission"', 'ui.select', 'ui.confirm']) {
+    if (!src.includes(seam)) throw new Error(`${ext} never uses ${seam} — a seam the consent model (D2/D3) depends on is missing`);
+  }
+  // No silent switch: every setModel call site must sit after a dialog result — pinned as the
+  // confirmation word inside the same handler region, not as a vibe.
+  if (!/confirm[\s\S]{0,600}setModel|select[\s\S]{0,600}setModel/.test(src)) throw new Error(`${ext} sets a model outside any dialog — a silent switch is possible`);
+  return `${cases.length} fixtures (6 routes · declines via fail-open · low confidence · explicit bypass · blocked provider · restore · consumesPrompt) · extension seams present`;
+});
+
 check('skill-inventory reads a folded (>, >-) and a literal (|) description, not the indicator', () => {
   const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'skill-inv-'));
   const cases = {

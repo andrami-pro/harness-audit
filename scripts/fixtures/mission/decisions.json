@@ -1,0 +1,102 @@
+[
+  {
+    "name": "ordinary chat stays in the chat",
+    "input": { "prompt": "¿qué te parece el plan de la semana para el release?", "mission": "chat", "p": 0.9, "seats": { "explainer": { "provider": "nvidia", "model": "nemotron-3-super-120b-a12b" }, "creativo": { "provider": "opencode-go", "model": "gpt-6-luna" }, "architect": { "provider": "opencode-go", "model": "grok-4.7" }, "implementer": { "provider": "opencode-go", "model": "kimi-k2.7-code" } } },
+    "expect": { "route": "chat", "action": "none", "mission": "chat", "role": null, "model": null, "dispatch": null, "restore": false, "consumesPrompt": false }
+  },
+  {
+    "name": "question proposes the explainer seat, one-shot with restore",
+    "input": { "prompt": "¿dónde queda definido el umbral de confianza que usa el enrutador de misiones?", "mission": "question", "p": 0.8, "seats": { "explainer": { "provider": "nvidia", "model": "nemotron-3-super-120b-a12b" }, "creativo": { "provider": "opencode-go", "model": "gpt-6-luna" }, "architect": { "provider": "opencode-go", "model": "grok-4.7" }, "implementer": { "provider": "opencode-go", "model": "kimi-k2.7-code" } } },
+    "expect": { "route": "model", "action": "confirm-model", "mission": "question", "role": "explainer", "model": "nvidia/nemotron-3-super-120b-a12b", "dispatch": null, "restore": true, "consumesPrompt": false }
+  },
+  {
+    "name": "design proposes the creativo seat, one-shot with restore",
+    "input": { "prompt": "diseña la pantalla de alta del panel de operador, con el estado de cada bucle", "mission": "design", "p": 0.75, "seats": { "explainer": { "provider": "nvidia", "model": "nemotron-3-super-120b-a12b" }, "creativo": { "provider": "opencode-go", "model": "gpt-6-luna" }, "architect": { "provider": "opencode-go", "model": "grok-4.7" }, "implementer": { "provider": "opencode-go", "model": "kimi-k2.7-code" } } },
+    "expect": { "route": "model", "action": "confirm-model", "mission": "design", "role": "creativo", "model": "opencode-go/gpt-6-luna", "dispatch": null, "restore": true, "consumesPrompt": false }
+  },
+  {
+    "name": "complex without a ticket folder proposes architect planning, no loop",
+    "input": { "prompt": "hay que migrar el módulo de cobros a la nueva API, con su PRD y sus tickets", "mission": "complex", "p": 0.8, "seats": { "explainer": { "provider": "nvidia", "model": "nemotron-3-super-120b-a12b" }, "creativo": { "provider": "opencode-go", "model": "gpt-6-luna" }, "architect": { "provider": "opencode-go", "model": "grok-4.7" }, "implementer": { "provider": "opencode-go", "model": "kimi-k2.7-code" } } },
+    "expect": { "route": "model", "action": "confirm-model", "mission": "complex", "role": "architect", "model": "opencode-go/grok-4.7", "dispatch": null, "restore": true, "consumesPrompt": false }
+  },
+  {
+    "name": "bounded development proposes /develop-phase and consumes the prompt",
+    "input": { "prompt": "arregla el bug de login que deja la sesión colgada tras el refresh del token", "mission": "bounded", "p": 0.85, "seats": { "implementer": { "provider": "opencode-go", "model": "kimi-k2.7-code" } } },
+    "expect": { "route": "loop", "action": "confirm-loop", "mission": "bounded", "role": null, "model": null, "dispatch": "/develop-phase arregla el bug de login que deja la sesión colgada tras el refresh del token", "confirmedDispatch": null, "restore": false, "consumesPrompt": true }
+  },
+  {
+    "name": "complex with a ticket folder proposes the /develop-spec plan, --confirmed only later",
+    "input": { "prompt": "ejecuta el alcance de docs/tickets/payments-v2 con las tres fases", "mission": "complex", "p": 0.8, "seats": { "implementer": { "provider": "opencode-go", "model": "kimi-k2.7-code" } } },
+    "expect": { "route": "loop", "action": "confirm-loop", "mission": "complex", "dispatch": "/develop-spec --tickets payments-v2", "confirmedDispatch": "/develop-spec --tickets payments-v2 --confirmed", "restore": false, "consumesPrompt": true }
+  },
+  {
+    "name": "low confidence fails open to the chat",
+    "input": { "prompt": "diseña la nueva portada del producto para la landing", "mission": "design", "p": 0.42, "seats": { "creativo": { "provider": "opencode-go", "model": "gpt-6-luna" } } },
+    "expect": { "route": "chat", "action": "none", "role": null, "restore": false, "consumesPrompt": false }
+  },
+  {
+    "name": "Jev failure (no mission answer) fails open to the chat",
+    "input": { "prompt": "diseña la nueva portada del producto para la landing", "mission": null, "p": null, "seats": { "creativo": { "provider": "opencode-go", "model": "gpt-6-luna" } } },
+    "expect": { "route": "chat", "action": "none", "role": null, "restore": false, "consumesPrompt": false }
+  },
+  {
+    "name": "an unknown mission label fails open to the chat",
+    "input": { "prompt": "diseña la nueva portada del producto para la landing", "mission": "launch-rocket", "p": 0.9, "seats": { "creativo": { "provider": "opencode-go", "model": "gpt-6-luna" } } },
+    "expect": { "route": "chat", "action": "none", "role": null, "restore": false, "consumesPrompt": false }
+  },
+  {
+    "name": "no UI: nothing is proposed without somebody to confirm it",
+    "input": { "prompt": "diseña la nueva portada del producto para la landing", "mission": "design", "p": 0.9, "hasUI": false, "seats": { "creativo": { "provider": "opencode-go", "model": "gpt-6-luna" } } },
+    "expect": { "route": "chat", "action": "none", "role": null, "restore": false, "consumesPrompt": false }
+  },
+  {
+    "name": "a harness seat is not a human prompt",
+    "input": { "prompt": "diseña la nueva portada del producto para la landing", "mission": "design", "p": 0.9, "isSeat": true, "seats": { "creativo": { "provider": "opencode-go", "model": "gpt-6-luna" } } },
+    "expect": { "route": "chat", "action": "none", "role": null, "restore": false, "consumesPrompt": false }
+  },
+  {
+    "name": "/mission off disables routing for the session",
+    "input": { "prompt": "diseña la nueva portada del producto para la landing", "mission": "design", "p": 0.9, "sessionDisabled": true, "seats": { "creativo": { "provider": "opencode-go", "model": "gpt-6-luna" } } },
+    "expect": { "route": "chat", "action": "none", "role": null, "restore": false, "consumesPrompt": false }
+  },
+  {
+    "name": "a slash command already chose its route",
+    "input": { "prompt": "/develop-phase arregla el bug de login", "mission": "bounded", "p": 0.9, "seats": { "implementer": { "provider": "opencode-go", "model": "kimi-k2.7-code" } } },
+    "expect": { "route": "chat", "action": "none", "role": null, "dispatch": null, "restore": false, "consumesPrompt": false }
+  },
+  {
+    "name": "an explicit model choice bypasses the recommender",
+    "input": { "prompt": "implementa el borrador del acta, usa con mimo-v2.6-pro por favor", "mission": "bounded", "p": 0.9, "seats": { "implementer": { "provider": "opencode-go", "model": "kimi-k2.7-code" } } },
+    "expect": { "route": "chat", "action": "none", "role": null, "dispatch": null, "restore": false, "consumesPrompt": false }
+  },
+  {
+    "name": "an explicit loop mention bypasses the recommender",
+    "input": { "prompt": "pásale esto por /develop-phase cuando puedas, el bug del token", "mission": "bounded", "p": 0.9, "seats": { "implementer": { "provider": "opencode-go", "model": "kimi-k2.7-code" } } },
+    "expect": { "route": "chat", "action": "none", "role": null, "dispatch": null, "restore": false, "consumesPrompt": false }
+  },
+  {
+    "name": "launcher flags in task text bypass auto-dispatch, never become flags",
+    "input": { "prompt": "arregla el bug del token y déjalo sin commit --no-commit --max-iter 3", "mission": "bounded", "p": 0.9, "seats": { "implementer": { "provider": "opencode-go", "model": "kimi-k2.7-code" } } },
+    "expect": { "route": "chat", "action": "none", "role": null, "dispatch": null, "restore": false, "consumesPrompt": false }
+  },
+  {
+    "name": "a short follow-up is not a new mission",
+    "input": { "prompt": "ok, sigue", "mission": "bounded", "p": 0.9, "seats": { "implementer": { "provider": "opencode-go", "model": "kimi-k2.7-code" } } },
+    "expect": { "route": "chat", "action": "none", "role": null, "restore": false, "consumesPrompt": false }
+  },
+  {
+    "name": "a credit-blocked explainer is not proposed (anthropic block respected)",
+    "input": { "prompt": "¿por qué el asesor diario no recomienda nunca modelos que retienen prompts?", "mission": "question", "p": 0.8, "seats": { "explainer": { "provider": "anthropic", "model": "claude-sonnet-5-5" } }, "blockedProviders": ["anthropic"] },
+    "expect": { "route": "chat", "action": "none", "role": null, "model": null, "restore": false, "consumesPrompt": false }
+  },
+  {
+    "name": "a bounded loop whose implementer runs on a blocked provider is not dispatched",
+    "input": { "prompt": "arregla el bug de login que deja la sesión colgada tras el refresh del token", "mission": "bounded", "p": 0.85, "seats": { "implementer": { "provider": "anthropic", "model": "claude-opus-5-5" } }, "blockedProviders": ["anthropic"] },
+    "expect": { "route": "chat", "action": "none", "role": null, "dispatch": null, "restore": false, "consumesPrompt": false }
+  },
+  {
+    "name": "a missing creativo seat fails open instead of guessing a model",
+    "input": { "prompt": "diseña la pantalla de alta del panel de operador", "mission": "design", "p": 0.8, "seats": { "architect": { "provider": "opencode-go", "model": "grok-4.7" } } },
+    "expect": { "route": "chat", "action": "none", "role": null, "model": null, "restore": false, "consumesPrompt": false }
+  }
+]

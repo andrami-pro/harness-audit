@@ -43,7 +43,10 @@ const path = require('node:path');
 // 'scout' is develop-phase's first seat: read-only, it gathers context (graph, STATUS, PRD) into a
 // short brief so the analyst and the implementer start from it instead of re-exploring the repo at
 // their own prices. High volume, low difficulty — it wants a long context and a low price, not depth.
-const ROLES = ['scout', 'architect', 'orchestrator', 'implementer', 'reviewer', 'preflight', 'scorer', 'critic', 'judge', 'explainer'];
+// 'creativo' is the design seat (PRD-005): screens, layouts, visual polish, interface copy. Its
+// ranking is driven primarily by LMArena WebDev, because "best at coding" and "best at UI" are not the
+// same leaderboard — see PROFILES.creativo in lineup-advise.js.
+const ROLES = ['scout', 'architect', 'orchestrator', 'implementer', 'reviewer', 'preflight', 'scorer', 'critic', 'judge', 'explainer', 'creativo'];
 
 // Targets whose harness accepts a non-Anthropic `provider` (Pi, Kilo, OpenCode per D25). Every
 // other target — Claude Code chief among them — only understands bare Anthropic model ids, so a
