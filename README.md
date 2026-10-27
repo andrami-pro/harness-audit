@@ -6,12 +6,19 @@ Claude Code (and, partly, Cursor, Kilo Code, OpenCode and Pi) that harness, in t
 separately. *The model is the horse, the harness is the saddle*: models change every few months, the
 harness stays.
 
+**New in 3.1 — confirmed mission routing.** On Pi, you no longer route missions by hand: type the task
+normally, and the harness asks once which path it deserves — an answer in the chat, the
+develop-phase loop, a develop-spec plan, or the design seat — and which line-up model to use. Nothing
+switches silently: escape or decline keeps your session exactly as it was. A daily deterministic
+advisor (rankings × price × data policy, zero LLM calls) keeps the candidate models fresh, and its
+suggestions are applied only through `/line-up advise`. See [What's new](docs/whats-new.md).
+
 ## Which plugin do I need?
 
 | If you want to… | Install | What you get |
 |---|---|---|
 | Know what your repo is missing before you let agents loose on it | `harness-audit` | An audit against four pillars, an **executable rubric** (`harness-rubric.md`, every row a command), a stack-tailored plan, and a `develop-phase` wrapper for the project |
-| Let agents ship work with an independent reviewer and real stop conditions | `harness-loops` | `/orchestrate`, `/review-loop`, `/iterate`, `/skill-loop`, the seven critic/scorer agents, the global `develop-phase` loop (scout → analyst → test-first implementer → code and spec reviewers from another model family → preflight → commit), and `develop-spec`, which works a folder of tickets in waves |
+| Let agents ship work with an independent reviewer and real stop conditions | `harness-loops` | `/orchestrate`, `/review-loop`, `/iterate`, `/skill-loop`, the seven critic/scorer agents, the global `develop-phase` loop (scout → analyst → test-first implementer → code and spec reviewers from another model family → preflight → commit), `develop-spec`, which works a folder of tickets in waves — and on Pi, the confirmed mission router |
 | Stop dangerous commands and see how your sessions actually go | `harness-guards` | Four write-time guards, local telemetry, `/dashboard-harness` and `/session-review` — nothing leaves your machine |
 
 They work alone and together: the audit writes the rubric and the wrapper, the loops converge against
@@ -94,13 +101,20 @@ dashboard are Claude Code only.
    it shows the plan first, then works two tickets at a time, each in its own git worktree, merges each
    approved one, and starts a dependent the moment its blocker lands. One brief at the end says what
    landed, what is blocked and why.
-5. **Watch.** `/dashboard-harness` reads your local transcripts and tells you which tools failed, which
-   guards fired, which skills you installed and never used — for free, without leaving your machine.
+5. **Route.** On Pi, the mission router classifies each prompt (in the same Jev call that suggests
+   skills and tiers) and proposes one of four paths — a chat answer, the develop-phase loop, a
+   develop-spec plan, or the design seat — with the line-up model it would use. You approve or decline
+   every switch; declining leaves the run untouched. The daily advisor keeps those recommendations
+   current without spending a token per request.
+6. **Watch.** `/dashboard-harness` reads your local transcripts and reports which tools failed, which
+   guards fired, which skills you installed and never used — free, local.
 
 An independent reviewer beats self-critique; the often-cited ~62% → ~89% figures are directional, not
 reproduced here yet (see [WHITEPAPER §8.1](WHITEPAPER.md)). A minimal harness beats an inflated one.
 
 ## Read more
+
+- [docs/whats-new.md](docs/whats-new.md) — every recent change, newest first, with what each one changes for the operator
 
 - [plugins/harness-audit/README.md](plugins/harness-audit/README.md) — the four pillars, the model line-up, what the audit writes
 - [plugins/harness-loops/README.md](plugins/harness-loops/README.md) — the loops, `develop-phase`, Jev
@@ -116,7 +130,7 @@ reproduced here yet (see [WHITEPAPER §8.1](WHITEPAPER.md)). A minimal harness b
 plugins/harness-audit/            the audit skill, its templates, the model line-up tools
 plugins/harness-loops/            loop commands, agents, loop-gate, the global develop-phase, Jev
 plugins/harness-guards/           guards, telemetry, the dashboard
-docs/                             loops in detail, compatibility, PRDs
+docs/                             loops in detail, compatibility, PRDs, what's new
 scripts/validate.js               this repository's own gate — `node scripts/validate.js` before releasing
 install.sh                        installer for other agents and for Claude Code without plugins
 ```
