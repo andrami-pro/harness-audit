@@ -8,7 +8,7 @@
 
 ## Abstract
 
-`harness-audit` is a system for auditing and installing an agent harness in AI-agent repositories. Unlike traditional static-audit approaches, it produces an **executable rubric** — a set of command-verifiable criteria — that serves as the convergence target for an autonomous implement-and-verify loop. The system operates over four structural pillars (harness in code, role separation, automatic verification, loop design) and integrates **role-differentiated model selection**, progressive memory M1→M5, and independent adversarial verification. The working hypothesis is that separating the implementer from the verifier materially raises code-review accuracy and lowers false positives. The specific figures cited below (~62% → ~89% accuracy; ~28% → ~7% false positives) are **directional, illustrative targets — not yet independently reproduced in this project**, and do not come from a published Anthropic benchmark. A reproducible in-house A/B is planned (see §8.1 Reproducibility / `benchmarks/`, pending). Until then, read them as expected direction, not measurement.
+`harness-audit` is a system for auditing and installing an agent harness in AI-agent repositories. Unlike traditional static-audit approaches, it produces an **executable rubric** — a set of command-verifiable criteria — that serves as the convergence target for an autonomous implement-and-verify loop. The system operates over four structural pillars (harness in code, role separation, automatic verification, loop design) and integrates **role-differentiated model selection**, progressive memory M1→M5, and independent adversarial verification. On Pi it adds two pieces the loop alone cannot give: **confirmed mission routing** (the harness classifies each incoming task — chat answer, feature loop, ticket-wave plan, or design — and asks before switching models or launching any loop) and **waves** (`develop-spec`), which works a dependency graph of tickets without a human between them, keeping only two checkpoints on the approval side. The working hypothesis is that separating the implementer from the verifier materially raises code-review accuracy and lowers false positives. The specific figures cited below (~62% → ~89% accuracy; ~28% → ~7% false positives) are **directional, illustrative targets — not yet independently reproduced in this project**, and do not come from a published Anthropic benchmark. A reproducible in-house A/B is planned (see §8.1 Reproducibility / `benchmarks/`, pending). Until then, read them as expected direction, not measurement.
 
 ---
 
@@ -318,10 +318,42 @@ in order:
   `/session-review` audits a transcript that is not what the model saw. This is why the repeat-tool guard
   rides `additionalContext` — a channel the harness records — rather than rewriting a tool result in
   place: a harness that injects unlogged context makes every transcript-reading loop lie by omission.
+- **Mission routing is the consent boundary of the catalog, not a seventh loop**: §5.4's rule lives at
+  the front door (which loop may start), §5.5's waves at the back (how many run at once). Neither
+  changes what a loop is.
 
 None of this is aspirational — every loop in the table above has at least one recorded run backing the row
 it occupies in the README's catalog; see that catalog for what "recorded" means and which run backs which
 loop.
+
+### 5.4 Confirmed Mission Routing — the front door
+
+Two mechanisms sit above the loop catalog and qualify how loops start and how many run at once.
+
+**Confirmed mission routing.** The dispatch criterion that §10 documents — "the model evaluates
+the task at the start and proposes: *this task triggers A*" — matures in 3.1 from a habit the operator
+must remember into a mechanism the harness owns. On Pi, one Jev classification call reads every incoming
+prompt and proposes one of four paths — a chat answer, the per-feature `develop-phase` loop, a
+`develop-spec` plan, or the design seat — together with the line-up model each path would use. The route
+is **confirmed, never silent**: approval is per mission, decline leaves the run untouched, escape slang,
+no TUI and low confidence all route nothing, and any one-shot model change restores the session model
+when the run ends. The gate that proves it is machine-checked, not promised: 20 mission fixtures in
+`scripts/validate.js` pin every route, every bypass, the restore path, and the rule that a confirmed
+dispatch cannot also re-run the task in the main chat. This is the consent boundary §8 names for cost:
+a deep loop may never start without an approval the operator actually saw.
+
+### 5.5 Waves — the concurrency the graph allows
+
+**Waves (`develop-spec`).** Loop 4 gates one feature; a real phase is a graph of features.
+`develop-spec` takes a folder of ticket files — each with `Status:` and `Blocked by:` lines — computes
+the frontier (every ticket whose blockers are done), and runs up to two of them at a time, each inside
+its own git worktree through the full `develop-phase` loop: agreed seams, test-first implementation,
+both review axes, preflight, commit. An approved ticket merges into the integration branch, its
+dependents re-enter the frontier the moment it lands, and a ticket that does not converge is marked
+blocked with its open findings while the rest of the graph continues. Two human checkpoints bound the
+autonomy: the plan before the first wave, and one brief at the end. The property it adds to Loop 4 is
+*throughput under consent* — concurrency bounded to two, migrations serialized by the graph itself, and
+no third checkpoint invented between them.
 
 ---
 
@@ -469,11 +501,21 @@ Launch the workflow .claude/workflows/develop-phase.js with:
 
 The Implementer → Reviewer → Preflight loop runs autonomously. Max 5 iterations by default (`maxIter` adjustable).
 
+### Invoking the waves loop
+
+With tickets split into files (`Status:`, `Blocked by:` — the format `docs/agents/issue-tracker.md`
+prescribes), run develop-spec on the folder: it first prints the plan (waves, cycle and blocker
+warnings) and changes nothing; the plan is confirmed with one short confirmation plus the plan's own
+execution dialog, then the waves run with two tickets in flight and the merges in code. On Pi the same
+folds run through `scripts/develop-spec-pi.js`; controlled from a session, `/mission` offering the plan
+is the confirmed router of §5.4 doing the proposing.
+
 ### Reading loop state
 
 ```bash
 grep "PASS\|FAIL" harness-rubric.md   # current convergence state
 ./scripts/preflight.sh                 # verification gate
+node scripts/validate.js               # the harness's own gate, including the mission fixtures
 ```
 
 ---
@@ -482,12 +524,16 @@ grep "PASS\|FAIL" harness-rubric.md   # current convergence state
 
 `harness-audit` applies the Loop Design paradigm to harness engineering for AI agents. Its contribution is not the audit report — it is the executable rubric that turns the harness from a static document into a convergence target for an autonomous loop.
 
-Three invariants:
+Five invariants:
 
 1. **The rubric is the artifact of value.** A report a human reads and executes is L0. A rubric a loop converges is L3.
 
 2. **The verifier never knows the implementer's reasoning.** Reviewer independence is the necessary condition for the accuracy jump (its magnitude, ~62%→~89%, is the target still to be reproduced).
 
 3. **The model is interchangeable; the harness is not.** The day a model is replaced by its successor, the loop keeps working. The harness is the intellectual property; the model is the engine that runs it.
+
+4. **A loop starts only through a consent the operator saw.** Mission routing (§5.4) owns the front door: classify, propose, confirm — never launch silently. The cost guardrail of §8 is thereby mechanical, not remembered.
+
+5. **Scale comes from the graph, not from patience.** Waves (§5.5) turn one gated feature into a gated graph whose concurrency is bounded and whose human checkpoints stay at two: plan once, read one brief.
 
 > *"The model is the horse; the harness is the saddle."*
