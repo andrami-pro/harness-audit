@@ -3945,6 +3945,76 @@ esac
   return '--prd reaches every ticket; without it the child prompts stay as before';
 });
 
+// ui-check (PRD-006) opens a project's interface in a real browser and checks UI rules that hold for any web app.
+// The fixtures carry one violation of each rule (bad.html, clicks.html) and the patterns that raised false alarms
+// while it was calibrated on Tama OS (good.html: screen-reader-only text, an ellipsis, a line clamp, a button inside
+// a field's box, a selected tab, content scrolling under a pinned tab bar). It needs Playwright and a Chromium: without
+// them ui-check exits 3 and this check is NOT VERIFIED, never green.
+//
+// Negative controls (2026-11-16, each applied, observed, reverted — all exit 1):
+//   (recorded below once observed)
+const UI_CHECK = 'plugins/harness-loops/scripts/ui-check.js';
+const uiCheckRun = (cfg, extra = []) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ui-check-'));
+  const port = 47000 + Math.floor(Math.random() * 2000);
+  const conf = path.join(tmp, 'ui-check.json');
+  fs.writeFileSync(conf, JSON.stringify({
+    url: `http://127.0.0.1:${port}/`, serve: `node ${path.join(ROOT, 'scripts/fixtures/ui-check/serve.js')} ${port}`, ...cfg,
+  }));
+  const json = path.join(tmp, 'out.json');
+  const r = require('node:child_process').spawnSync('node', [path.join(ROOT, UI_CHECK), '--config', conf, '--json', json, ...extra], { encoding: 'utf8', timeout: 240000 });
+  const out = fs.existsSync(json) ? JSON.parse(fs.readFileSync(json, 'utf8')) : null;
+  fs.rmSync(tmp, { recursive: true, force: true });
+  return { code: r.status, stdout: r.stdout || '', out };
+};
+const uiHits = (out, rule) => (out?.violations?.[rule]?.hits ?? []).map((h) => `${h.where} ${h.detail}`);
+check('ui-check finds each static rule on bad.html, nothing on good.html, and a promoted rule blocks', () => {
+  const bad = uiCheckRun({ routes: ['bad.html', 'good.html'], viewports: [[1280, 800], [390, 800]], rules: { 'conversation-starved': 'block', accessibility: 'off' } });
+  if (bad.code === 3) skip(`ui-check could not run here: ${bad.stdout.trim().split('\n')[0]}`);
+  if (bad.code !== 2) throw new Error(`a blocking rule did not exit 2 (exit ${bad.code}): ${bad.stdout.trim().split('\n').slice(-1)[0]}`);
+  if (JSON.stringify(bad.out.blocking) !== '["conversation-starved"]') throw new Error(`blocking should be exactly the promoted rule, got ${JSON.stringify(bad.out.blocking)}`);
+  const want = ['page-scrolls-sideways', 'scroll-area-squeezed', 'text-cut-silently', 'control-off-screen', 'controls-overlap', 'text-over-text', 'tap-target-small', 'console-error', 'request-failed'];
+  const missing = want.filter((r) => !bad.out.warnings.includes(r));
+  if (missing.length) throw new Error(`bad.html: no ${missing.join(', ')} — a rule went blind`);
+  if (!uiHits(bad.out, 'text-over-text').some((h) => h.includes('hidden under select'))) throw new Error('bad.html: a select laid over a heading was not reported as text-over-text');
+  const onGood = Object.entries(bad.out.violations).flatMap(([rule, v]) => v.hits.filter((h) => h.screen.includes('good.html')).map((h) => `${rule}: ${h.where} ${h.detail}`));
+  if (onGood.length) throw new Error(`good.html raised a false alarm — ${onGood[0]}`);
+  const typo = uiCheckRun({ routes: ['good.html'], rules: { 'conversation-starve': 'block' } });
+  if (typo.code !== 1) throw new Error(`an unknown rule name in the config did not exit 1 (exit ${typo.code}) — a typo would silently switch a rule off`);
+  const down = require('node:child_process').spawnSync('node', [path.join(ROOT, UI_CHECK), '--url', 'http://127.0.0.1:9/'], { encoding: 'utf8' });
+  if (down.status !== 3 || !/NOT VERIFIED/.test(down.stdout)) throw new Error(`an app that never answers did not exit 3 NOT VERIFIED (exit ${down.status})`);
+  return `${want.length + 1} static rules fire on bad.html · good.html silent · promoted rule exits 2 · typo exits 1 · no app exits 3`;
+});
+check('ui-check presses buttons: silent, unannounced, abrupt and loose-red answers are reported, unsafe labels never pressed', () => {
+  const base = { routes: ['clicks.html'], viewports: [[1280, 800]], interactions: { enabled: true }, rules: { accessibility: 'off', 'console-error': 'off' } };
+  const ok = uiCheckRun(base);
+  if (ok.code === 3) skip(`ui-check could not run here: ${ok.stdout.trim().split('\n')[0]}`);
+  const failing = uiCheckRun({ ...base, failRequests: ['**/api/**'] });
+  const expect = [
+    [uiHits(ok.out, 'silent-click').some((h) => h.includes('«Silence»')), 'a button that does nothing was not reported as silent-click'],
+    [uiHits(ok.out, 'change-unannounced').some((h) => h.includes('«Mute change»')), 'a change nobody announced was not reported'],
+    [uiHits(ok.out, 'abrupt-insert').some((h) => h.includes('«Shove»')), 'a 300 px block prepended above the content was not reported as abrupt-insert'],
+    [uiHits(ok.out, 'error-unannounced').some((h) => h.includes('«Loose red»')), 'loose red error text was not reported as error-unannounced'],
+    [!Object.values(ok.out.violations).some((v) => v.hits.some((h) => /«(Save|Menu|Load|Send to API)»/.test(h.where))), 'a button that announces its answer (status, aria-expanded, its own label) was reported'],
+    [!uiHits(ok.out, 'silent-click').length || uiHits(ok.out, 'silent-click').length === 1, 'a ticking clock was read as the answer to a press, or as noise'],
+    [ok.out.stats.unsafe === 1, `"Delete everything" was not skipped as unsafe (unsafe=${ok.out.stats.unsafe})`],
+    [uiHits(failing.out, 'error-unannounced').some((h) => h.includes('«Send to API»')), 'with failRequests the API error shown as loose red text was not reported — the failing-backend condition does nothing'],
+  ];
+  const bad = expect.find(([pass]) => !pass);
+  if (bad) throw new Error(bad[1]);
+  return `${ok.out.stats.pressed} buttons pressed, 1 unsafe skipped · 4 interaction rules fire · announced answers stay silent · failRequests surfaces the loose error`;
+});
+check('ui-check accessibility: axe-core reports bad.html and stays silent on good.html', () => {
+  const r = uiCheckRun({ routes: ['bad.html', 'good.html'], viewports: [[1280, 800]] });
+  if (r.code === 3) skip(`ui-check could not run here: ${r.stdout.trim().split('\n')[0]}`);
+  if ((r.out?.skipped ?? []).some((n) => n.startsWith('accessibility'))) skip('axe-core is not installed in the project or the global npm root (npm i -g axe-core)');
+  const hits = r.out.violations.accessibility?.hits ?? [];
+  if (!hits.some((h) => h.screen.includes('bad.html') && /image-alt/.test(h.detail))) throw new Error('an image with no alt on bad.html was not reported');
+  const good = hits.filter((h) => h.screen.includes('good.html'));
+  if (good.length) throw new Error(`good.html raised an accessibility alarm — ${good[0].detail}`);
+  return 'axe-core runs inside ui-check: image-alt on bad.html, nothing on good.html';
+});
+
 const GLYPH = { pass: '✓', fail: '✗', skip: '⊘' };
 let failed = 0, skipped = 0;
 for (const r of results) {

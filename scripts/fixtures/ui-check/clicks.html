@@ -1,0 +1,38 @@
+<!doctype html>
+<!-- Buttons for the interaction rules. Each label says what ui-check must report. -->
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>clicks</title>
+<style>body{margin:0;font:16px sans-serif}button{min-height:44px;margin:4px}.err{color:#d00000}</style></head>
+<body><main>
+  <h1>Clicks fixture</h1>
+  <div id="slot"></div>
+  <div role="status" id="status"></div>
+  <button id="silent">Silence</button>
+  <button id="mute">Mute change</button>
+  <button id="shove">Shove</button>
+  <button id="red">Loose red</button>
+  <button id="save">Save</button>
+  <button id="menu" aria-expanded="false">Menu</button>
+  <ul id="menulist" hidden><li>One</li></ul>
+  <button id="self">Load</button>
+  <button id="send">Send to API</button>
+  <button id="wipe">Delete everything</button>
+  <p>Content below the buttons, so an insert above them shoves it.</p>
+  <p id="clock"></p>
+  <script>
+    const $ = (id) => document.getElementById(id)
+    setInterval(() => { $('clock').textContent = String(Date.now()) }, 200)
+    $('silent').onclick = () => {}
+    $('mute').onclick = () => { const d = document.createElement('div'); d.textContent = 'A row appeared'; $('slot').append(d) }
+    $('shove').onclick = () => { const d = document.createElement('div'); d.style.height = '300px'; d.textContent = 'Big block'; document.querySelector('main').prepend(d) }
+    $('red').onclick = () => { const p = document.createElement('p'); p.className = 'err'; p.textContent = 'Something went wrong'; $('slot').append(p) }
+    $('save').onclick = () => { $('status').textContent = 'Saved' }
+    $('menu').onclick = () => { const open = $('menu').getAttribute('aria-expanded') === 'true'; $('menu').setAttribute('aria-expanded', String(!open)); $('menulist').hidden = open }
+    $('self').onclick = () => { $('self').textContent = 'Loading…' }
+    $('send').onclick = async () => {
+      const r = await fetch('/api/send', { method: 'POST' })
+      if (r.ok) $('status').textContent = 'Sent'
+      else { const p = document.createElement('p'); p.className = 'err'; p.textContent = 'Sending failed'; $('slot').append(p) }
+    }
+    $('wipe').onclick = () => { document.title = 'WIPED' ; $('status').textContent = 'Everything deleted' }
+  </script>
+</main></body></html>
