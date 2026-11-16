@@ -2287,6 +2287,7 @@ check('install.sh --lineup stamps the project roles and never clobbers a customi
     || read('plugins/harness-loops/workflows/develop-phase.js') !== fs.readFileSync(path.join(wfDir, 'develop-phase.js'), 'utf8')) {
     throw new Error('install.sh --target claude did not copy the global develop-phase loop where the wrapper calls it');
   }
+  if (!fs.existsSync(path.join(wfDir, 'ui-check.js'))) throw new Error('install.sh --target claude did not copy ui-check.js where the uiCheck seat runs it');
 
   const modelOf = (f) => {
     const src = fs.readFileSync(path.join(agents, f), 'utf8');
@@ -3038,6 +3039,72 @@ check('develop-phase workdir, allowSkipped and a read-only reviewer', () => {
   return 'every seat cd\'s into the workdir · declared skips reported, not counted · any other skip still NOT VERIFIED · reviewer read-only';
 });
 
+// uiCheck (PRD-006): ui-check runs after every implementation, before any reviewer. A BLOCK sends the change back with
+// the report and no review that round; WARN lines reach the code reviewer as evidence; a run that could not open the app
+// is NOT VERIFIED, joining the preflight's skips (allowSkipped may accept it). Stub seats, as the checks above.
+//
+// Negative controls (2026-11-16, each applied to develop-phase.js, observed, reverted — all exit 1):
+//   (recorded once observed)
+check('develop-phase uiCheck: a BLOCK goes back before review, warnings reach the reviewer, a run that cannot open the app is NOT VERIFIED', () => {
+  const harness = (file) => {
+    const src = require('fs').readFileSync(file, 'utf8').replace(/^export /m, '');
+    const AsyncFn = Object.getPrototypeOf(async function () {}).constructor;
+    const REPORT = { block: 'ui-check: 2 screen(s)\nBLOCK conversation-starved (1) — a conversation keeps 40%\n      1280x800 #room ol.thread — 64px\nRESULT: FAIL — blocking: conversation-starved',
+      warn: 'ui-check: 2 screen(s)\nWARN  silent-click (1) — a pressed button answers\n      1280x800 #room «Send» — nothing visible changed\nRESULT: PASS — 1 rule(s) warn',
+      down: 'ui-check: NOT VERIFIED — http://localhost:5175/ did not answer (start the app, or set "serve")' };
+    const run = async (args, uiSeq) => {
+      const calls = [];
+      let ui = 0;
+      const agent = async (prompt, o) => {
+        const l = String(o.label); calls.push({ label: l, prompt });
+        if (l.startsWith('ui:')) {
+          const k = uiSeq[Math.min(ui++, uiSeq.length - 1)];
+          return { exitCode: { block: 2, warn: 0, pass: 0, down: 3 }[k], blocking: k === 'block' ? ['conversation-starved'] : [],
+            warnings: k === 'warn' ? ['silent-click'] : [], report: REPORT[k] ?? 'ui-check: 2 screen(s)\nRESULT: PASS' };
+        }
+        if (l === 'preflight') return { exitCode: 0, skipped: [], failedCheck: null, tail: '' };
+        return l.startsWith('review') || l.startsWith('spec') ? '[PASS] a — x\nAPPROVED' : l === 'scout' ? 'B' : l === 'analyst' ? 'P' : 'impl';
+      };
+      const out = await new AsyncFn('args', 'agent', 'log', 'phase', src)({ task: 'T', maxIter: 3, preparer: false, ...args }, agent, () => {}, () => {});
+      return { out, calls };
+    };
+    const labels = (r) => r.calls.map((c) => c.label).join(',');
+    (async () => {
+      const off = await run({}, ['pass']);
+      const fix = await run({ uiCheck: true }, ['block', 'pass']);
+      const warn = await run({ uiCheck: 'node tools/ui-check.js --quiet' }, ['warn']);
+      const down = await run({ uiCheck: true }, ['down']);
+      const allowed = await run({ uiCheck: true, allowSkipped: ['ui-check'] }, ['down']);
+      const stuck = await run({ uiCheck: true }, ['block']);
+      const impl2 = fix.calls.find((c) => c.label === 'impl:iter2')?.prompt ?? '';
+      console.log(JSON.stringify({
+        off: labels(off).includes('ui:'),
+        fix: [labels(fix), fix.out.handoff.status, impl2.includes('ui-check BLOCKED') && impl2.includes('#room ol.thread — 64px'), fix.out.handoff.evidence.includes('ui-check: PASS')],
+        warn: [warn.calls.find((c) => c.label.startsWith('ui:')).prompt.includes('node tools/ui-check.js --quiet; echo "EXIT=$?"'),
+          warn.calls.find((c) => c.label.startsWith('review')).prompt.includes('#room «Send» — nothing visible changed'),
+          !warn.calls.find((c) => c.label.startsWith('spec')).prompt.includes('UI CHECK'), warn.out.handoff.status],
+        down: [down.out.approved, down.out.handoff.status, down.out.nextStep.includes('ui-check NOT VERIFIED'), allowed.out.handoff.status],
+        stuck: [stuck.out.approved, stuck.out.handoff.status, stuck.calls.some((c) => c.label.startsWith('review')), /^ui-check BLOCK — BLOCK conversation-starved/.test(stuck.out.handoff.blocker ?? ''), stuck.out.handoff.summary],
+      }));
+    })().catch((e) => console.log('THREW ' + e.stack));
+  };
+  const out = execFileSync('node', ['-e', `(${harness})(process.argv[1])`, path.join(ROOT, DEVELOP_PHASE)], { encoding: 'utf8' }).trim();
+  if (out.startsWith('THREW')) throw new Error(`the develop-phase loop throws with uiCheck — ${out.slice(6, 300)}`);
+  const r = JSON.parse(out);
+  const want = {
+    off: [false, 'a run without uiCheck started a ui-check seat'],
+    fix: [['impl:iter1,ui:iter1,impl:iter2,ui:iter2,review:iter2,spec:iter2,preflight', 'complete', true, true],
+      'a BLOCK did not go straight back to the implementer with the report (no review that round), or the fixed run did not complete with ui-check: PASS'],
+    warn: [[true, true, true, 'complete'], 'the configured uiCheck command was not run as given, or WARN lines did not reach the code reviewer (and only it)'],
+    down: [[true, 'continue', true, 'complete'], 'a ui-check that could not open the app passed as verified, or allowSkipped could not accept it'],
+    stuck: [[false, 'blocked', false, true, 'ui-check still blocks after 3 iteration(s)'], 'a change ui-check blocks every round was reviewed, approved, or handed off without the BLOCK lines as its blocker'],
+  };
+  for (const [k, [v, why]] of Object.entries(want)) {
+    if (JSON.stringify(r[k]) !== JSON.stringify(v)) throw new Error(`${why} (got ${JSON.stringify(r[k])})`);
+  }
+  return 'off by default · BLOCK → implementer, no review · WARN → code reviewer only · cannot run → NOT VERIFIED (allowSkipped accepts) · stuck → blocked';
+});
+
 // develop-spec (PRD-004 §4) is develop-phase's loop inlined by scripts/build-workflows.js — a workflow runs another
 // only one level deep and the wrapper spends it — plus a scheduler. Each scheduling rule is a way to go quiet wrong:
 // code before the human approved the breakdown, a dependent started before its blocker merged, more tickets in
@@ -3337,6 +3404,9 @@ check('sync-workflows keeps the stable copy equal to the shipped loop, and only 
     if (fs.readFileSync(target, 'utf8') !== read(DEVELOP_PHASE)) throw new Error('first session start did not copy the loop');
     if (fs.readFileSync(path.join(dir, 'harness', 'jev.js'), 'utf8') !== read('plugins/harness-loops/scripts/jev.js')) {
       throw new Error("jev.js was not copied next to the loop — routeByJev's seat runs ~/.claude/harness/jev.js");
+    }
+    if (fs.readFileSync(path.join(dir, 'harness', 'ui-check.js'), 'utf8') !== read('plugins/harness-loops/scripts/ui-check.js')) {
+      throw new Error("ui-check.js was not copied next to the loop — uiCheck's seat runs ~/.claude/harness/ui-check.js");
     }
     const before = fs.statSync(target).mtimeMs;
     execFileSync('node', [hook], { input: start, env, stdio: 'pipe' });
@@ -3951,8 +4021,21 @@ esac
 // a field's box, a selected tab, content scrolling under a pinned tab bar). It needs Playwright and a Chromium: without
 // them ui-check exits 3 and this check is NOT VERIFIED, never green.
 //
-// Negative controls (2026-11-16, each applied, observed, reverted — all exit 1):
-//   (recorded below once observed)
+// Negative controls (2026-11-16, each applied to ui-check.js, observed, reverted — all exit 1):
+//   conversation-starved thresholds 240 px / 40 % lowered to 24 px / 10 % ...........................................
+//     "a blocking rule did not exit 2 (exit 0): RESULT: PASS — 9 rule(s) warn"
+//   layout shifts filtered on hadRecentInput again ..................................................................
+//     "a 300 px block prepended above the content was not reported as abrupt-insert" — the click IS the recent input
+//   UNSAFE label pattern emptied ....................................................................................
+//     "\"Delete everything\" was not skipped as unsafe (unsafe=0)"
+//   srOnly = false (screen-reader-only text counted) ..................................................................
+//     "good.html raised a false alarm — text-cut-silently: span.sr-only 435px of text hidden, no ellipsis"
+//   the pinned-bar guard in controls-overlap removed ...................................................................
+//     "good.html raised a false alarm — controls-overlap: button 68% hidden under a"
+//   the field-over-text pass removed (fields = []) ...................................................................
+//     "bad.html: a select laid over a heading was not reported as text-over-text"
+// The pinned-bar control first came back green: controls were filtered on being painted somewhere, so a control
+// hidden whole under another never entered the comparison — the worst case was invisible. Fixed before recording.
 const UI_CHECK = 'plugins/harness-loops/scripts/ui-check.js';
 const uiCheckRun = (cfg, extra = []) => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ui-check-'));
