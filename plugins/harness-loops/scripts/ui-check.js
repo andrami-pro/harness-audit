@@ -162,8 +162,13 @@ function staticRules(document, window) {
     return w > 2 && h > 2 ? { w, h, cx: Math.max(a.left, b.left) + w / 2, cy: Math.max(a.top, b.top) + h / 2 } : null
   }
 
-  // A button drawn inside a text field's box is a normal pattern; only controls that really paint count.
-  const controls = all.filter((el) => CONTROL.test(el.tagName) && !/^(TEXTAREA|INPUT)$/.test(el.tagName) && paintedAnywhere(el)).slice(0, 400)
+  // A button drawn inside a text field's box is a normal pattern, so fields are left out. A control counts while its box
+  // is in the window and big enough to see — not whether it is painted: one hidden whole under another is the worst case.
+  const controls = all.filter((el) => {
+    if (!CONTROL.test(el.tagName) || /^(TEXTAREA|INPUT)$/.test(el.tagName)) return false
+    const r = el.getBoundingClientRect()
+    return r.width >= 8 && r.height >= 8 && r.right > 0 && r.left < vw && r.bottom > 0 && r.top < vh
+  }).slice(0, 400)
   const rects = controls.map((el) => el.getBoundingClientRect())
   for (let i = 0; i < controls.length; i++) {
     for (let j = i + 1; j < controls.length; j++) {
