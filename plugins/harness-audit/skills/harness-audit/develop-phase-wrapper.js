@@ -21,6 +21,9 @@ const CONFIG = {
   // true: Jev may move the implementer's tier when its confidence clears the measured threshold — down one tier
   // at most and never below sonnet. Read README §Jev (harness-loops) first; the run's `routing` says what it did.
   routeByJev: false,
+  // true (web UI projects): after every implementation, ui-check opens the app in a browser and checks the UI rules in
+  // .harness/ui-check.json; a rule set to block sends the change back before review. docs/loops.md#ui-check in harness-audit.
+  uiCheck: false,
 }
 
 // A run launched by hand may pass its args as a JSON string; anything else that is a string is the task.

@@ -4,6 +4,24 @@ Every change to the harness that an operator can notice, newest first. Each entr
 not how it is built. Minor internal fixes live in the commits; they make the list only when they
 change behavior.
 
+## 2026-11-17 · 3.2 — the loop opens the interface in a real browser
+
+**Unit tests never draw the screen, so a broken layout stayed green.** In Tama OS every test passed while the
+project room's conversation was squeezed to 64 px and 12 buttons answered nothing (`PRD-006`).
+
+- **ui-check.** One command opens the app in Chromium and checks rules that hold for any web app: nothing scrolls
+  sideways, a conversation keeps room in its panel, text is not cut or printed over other text, controls stay in the
+  window and do not hide each other, phone tap targets, accessibility (axe-core), console and network errors. With
+  `interactions` on, it presses every button and reports the ones that answer nothing, change the screen without
+  saying so, shove the layout, or show an error as loose red text. Destructive labels are never pressed.
+- **In develop-phase, after every implementation** (`uiCheck: true` in the wrapper). A rule set to `block` sends the
+  change back before any reviewer token; a `warn` rule reaches the code reviewer as evidence. A run that could not
+  open the app is NOT VERIFIED, never a pass.
+- **Every rule starts as a warning.** They were calibrated on one project (571 alarms → 9). Promote a rule once it
+  stays quiet on yours.
+- **Measured, then decided:** Bombadil saw none of these bugs with its defaults, and Jev, asked about screenshots,
+  scored the squeezed room like a healthy screen. Both stay out of the per-change gate.
+
 ## 2026-10-28 · 3.1 — confirmed mission routing (Pi) and a daily design line-up
 
 **The operator no longer routes missions by hand on Pi.** Three changes, one design rule:

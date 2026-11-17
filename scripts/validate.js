@@ -3044,7 +3044,12 @@ check('develop-phase workdir, allowSkipped and a read-only reviewer', () => {
 // is NOT VERIFIED, joining the preflight's skips (allowSkipped may accept it). Stub seats, as the checks above.
 //
 // Negative controls (2026-11-16, each applied to develop-phase.js, observed, reverted — all exit 1):
-//   (recorded once observed)
+//   `if (uiBlocked) continue` disabled ...............................................................................
+//     "a BLOCK did not go straight back to the implementer … (got [\"impl:iter1,ui:iter1,review:iter1,spec:iter1,preflight\",…])"
+//   uiSkip = [] (a run that could not open the app is not a skip) .....................................................
+//     "a ui-check that could not open the app passed as verified, or allowSkipped could not accept it (got [true,\"complete\",…])"
+//   ${uiEvidence} dropped from the code reviewer's prompt .............................................................
+//     "the configured uiCheck command was not run as given, or WARN lines did not reach the code reviewer (got [true,false,…])"
 check('develop-phase uiCheck: a BLOCK goes back before review, warnings reach the reviewer, a run that cannot open the app is NOT VERIFIED', () => {
   const harness = (file) => {
     const src = require('fs').readFileSync(file, 'utf8').replace(/^export /m, '');

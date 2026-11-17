@@ -318,6 +318,47 @@ Where the saving comes from: the reviewer seat first, then an implementer that n
 a trivial task, and any plan whose limit counts tokens without weighting them by model, because the scout reads a lot on a
 cheap tier.
 
+<a id="ui-check"></a>
+## ui-check: the interface in a real browser
+
+Unit tests in jsdom never draw the screen, so they pass a conversation squeezed to 64 px or a button that answers
+nothing. `plugins/harness-loops/scripts/ui-check.js` opens the app in Chromium (Playwright) and checks rules that hold
+for any web app (PRD-006). With `uiCheck: true` in the wrapper, develop-phase runs it after every implementation: a rule
+set to `block` sends the change back to the implementer with the report, before any reviewer token; a `warn` rule reaches
+the code reviewer as evidence, to fail the change only when this diff caused it. A run that could not open the app is
+NOT VERIFIED, like a preflight `SKIP` (`allowSkipped: ['ui-check']` accepts it).
+
+| Still screen (every route × viewport × color scheme) | After a press (`interactions`) |
+|---|---|
+| `page-scrolls-sideways` · `scroll-area-squeezed` · `conversation-starved` (a `role=log`/`feed` keeps 40 % of its panel and 240 px) · `text-cut-silently` · `control-off-screen` · `controls-overlap` · `text-over-text` (a field over a heading counts) · `tap-target-small` (phone) · `accessibility` (axe-core, serious and critical) · `console-error` · `request-failed` | `silent-click` (nothing visible within 1 s) · `change-unannounced` (no own state, status region, dialog or navigation) · `abrupt-insert` (layout shift > 0.05) · `error-unannounced` (red text outside `role=alert/status`) |
+
+Config, `.harness/ui-check.json` in the project:
+
+```json
+{
+  "url": "http://localhost:5175/", "serve": "pnpm --dir shell dev --strictPort", "ready": "#root > *",
+  "routes": ["#hoy", "#chat", "#proyecto/faro-cms"], "viewports": [[1280, 800], [390, 800]], "colorSchemes": ["light"],
+  "interactions": { "enabled": false, "maxPerScreen": 12, "skip": ["[data-danger]"] }, "failRequests": ["**/api/**"],
+  "rules": { "conversation-starved": "block" }, "ignore": [{ "rule": "tap-target-small", "where": ".legal-link" }]
+}
+```
+
+- **Every rule starts at `warn`.** They were calibrated on one project, Tama OS (54 screens: 571 alarms before the
+  false positives were removed, 9 after). Promote a rule to `block` once it stays quiet on yours; an unknown rule name
+  or level exits 1, so a typo cannot switch one off.
+- **Exit codes:** 0 nothing blocks · 2 a blocking rule fired · 1 usage error · 3 could not run (no Playwright, no
+  browser, the app never answered).
+- **Dependencies:** none shipped. Playwright and axe-core come from the project, then the global npm root; without
+  axe-core the accessibility rule reports a `SKIP`. When Playwright's pinned browser build is missing, the newest
+  Chromium under `~/.cache/ms-playwright` is used.
+- **The probe presses buttons.** Run `interactions` against demo or mock data only. Labels that read as destructive
+  (delete, remove, reset, log out, pay, deploy, publish, merge…, in English, Spanish and French) are never pressed, and
+  `skip` adds selectors. `failRequests` answers matching requests with a 500 during the presses, so an error shown as
+  loose red text surfaces. It is slow: about 4 s a button.
+- **Navigation:** a hash route on an app already loaded is reached without a reload — reloading a Vite dev app for
+  every screen exhausted Chromium (`net::ERR_INSUFFICIENT_RESOURCES`). The first screen waits up to 90 s for a cold dev server.
+- **Not on Pi yet**: `develop-phase-pi.js` has no ui-check seat; run the script from the shell.
+
 ## develop-spec: waves
 
 `plugins/harness-loops/workflows/develop-spec.js` works a folder of tickets without a human between them (PRD-004 §4).
