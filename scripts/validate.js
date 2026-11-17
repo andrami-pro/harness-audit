@@ -3804,6 +3804,70 @@ check('develop-phase-pi: --prd reaches scout and spec prompts, default stays doc
 // Built by develop-spec-pi's first live run; its final code review found the two gaps checked last. Controls, each
 // reverted alone (exit 1): the blocker back to the bare review ("got … \"blocker\":\"RECHAZADO\""); linesOf without
 // the bullet ("a bulleted \"- [FAIL]\" line did not reach the blocker").
+// PRD-006 on Pi: the loop runs ui-check itself after every implementation (no seat relays it). A stub stands in for
+// ui-check: FAKE_UI_SEQ lists its exit codes, one per call. The same rules as the Claude loop's uiCheck check.
+//
+// Negative controls (2026-11-17, each applied to develop-phase-pi.js, observed, reverted — all exit 1):
+//   `if (uiBlocked) continue` disabled ............ "a BLOCK did not go back to the implementer … (got [1,\"continue\",false,…])"
+//   --allow-skipped matched as a substring of the report .. "an --allow-skipped substring of the ui-check line (the URL)
+//                                                             accepted it … (got \"complete\")"
+//   the exit code back to approved && preflightPassed ..... "a ui-check that could not open the app passed … (got [0,…])"
+//   ${uiEvidence} dropped from the code reviewer's prompt .. "… or the WARN lines did not reach the code reviewer (got […,false])"
+check('develop-phase-pi --ui-check: a BLOCK goes back before review, warnings reach the reviewer, exit 3 is NOT VERIFIED, exit 1 is never accepted', () => {
+  const { tmp, run, done } = piLoop();
+  const stub = path.join(tmp, 'ui-stub.sh');
+  fs.writeFileSync(stub, `#!/bin/sh
+n=$(cat "$UI_COUNT" 2>/dev/null || echo 0); n=$((n+1)); echo $n > "$UI_COUNT"
+code=$(echo "$FAKE_UI_SEQ" | cut -d, -f$n); [ -z "$code" ] && code=$(echo "$FAKE_UI_SEQ" | tr ',' '\\n' | tail -1)
+case $code in
+  2) printf 'ui-check: 1 screen(s)\\nBLOCK conversation-starved (1) — a conversation keeps room\\n      1280x800 #room ol.thread — 64px\\nRESULT: FAIL — blocking: conversation-starved\\n' ;;
+  0) printf 'ui-check: 1 screen(s)\\nWARN  silent-click (1) — a pressed button answers\\n      1280x800 #room «Send» — nothing visible changed\\nRESULT: PASS — 1 rule(s) warn\\n' ;;
+  3) printf 'ui-check: NOT VERIFIED — http://localhost:5175/ did not answer\\n' ;;
+  *) printf 'ui-check: error — unknown rule "conversation-starve" in config\\n' ;;
+esac
+exit $code
+`, { mode: 0o755 });
+  const ui = (name, seq, extra = {}) => run(name, { ...extra, env: { FAKE_UI_SEQ: seq, UI_COUNT: path.join(tmp, `${name}.count`), ...(extra.env || {}) },
+    args: ['--max-iter', '3', '--ui-check', `sh ${stub}`, ...(extra.args || [])] });
+  try {
+    const fix = ui('ui-fix', '2,0');
+    const impl2 = fix.prompt('implementer-2') || '';
+    const rev1 = fix.prompt('reviewer-1');
+    const rev2 = fix.prompt('reviewer-2') || '';
+    const down = ui('ui-down', '3');
+    const allowed = ui('ui-allowed', '3', { args: ['--allow-skipped', 'ui-check'] });
+    const loose = ui('ui-loose', '3', { args: ['--allow-skipped', 'localhost'] });
+    const broken = ui('ui-broken', '1', { args: ['--allow-skipped', 'ui-check'] });
+    const stuck = ui('ui-stuck', '2');
+    const plain = run('ui-off');
+    const got = {
+      fix: [fix.code, fix.out.handoff.status, rev1 === null, impl2.includes('ui-check BLOQUEÓ') && impl2.includes('#room ol.thread — 64px'),
+        rev2.includes('#room «Send» — nothing visible changed'), fix.out.handoff.evidence.some((e) => e.startsWith('ui-check: PASS'))],
+      down: [down.code, down.out.handoff.status, Boolean(down.out.commit), down.out.nextStep.includes('ui-check NO VERIFICADO')],
+      allowed: [allowed.out.handoff.status, Boolean(allowed.out.commit && allowed.out.commit.committed)],
+      loose: loose.out.handoff.status,
+      broken: [broken.out.handoff.status, Boolean(broken.out.commit), broken.out.nextStep.includes('FAILED (exit 1)')],
+      stuck: [stuck.out.approved, stuck.out.handoff.status, stuck.prompt('reviewer-1') === null, /^ui-check BLOCK — BLOCK conversation-starved/.test(stuck.out.handoff.blocker || '')],
+      off: 'uiCheck' in plain.out,
+    };
+    const want = {
+      fix: [[0, 'complete', true, true, true, true], 'a BLOCK did not go back to the implementer with the report and no review, or the WARN lines did not reach the code reviewer'],
+      down: [[1, 'continue', false, true], 'a ui-check that could not open the app passed, committed, or is not named in nextStep'],
+      allowed: [['complete', true], "--allow-skipped ui-check did not accept a run that could not open the app"],
+      loose: ['continue', 'an --allow-skipped substring of the ui-check line (the URL) accepted it — only the exact entry "ui-check" may'],
+      broken: [['continue', false, true], 'a ui-check that failed on its own config (exit 1) was accepted, committed, or not named'],
+      stuck: [[false, 'blocked', true, true], 'a change ui-check blocks every round was reviewed or handed off without the BLOCK lines'],
+      off: [false, 'a run without --ui-check reports a ui-check state'],
+    };
+    for (const [k, [v, why]] of Object.entries(want)) {
+      if (JSON.stringify(got[k]) !== JSON.stringify(v)) throw new Error(`${why} (got ${JSON.stringify(got[k])})`);
+    }
+  } finally {
+    done();
+  }
+  return 'BLOCK → implementer, no review · WARN → code reviewer · exit 3 → NOT VERIFIED (exact --allow-skipped ui-check accepts) · exit 1 never accepted · off by default';
+});
+
 check('develop-phase-pi: reject without [FAIL] stops on the code axis', () => {
   const { run, done } = piLoop();
   const codeNoFail = run('code-no-fail', { env: { FAKE_REJECT_NOFAIL: 'code' }, args: ['--max-iter', '3'] });
@@ -4032,10 +4096,19 @@ esac
     const specNo = noPrd.childPrompt('spec-1') || '';
     if (!scoutNo.includes('docs/prds/ (PRD activo)')) throw new Error('ticket scout prompt changed when --prd is absent');
     if (!specNo.includes('docs/prds/ (el PRD activo')) throw new Error('ticket spec prompt changed when --prd is absent');
+    // --ui-check reaches every ticket, with its command or bare (the bare form runs the shipped ui-check.js, which,
+    // with no config in the ticket's worktree, fails on "no url": FAILED, so the ticket is not merged).
+    const stub = path.join(tmp, 'ui-ok.sh');
+    fs.writeFileSync(stub, `#!/bin/sh\necho ran >> ${path.join(tmp, 'ui-ran')}\nprintf 'ui-check: 1 screen(s)\\nRESULT: PASS\\n'\n`, { mode: 0o755 });
+    const withUi = run(['--ui-check', `sh ${stub}`]);
+    if (withUi.out?.handoff.status !== 'complete' || !fs.existsSync(path.join(tmp, 'ui-ran'))) throw new Error(`--ui-check "<cmd>" did not reach the ticket, or a passing ui-check did not complete: ${withUi.err.slice(-200)}`);
+    const bare = run(['--ui-check', '--prd', 'docs/prds/x.md']);
+    const bareOut = (() => { try { return fs.readFileSync(path.join(tmp, `run-${n}`, 'ticket-01', 'ui-check-1.out.txt'), 'utf8'); } catch { return ''; } })();
+    if (!/no url/.test(bareOut) || bare.out?.handoff.status === 'complete') throw new Error(`a bare --ui-check did not run the shipped ui-check.js in the ticket, or its FAILED run completed (out: ${bareOut.slice(0, 120)})`);
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
-  return '--prd reaches every ticket; without it the child prompts stay as before';
+  return '--prd reaches every ticket; without it the child prompts stay as before · --ui-check reaches every ticket, with or without its command';
 });
 
 // ui-check (PRD-006) opens a project's interface in a real browser and checks UI rules that hold for any web app.

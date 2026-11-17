@@ -53,5 +53,5 @@ critic seat · 05 nightly exploration.
 
 ## 5. Out of scope
 
-The Pi loop (`develop-phase-pi.js`) until ticket 02 has run on a real project. Pixel-diff visual regression.
+Pixel-diff visual regression.
 Non-web interfaces (Flutter, native).
