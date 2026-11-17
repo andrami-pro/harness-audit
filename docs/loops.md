@@ -325,18 +325,20 @@ Unit tests in jsdom never draw the screen, so they pass a conversation squeezed 
 nothing. `plugins/harness-loops/scripts/ui-check.js` opens the app in Chromium (Playwright) and checks rules that hold
 for any web app (PRD-006). With `uiCheck: true` in the wrapper, develop-phase runs it after every implementation: a rule
 set to `block` sends the change back to the implementer with the report, before any reviewer token; a `warn` rule reaches
-the code reviewer as evidence, to fail the change only when this diff caused it. A run that could not open the app is
-NOT VERIFIED, like a preflight `SKIP` (`allowSkipped: ['ui-check']` accepts it).
+the code reviewer as evidence, to fail the change only when this diff caused it (an external reviewer reached through
+the bridge does not see them; the handoff says so). A run that could not open the app, or ran only in part, is NOT
+VERIFIED: only an `allowSkipped` entry that is exactly `'ui-check'` accepts it. Any other failure — a config typo, a
+crash — is a failure nothing accepts.
 
 | Still screen (every route × viewport × color scheme) | After a press (`interactions`) |
 |---|---|
-| `page-scrolls-sideways` · `scroll-area-squeezed` · `conversation-starved` (a `role=log`/`feed` keeps 40 % of its panel and 240 px) · `text-cut-silently` · `control-off-screen` · `controls-overlap` · `text-over-text` (a field over a heading counts) · `tap-target-small` (phone) · `accessibility` (axe-core, serious and critical) · `console-error` · `request-failed` | `silent-click` (nothing visible within 1 s) · `change-unannounced` (no own state, status region, dialog or navigation) · `abrupt-insert` (layout shift > 0.05) · `error-unannounced` (red text outside `role=alert/status`) |
+| `page-scrolls-sideways` · `scroll-area-squeezed` · `conversation-starved` (a `role=log`/`feed` under 40 % of its panel or 240 px that hides messages, or whose panel collapses to its content over an empty window) · `text-cut-silently` · `control-off-screen` · `controls-overlap` · `text-over-text` (a field over a heading counts) · `tap-target-small` (phone) · `accessibility` (axe-core, serious and critical) · `console-error` · `request-failed` | `silent-click` (nothing visible within 1 s) · `change-unannounced` (no own state, status region, dialog or navigation) · `abrupt-insert` (layout shift > 0.05) · `error-unannounced` (red text outside `role=alert/status`) |
 
 Config, `.harness/ui-check.json` in the project:
 
 ```json
 {
-  "url": "http://localhost:5175/", "serve": "pnpm --dir shell dev --strictPort", "ready": "#root > *",
+  "url": "http://localhost:{port}/", "serve": "pnpm --dir shell dev --port {port} --strictPort", "ready": "#root > *",
   "routes": ["#hoy", "#chat", "#proyecto/faro-cms"], "viewports": [[1280, 800], [390, 800]], "colorSchemes": ["light"],
   "interactions": { "enabled": false, "maxPerScreen": 12, "skip": ["[data-danger]"] }, "failRequests": ["**/api/**"],
   "rules": { "conversation-starved": "block" }, "ignore": [{ "rule": "tap-target-small", "where": ".legal-link" }]
@@ -346,14 +348,20 @@ Config, `.harness/ui-check.json` in the project:
 - **Every rule starts at `warn`.** They were calibrated on one project, Tama OS (54 screens: 571 alarms before the
   false positives were removed, 9 after). Promote a rule to `block` once it stays quiet on yours; an unknown rule name
   or level exits 1, so a typo cannot switch one off.
-- **Exit codes:** 0 nothing blocks · 2 a blocking rule fired · 1 usage error · 3 could not run (no Playwright, no
-  browser, the app never answered).
+- **Exit codes:** 0 nothing blocks · 2 a blocking rule fired · 1 usage error (an unknown key, rule, level or `ignore`
+  entry without a known `rule` is refused) · 3 could not run or ran in part (no Playwright, no browser, the app never
+  answered, a route never became ready, a `block` rule could not run, the probe pressed nothing).
+- **The server:** `{port}` in `url` and `serve` is replaced by a free port, so two worktrees never share a server. With
+  `serve`, a URL that already answers before the server starts is refused (it would check another app), and the server's
+  whole process group is stopped on every exit, including when ui-check itself is killed.
 - **Dependencies:** none shipped. Playwright and axe-core come from the project, then the global npm root; without
   axe-core the accessibility rule reports a `SKIP`. When Playwright's pinned browser build is missing, the newest
   Chromium under `~/.cache/ms-playwright` is used.
-- **The probe presses buttons.** Run `interactions` against demo or mock data only. Labels that read as destructive
-  (delete, remove, reset, log out, pay, deploy, publish, merge…, in English, Spanish and French) are never pressed, and
-  `skip` adds selectors. `failRequests` answers matching requests with a 500 during the presses, so an error shown as
+- **The probe presses buttons.** Run `interactions` against demo or mock data only. A button whose names —
+  aria-label, text, title, value, read whole — contain a destructive word (delete, remove, clear, reset, log out, pay,
+  deploy, publish, merge…, whole words, in English, Spanish and French), or that has no readable name, is never pressed;
+  the report lists them. `skip` adds selectors, matched on the button and its ancestors. A focus move, a scroll, a
+  download or a popup count as answers. `failRequests` answers matching requests with a 500 during the presses, so an error shown as
   loose red text surfaces. It is slow: about 4 s a button.
 - **Navigation:** a hash route on an app already loaded is reached without a reload — reloading a Vite dev app for
   every screen exhausted Chromium (`net::ERR_INSUFFICIENT_RESOURCES`). The first screen waits up to 90 s for a cold dev server.

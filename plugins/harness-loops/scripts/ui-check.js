@@ -124,8 +124,14 @@ function staticRules(document, window) {
       while (panel && panel !== document.body && !/^(SECTION|ARTICLE|ASIDE|MAIN|DIALOG)$/.test(panel.tagName)) panel = panel.parentElement
       const ph = panel ? panel.getBoundingClientRect().height : vh
       const share = Math.round((el.clientHeight / ph) * 100)
-      // A short conversation that fits is not starved; one that hides messages in a small box is.
-      if (vh >= 600 && el.scrollHeight > el.clientHeight + 2 && (el.clientHeight < 240 || share < 40)) add('conversation-starved', el, `${el.clientHeight}px, ${share}% of its ${Math.round(ph)}px panel`)
+      // Two ways a conversation is starved, and a short conversation that fits its room is neither:
+      // it hides messages in a small box, or its panel collapses to its content and leaves the window's height empty
+      // below it (Tama OS: a room thread of 64 px over 600 px of nothing).
+      const pb = panel ? panel.getBoundingClientRect().bottom : vh
+      if (vh >= 600 && (el.clientHeight < 240 || share < 40)) {
+        if (el.scrollHeight > el.clientHeight + 2) add('conversation-starved', el, `${el.clientHeight}px, ${share}% of its ${Math.round(ph)}px panel, messages hidden`)
+        else if (el.clientHeight < 240 && pb < vh - 200) add('conversation-starved', el, `${el.clientHeight}px, its panel collapsed to its content with ${Math.round(vh - pb)}px of window empty below`)
+      }
     }
 
     const clamped = s.webkitLineClamp && s.webkitLineClamp !== 'none'

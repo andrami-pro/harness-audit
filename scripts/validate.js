@@ -3050,6 +3050,10 @@ check('develop-phase workdir, allowSkipped and a read-only reviewer', () => {
 //     "a ui-check that could not open the app passed as verified, or allowSkipped could not accept it (got [true,\"complete\",…])"
 //   ${uiEvidence} dropped from the code reviewer's prompt .............................................................
 //     "the configured uiCheck command was not run as given, or WARN lines did not reach the code reviewer (got [true,false,…])"
+//   uiAccepted through the substring allowSkipped match, any non-PASS state (2026-11-17) ..............................
+//     "a ui-check that failed on its own config (exit 1) was accepted by allowSkipped, committed, or not named in nextStep"
+//   the review's open [FAIL] items dropped from the UI-block correction ...............................................
+//     "a UI block after a rejected review dropped the review's open [FAIL] items from the implementer's next prompt"
 check('develop-phase uiCheck: a BLOCK goes back before review, warnings reach the reviewer, a run that cannot open the app is NOT VERIFIED', () => {
   const harness = (file) => {
     const src = require('fs').readFileSync(file, 'utf8').replace(/^export /m, '');
@@ -4055,6 +4059,22 @@ esac
 //     "bad.html: a select laid over a heading was not reported as text-over-text"
 // The pinned-bar control first came back green: controls were filtered on being painted somewhere, so a control
 // hidden whole under another never entered the comparison — the worst case was invisible. Fixed before recording.
+// After the independent review (2026-11-17), each also applied to ui-check.js, observed, reverted — all exit 1:
+//   the skip selector tested with matches() instead of closest() ..............................................
+//     "a destructive or skipped button was pressed: /api/send /api/danger"
+//   the unsafe test reads only the first name (aria-label "More" over "Delete account") ...........................
+//     "a destructive or skipped button was pressed: /api/send /api/deleted-account /api/confirm"
+//   an added role=alert node not counted as announced ............................................................
+//     "an announced answer (status text, aria-expanded, its own label, an added role=alert, a focus move) was reported"
+//   a focus move not counted as an answer .........................................................................
+//     same message — «Edit name» reported as silent-click
+//   a partial run allowed to exit 0 ..............................................................................
+//     "a route that never became ready still passed (exit 0) — a partial run is NOT VERIFIED"
+//   the "something already answers before serve" guard removed ...................................................
+//     "a port another server already answers on was checked as if it were the app (exit 0: ui-check: 2 screen(s))"
+//   ignore entries no longer validated ...........................................................................
+//     "an ignore entry without a known rule (it would silence every rule) in the config did not exit 1 (exit 0)"
+// Not covered by a check: the SIGINT/SIGTERM/SIGHUP handlers that stop the server when ui-check itself is killed.
 const UI_CHECK = 'plugins/harness-loops/scripts/ui-check.js';
 const UI_SERVE = path.join(ROOT, 'scripts/fixtures/ui-check/serve.js');
 // One ui-check run against the fixtures. {port} makes ui-check pick a free port; the fixture server logs its pid and
@@ -4095,6 +4115,8 @@ check('ui-check finds each static rule on bad.html, nothing on good.html, refuse
   if (missing.length) throw new Error(`bad.html: no ${missing.join(', ')} — a rule went blind`);
   if (!uiHits(bad.out, 'text-over-text').some((h) => h.includes('hidden under select'))) throw new Error('bad.html: a select laid over a heading was not reported as text-over-text');
   if (!uiHits(bad.out, 'text-cut-silently').some((h) => h.includes('cut off at the bottom'))) throw new Error('bad.html: wrapped text cut at the bottom of a fixed-height box was not reported');
+  const room = uiCheckRun({ routes: ['room.html'], viewports: [[1280, 800]], rules: { accessibility: 'off' } });
+  if (!uiHits(room.out, 'conversation-starved').some((h) => h.includes('collapsed to its content'))) throw new Error('room.html: a chat panel collapsed to its content over an empty window was not reported — the Tama OS room-thread bug');
   const onGood = Object.entries(bad.out.violations).flatMap(([rule, v]) => v.hits.filter((h) => h.screen.includes('good.html')).map((h) => `${rule}: ${h.where} ${h.detail}`));
   if (onGood.length) throw new Error(`good.html raised a false alarm — ${onGood[0]}`);
   for (const [cfg, what] of [

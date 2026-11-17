@@ -1,0 +1,15 @@
+<!doctype html>
+<!-- A project room laid out like Tama OS's: content on the left, the room's chat on the right. The chat panel
+     collapses to its content, so its thread is a strip with the window's height empty below. -->
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>room</title>
+<style>body{margin:0;font:16px sans-serif}main{display:grid;grid-template-columns:1fr 360px;gap:24px;padding:16px;align-items:start}
+.panel{position:sticky;top:16px;border:1px solid #ccc;border-radius:8px}.head{padding:12px;border-bottom:1px solid #ccc}
+.thread{overflow-y:auto;padding:12px}.composer{padding:12px;border-top:1px solid #ccc}</style></head>
+<body><main>
+  <article><h1>Project</h1><p>The project's brief and its tickets.</p></article>
+  <aside class="panel" aria-label="Room chat">
+    <div class="head"><h2 style="margin:0;font-size:16px">Room thread</h2><p style="margin:4px 0 0">Forja, Contra and Tama are in the room.</p></div>
+    <div class="thread" role="log" aria-label="Conversation"><p style="margin:0">Start of the thread</p></div>
+    <div class="composer"><label>Message <textarea rows="2" style="width:100%"></textarea></label></div>
+  </aside>
+</main></body></html>
