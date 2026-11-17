@@ -24,6 +24,7 @@
   <button id="edit">Edit name</button>
   <input id="name" aria-label="Name" value="Ada">
   <button id="darkred">Dark red</button>
+  <button id="orange">Orange note</button>
   <p>Content below the buttons, so an insert above them shoves it.</p>
   <p id="clock"></p>
   <script>
@@ -49,6 +50,7 @@
     $('confirm').onclick = () => { fetch('/api/confirm'); $('status').textContent = 'Confirmed' }
     $('alertsave').onclick = () => { const p = document.createElement('p'); p.setAttribute('role', 'alert'); p.textContent = 'Saved your changes'; $('slot').append(p) }
     $('edit').onclick = () => { $('name').focus() }
+    $('orange').onclick = () => { const p = document.createElement('p'); p.style.color = '#f97316'; p.textContent = 'Heads up: draft not shared'; $('slot').append(p) }
     $('darkred').onclick = () => { const p = document.createElement('p'); p.style.color = '#f87171'; p.textContent = 'Could not save'; $('slot').append(p) }
   </script>
 </main></body></html>

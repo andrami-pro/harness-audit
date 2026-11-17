@@ -400,7 +400,8 @@ Do not fix anything.`,
     uiBlocked = lastUi?.exitCode === 2
     log(uiBlocked ? `✗ ui-check BLOCK (${lastUi.blocking.join(', ')}) — back to the implementer, no review this round`
       : lastUi?.exitCode === 0 ? `✓ ui-check PASS${lastUi.warnings.length ? ` · ${lastUi.warnings.length} rule(s) warn` : ''}`
-      : `⚠ ui-check NOT VERIFIED — ${uiFirstLine()}`)
+      : lastUi?.exitCode === 3 ? `⚠ ui-check NOT VERIFIED — ${uiFirstLine()}`
+      : `✗ ui-check FAILED (exit ${lastUi?.exitCode ?? '?'}) — ${uiFirstLine()}`)
     if (uiBlocked) continue
   }
 

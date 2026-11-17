@@ -4160,6 +4160,7 @@ check('ui-check presses buttons: silent, unannounced, abrupt and loose-red answe
     [uiHits(ok.out, 'abrupt-insert').some((h) => h.includes('«Shove»')), 'a 300 px block prepended above the content was not reported as abrupt-insert'],
     [uiHits(ok.out, 'error-unannounced').some((h) => h.includes('«Loose red»')), 'loose red error text was not reported as error-unannounced'],
     [uiHits(ok.out, 'error-unannounced').some((h) => h.includes('«Dark red»')), 'a dark-theme error colour (#f87171) was not read as an error'],
+    [!uiHits(ok.out, 'error-unannounced').some((h) => h.includes('«Orange note»')), 'orange text (#f97316) was read as an error — red is a hue, not a strong red channel'],
     [['Save', 'Menu', 'Load', 'Send to API', 'Alert save', 'Edit name'].every(quiet), 'an announced answer (status text, aria-expanded, its own label, an added role=alert, a focus move) was reported'],
     [ok.out.stats.pressed > 0 && ok.code === 0, `the probe did not complete (exit ${ok.code})`],
     [uiHits(failing.out, 'error-unannounced').some((h) => h.includes('«Send to API»')), 'with failRequests the API error shown as loose red text was not reported — the failing-backend condition does nothing'],

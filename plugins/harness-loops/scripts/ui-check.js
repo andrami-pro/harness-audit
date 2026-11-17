@@ -54,7 +54,7 @@ const LEVELS = ['off', 'warn', 'block']
 // Words a probe never presses: pressing every button is safe on demo data, not on a real account. Whole words only
 // ("Display" is not "pay", "Borrador" is not "borrar"), tested on every name the button has — aria-label, text, title,
 // value — untruncated. A button with no readable name at all (a bare 🗑) is not pressed either: its intent is unknown.
-const UNSAFE = /(?<![\p{L}\p{N}])(delete|deleting|remove|erase|wipe|clear|purge|destroy|reset|revoke|archive|drop|unsubscribe|transfer|withdraw|eliminar|elimina|borrar|borra|vaciar|quitar|revocar|archivar|retirar|transferir|supprimer|supprime|effacer|vider|r[ée]voquer|log ?out|sign ?out|cerrar sesi[oó]n|d[ée]connexion|se d[ée]connecter|pay|payer|pagar|paga|buy|comprar|acheter|deploy|desplegar|d[ée]ployer|publish|publicar|publier|merge|fusionar|fusionner)(?![\p{L}\p{N}])/iu
+const UNSAFE = /(?<![\p{L}\p{N}])(delet\p{L}*|remov\p{L}*|eras\p{L}*|wipe|clear|purg\p{L}*|destroy|reset|revok\p{L}*|archiv\p{L}*|drop|uninstall\p{L}*|unpublish\p{L}*|unsubscrib\p{L}*|empty trash|cancel subscription|place order|checkout|transfer|withdraw|eliminar|elimin[aeo]\p{L}*|borrar|borra|vaciar|quitar|revocar|desinstalar|despublicar|retirar|transferir|supprim\p{L}*|effacer|vider|r[ée]voquer|d[ée]sinstaller|log[ -]?out|sign[ -]?out|cerrar sesi[oó]n|d[ée]connexion|se d[ée]connecter|pay|payer|pagar|paga|buy|comprar|acheter|commander|deploy|desplegar|d[ée]ployer|publish|publicar|publier|merge|fusionar|fusionner)(?![\p{L}\p{N}])/iu
 const unsafeReason = (words) => (!/\p{L}/u.test(words) ? 'no readable name' : UNSAFE.test(words) ? `«${words.match(UNSAFE)[0]}»` : null)
 
 // Runs inside the page. One self-contained function: Playwright serialises it, so it may not close over anything.
@@ -128,9 +128,15 @@ function staticRules(document, window) {
       // it hides messages in a small box, or its panel collapses to its content and leaves the window's height empty
       // below it (Tama OS: a room thread of 64 px over 600 px of nothing).
       const pb = panel ? panel.getBoundingClientRect().bottom : vh
+      // "Empty below" means nothing is drawn there: a hit test under the panel lands on one of its own ancestors.
+      const pr = panel ? panel.getBoundingClientRect() : null
+      const emptyBelow = !!pr && [0.25, 0.5, 0.75].every((f) => {
+        const t = document.elementFromPoint(pr.left + pr.width * f, Math.min(vh - 2, pb + 120))
+        return !t || t === document.body || t === document.documentElement || t.contains(panel)
+      })
       if (vh >= 600 && (el.clientHeight < 240 || share < 40)) {
         if (el.scrollHeight > el.clientHeight + 2) add('conversation-starved', el, `${el.clientHeight}px, ${share}% of its ${Math.round(ph)}px panel, messages hidden`)
-        else if (el.clientHeight < 240 && pb < vh - 200) add('conversation-starved', el, `${el.clientHeight}px, its panel collapsed to its content with ${Math.round(vh - pb)}px of window empty below`)
+        else if (el.clientHeight < 240 && pb < vh - 200 && emptyBelow) add('conversation-starved', el, `${el.clientHeight}px, its panel collapsed to its content with ${Math.round(vh - pb)}px of window empty below`)
       }
     }
 
@@ -274,8 +280,16 @@ function readProbe(id) {
   // Moving the focus elsewhere (an "Edit" that focuses a field) or scrolling the page is a visible answer.
   const moved = (document.activeElement !== p.focus && document.activeElement !== btn && document.activeElement !== document.body)
     || window.scrollX !== p.scroll[0] || window.scrollY !== p.scroll[1]
-  // Error-red by hue, light or dark theme: #d00000, #f87171, #cf6679 all qualify; orange and pink-grey do not.
-  const reddish = (c) => c.length >= 3 && c[0] > 140 && c[0] - c[1] > 70 && c[0] - c[2] > 60
+  // Error-red by hue, light or dark theme: #d00000, #f87171, #cf6679 qualify (hue ≥ 340° or ≤ 10°, saturated);
+  // orange (#f97316), amber (#f59e0b), pink (#ec4899) and brown (#92400e) do not.
+  const reddish = (c) => {
+    if (c.length < 3) return false
+    const [r, g, b] = c.map((v) => v / 255)
+    const max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min
+    if (max < 0.5 || d < 0.25 || max !== r) return false
+    const hue = (((g - b) / d) * 60 + 360) % 360
+    return hue <= 10 || hue >= 340
+  }
   for (const m of real) {
     const t = el(m.target)
     if (btn && (btn === t || btn.contains(t))) { self = true; continue }
@@ -447,7 +461,12 @@ function serveStart(cmd, cwd) {
   const child = spawn(cmd, { cwd, shell: true, detached: true, stdio: 'ignore' })
   const state = { exited: null }
   child.on('exit', (code) => { state.exited = code ?? 'signal' })
-  const alive = () => { try { process.kill(-child.pid, 0); return true } catch { return false } }
+  // kill(-pgid, 0) still succeeds on a zombie nobody has reaped (the event loop is blocked while we wait), so a
+  // process in state Z counts as gone.
+  const alive = () => {
+    try { process.kill(-child.pid, 0) } catch { return false }
+    try { return fs.readFileSync(`/proc/${child.pid}/stat`, 'utf8').split(') ')[1]?.[0] !== 'Z' } catch { return true }
+  }
   state.stop = () => {
     if (!alive()) return
     try { process.kill(-child.pid, 'SIGTERM') } catch { return }
@@ -651,6 +670,7 @@ async function main(argv) {
         stats.unsafe = r.unsafe
         notes.push(...r.failures)
         if (r.candidates > r.unsafe.length && r.pressed === 0) unverified.push('interactions are on and no button could be pressed')
+        else if (r.failures.length) unverified.push(`${r.failures.length} probe step(s) failed`)
       }
     } finally {
       await browser.close()

@@ -353,7 +353,8 @@ Config, `.harness/ui-check.json` in the project:
   answered, a route never became ready, a `block` rule could not run, the probe pressed nothing).
 - **The server:** `{port}` in `url` and `serve` is replaced by a free port, so two worktrees never share a server. With
   `serve`, a URL that already answers before the server starts is refused (it would check another app), and the server's
-  whole process group is stopped on every exit, including when ui-check itself is killed.
+  whole process group is stopped on every exit, including when ui-check itself is killed. A `serve` command must stay in
+  the foreground: one that backgrounds the server and exits counts as a server that died (exit 3).
 - **Dependencies:** none shipped. Playwright and axe-core come from the project, then the global npm root; without
   axe-core the accessibility rule reports a `SKIP`. When Playwright's pinned browser build is missing, the newest
   Chromium under `~/.cache/ms-playwright` is used.
