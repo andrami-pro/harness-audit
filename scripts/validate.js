@@ -3808,7 +3808,11 @@ check('develop-phase-pi: --prd reaches scout and spec prompts, default stays doc
 // ui-check: FAKE_UI_SEQ lists its exit codes, one per call. The same rules as the Claude loop's uiCheck check.
 //
 // Negative controls (2026-11-17, each applied to develop-phase-pi.js, observed, reverted — all exit 1):
-//   (recorded once observed)
+//   `if (uiBlocked) continue` disabled ............ "a BLOCK did not go back to the implementer … (got [1,\"continue\",false,…])"
+//   --allow-skipped matched as a substring of the report .. "an --allow-skipped substring of the ui-check line (the URL)
+//                                                             accepted it … (got \"complete\")"
+//   the exit code back to approved && preflightPassed ..... "a ui-check that could not open the app passed … (got [0,…])"
+//   ${uiEvidence} dropped from the code reviewer's prompt .. "… or the WARN lines did not reach the code reviewer (got […,false])"
 check('develop-phase-pi --ui-check: a BLOCK goes back before review, warnings reach the reviewer, exit 3 is NOT VERIFIED, exit 1 is never accepted', () => {
   const { tmp, run, done } = piLoop();
   const stub = path.join(tmp, 'ui-stub.sh');

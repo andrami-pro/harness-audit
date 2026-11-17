@@ -24,3 +24,5 @@ handoff, accepted only through `allowSkipped`. `sync-workflows` and `install.sh`
 ## Comments
 
 - 2026-11-17: built on branch feat/ui-check; not yet run by a live develop-phase on a project.
+- 2026-11-17: Pi parity — `develop-phase-pi.js --ui-check ["<cmd>"]` runs it in code (no seat), forwarded by
+  `develop-spec-pi.js`; the Pi exit code is now 0 only for a `complete` handoff.

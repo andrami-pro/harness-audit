@@ -17,6 +17,8 @@ project room's conversation was squeezed to 64 px and 12 buttons answered nothin
 - **In develop-phase, after every implementation** (`uiCheck: true` in the wrapper). A rule set to `block` sends the
   change back before any reviewer token; a `warn` rule reaches the code reviewer as evidence. A run that could not
   open the app is NOT VERIFIED, never a pass.
+- **On Pi too.** `develop-phase-pi.js --ui-check` runs it in code after every implementation, with the same rules,
+  and `develop-spec-pi.js` passes the flag to every ticket.
 - **Every rule starts as a warning.** They were calibrated on one project (571 alarms → 9). Promote a rule once it
   stays quiet on yours.
 - **Measured, then decided:** Bombadil saw none of these bugs with its defaults, and Jev, asked about screenshots,
