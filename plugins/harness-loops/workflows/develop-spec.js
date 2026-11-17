@@ -51,7 +51,8 @@ async function developPhase(args, agent, log, phase) {
 //   uiCheck         true, or the command that runs the project's UI rules (default `node ~/.claude/harness/ui-check.js`,
 //                   which reads .harness/ui-check.json). It runs after every implementation: a BLOCK rule sends the change
 //                   back before any reviewer token; WARN rules reach the code reviewer as evidence. A run that could not
-//                   open the app is NOT VERIFIED, like a preflight SKIP (allowSkipped: ['ui-check'] accepts it)
+//                   open the app, or ran only in part (exit 3), is NOT VERIFIED; allowSkipped: ['ui-check'] accepts that.
+//                   Any other exit (a config typo, a crash) is a failure nothing accepts
 const cfg = args && typeof args === 'object' ? args : { task: typeof args === 'string' ? args : undefined }
 const task = cfg.task ?? 'implement the active task in TASKS.md or equivalent'
 const maxIter = cfg.maxIter ?? 5
@@ -365,8 +366,10 @@ while (!approved && iteration < maxIter) {
   phase('Implement')
   const correctionCtx = iteration === 1 ? ''
     : uiBlocked
-      ? `\n\n⚠ ui-check BLOCKED the change before review. Fix ONLY what its BLOCK lines name — each gives the rule, the screen
-and the element. Re-run it yourself to confirm: ${UI_CMD}\nUI CHECK:\n${lastUi.report}`
+      ? `\n\n⚠ ui-check BLOCKED the change before review. Fix what its BLOCK lines name — each gives the rule, the screen
+and the element. Re-run it yourself to confirm: ${UI_CMD}\nUI CHECK:\n${lastUi.report}${
+        axes && !axes.code.approved ? `\nThe last review also REJECTED; its [FAIL] items still stand.\nCODE REVIEW (rubric):\n${lastReview}` : ''}${
+        axes?.spec && !axes.spec.approved ? `\nSPEC REVIEW (task, PRD, seams):\n${lastSpec}` : ''}`
       : `\n\n⚠ The review REJECTED. Fix ONLY the [FAIL] items.${axes.code.approved ? '' : `\nCODE REVIEW (rubric):\n${lastReview}`}${
         axes.spec && !axes.spec.approved ? `\nSPEC REVIEW (task, PRD, seams):\n${lastSpec}` : ''}`
 
@@ -402,7 +405,9 @@ Do not fix anything.`,
 
   phase('Review')
   // Warnings are evidence, not a verdict: a rule not yet promoted to block may fire on what this change did not touch.
-  const uiEvidence = lastUi?.exitCode === 0 && lastUi.warnings.length
+  const uiWarned = lastUi?.exitCode === 0 && lastUi.warnings.length > 0
+  if (uiWarned && MODELS.reviewer.includes('/')) log('⚠ ui-check warnings do not reach an external reviewer (the bridge takes the diff only) — recorded in the handoff')
+  const uiEvidence = uiWarned
     ? `\nUI CHECK — passed with warnings (rules the project has not promoted to block). [FAIL] the change for a warning only
 when this diff caused it; name the rule, the screen and the element.\n${lastUi.report}\n`
     : ''
@@ -496,14 +501,19 @@ Do not fix anything.`,
 // exception is a skip the project declared in allowSkipped (a live check with no key here): reported, not counted.
 const ALLOWED_SKIPS = list(cfg.allowSkipped).map((a) => String(a).toLowerCase())
 const isAllowedSkip = (l) => ALLOWED_SKIPS.some((a) => l.toLowerCase().includes(a))
-// ui-check that could not open the app is a check that did not run: it joins the preflight's skips.
+const skipped = (preflight?.skipped ?? []).filter((l) => !isAllowedSkip(l))
+const allowedSkips = (preflight?.skipped ?? []).filter(isAllowedSkip)
+// ui-check keeps its own state, next to the preflight's. Exit 3 (could not open the app, or ran in part) is a check
+// that did not run: NOT VERIFIED, accepted only by an allowSkipped entry that is exactly 'ui-check'. Any other exit — a
+// config typo, a crash, a seat that returned nothing — is a failure nothing accepts.
+const uiLast = lastUi?.report ? lastUi.report.trim().split('\n').filter((l) => l.startsWith('RESULT')).pop() : null
 const uiState = !UI_CMD ? null
   : uiBlocked ? `BLOCK (${lastUi.blocking.join(', ')})`
-  : lastUi?.exitCode === 0 ? `PASS${lastUi.warnings.length ? ` (${lastUi.warnings.length} rule(s) warn: ${lastUi.warnings.join(', ')})` : ''}`
-  : `NOT VERIFIED — ${uiFirstLine()}`
-const uiSkip = uiState?.startsWith('NOT VERIFIED') ? [`ui-check ${uiState}`] : []
-const skipped = [...(preflight?.skipped ?? []), ...uiSkip].filter((l) => !isAllowedSkip(l))
-const allowedSkips = [...(preflight?.skipped ?? []), ...uiSkip].filter(isAllowedSkip)
+  : lastUi?.exitCode === 0 ? `PASS${lastUi.warnings.length ? ` (${lastUi.warnings.length} rule(s) warn: ${lastUi.warnings.join(', ')}${MODELS.reviewer.includes('/') ? ' — not seen by the external reviewer' : ''})` : ''}`
+  : lastUi?.exitCode === 3 ? `NOT VERIFIED — ${uiLast ?? uiFirstLine()}`
+  : `FAILED (exit ${lastUi?.exitCode ?? '?'}) — ${uiFirstLine()}`
+const uiAccepted = uiState?.startsWith('NOT VERIFIED') && ALLOWED_SKIPS.includes('ui-check')
+const uiOk = !UI_CMD || uiState.startsWith('PASS') || uiAccepted
 const preflightPassed = preflight?.exitCode === 0 && skipped.length === 0
 const preflightState = preflightPassed ? 'PASS'
   : preflight?.exitCode === 0 ? `NOT VERIFIED (${skipped.length} skipped)`
@@ -526,7 +536,7 @@ const COMMIT_SCHEMA = {
   },
 }
 let commit = null
-if (approved && preflightPassed && doCommit) {
+if (approved && preflightPassed && uiOk && doCommit) {
   phase('Commit')
   commit = await agent(
     `${ISOLATED}
@@ -559,11 +569,11 @@ const specLines = doSpec ? linesOf(lastSpec).map((l) => `spec: ${l}`) : []
 const openFails = [...verdictLines, ...specLines].filter((l) => /^(?:spec: )?\[FAIL\]/.test(l))
 const rejecting = axes ? `${[!axes.code.approved && 'code', axes.spec && !axes.spec.approved && 'spec'].filter(Boolean).join(' and ')} review` : 'review'
 const handoff = {
-  status: approved && preflightPassed ? 'complete' : approved ? 'continue' : 'blocked',
+  status: approved && preflightPassed && uiOk ? 'complete' : approved ? 'continue' : 'blocked',
   summary: approved
-    ? `${doSpec ? 'Code and spec reviews' : 'Reviewer'} approved after ${iteration} iteration(s); preflight ${preflightState}${commit?.committed ? `; commit ${commit.hash}` : ''}`
+    ? `${doSpec ? 'Code and spec reviews' : 'Reviewer'} approved after ${iteration} iteration(s); ${uiState ? `ui-check ${uiState}; ` : ''}preflight ${preflightState}${commit?.committed ? `; commit ${commit.hash}` : ''}`
     : uiBlocked ? `ui-check still blocks after ${maxIter} iteration(s)` : `The ${rejecting} still rejects after ${maxIter} iteration(s)`,
-  evidence: [...verdictLines, ...specLines, ...(uiState ? [`ui-check: ${uiState}`] : []), `preflight: ${preflightState}`, ...skipped.map((l) => `preflight skipped: ${l}`),
+  evidence: [...verdictLines, ...specLines, ...(uiState ? [`ui-check: ${uiState}${uiAccepted ? ' (accepted by allowSkipped)' : ''}`] : []), `preflight: ${preflightState}`, ...skipped.map((l) => `preflight skipped: ${l}`),
     ...allowedSkips.map((l) => `preflight skipped (allowed by config): ${l}`)],
   ...(approved ? {} : { blocker: uiBlocked ? `ui-check BLOCK — ${lastUi.report.split('\n').filter((l) => l.startsWith('BLOCK')).join(' · ')}`
     : openFails.join(' · ') || 'reviewer returned REJECTED with no [FAIL] line' }),
@@ -574,7 +584,10 @@ const integrate = cfg.integrate ? `, then ${cfg.integrate}` : ''
 return {
   task, iterations: iteration, approved, preflightPassed, commit, handoff, routing, axes,
   seams: { agreed: agreedSeams.length > 0, list: seams },
-  nextStep: LABEL + (approved && preflightPassed
+  ...(UI_CMD ? { uiCheck: uiState } : {}),
+  nextStep: LABEL + (approved && preflightPassed && !uiOk
+    ? `ui-check ${uiState} — ${uiState.startsWith('FAILED') ? 'fix the command or its .harness/ui-check.json' : 'make the app reachable (or fix the screens that never became ready)'} and re-run; a check that did not run is not a pass`
+    : approved && preflightPassed
     ? (commit?.committed ? `committed ${commit.hash}${integrate}` : `${cfg.doneStep ?? 'git add -p && git commit'}${integrate}`)
     : approved && preflight?.exitCode === 0 ? `Preflight skipped checks outside allowSkipped: ${skipped.join(' · ')} — supply what they need and re-run; a SKIP is not a PASS`
     : approved ? 'Preflight failed — fix before commit'

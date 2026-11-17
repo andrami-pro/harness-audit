@@ -12,10 +12,18 @@
   <button id="red">Loose red</button>
   <button id="save">Save</button>
   <button id="menu" aria-expanded="false">Menu</button>
-  <ul id="menulist" hidden><li>One</li></ul>
+  <ul id="menulist" hidden style="position:absolute;margin:0;background:#fff;border:1px solid #999"><li>One</li></ul>
   <button id="self">Load</button>
   <button id="send">Send to API</button>
   <button id="wipe">Delete everything</button>
+  <button id="more" aria-label="More">Delete account</button>
+  <button id="trash">🗑</button>
+  <div data-danger><button id="danger">Confirm</button></div>
+  <button id="confirm">Confirm</button>
+  <button id="alertsave">Alert save</button>
+  <button id="edit">Edit name</button>
+  <input id="name" aria-label="Name" value="Ada">
+  <button id="darkred">Dark red</button>
   <p>Content below the buttons, so an insert above them shoves it.</p>
   <p id="clock"></p>
   <script>
@@ -33,6 +41,14 @@
       if (r.ok) $('status').textContent = 'Sent'
       else { const p = document.createElement('p'); p.className = 'err'; p.textContent = 'Sending failed'; $('slot').append(p) }
     }
-    $('wipe').onclick = () => { document.title = 'WIPED' ; $('status').textContent = 'Everything deleted' }
+    // The destructive ones call the server, which logs the path: the check proves none was ever pressed.
+    $('wipe').onclick = () => { fetch('/api/wiped'); $('status').textContent = 'Everything deleted' }
+    $('more').onclick = () => { fetch('/api/deleted-account'); $('status').textContent = 'Account deleted' }
+    $('trash').onclick = () => { fetch('/api/trashed'); $('status').textContent = 'Trashed' }
+    $('danger').onclick = () => { fetch('/api/danger'); $('status').textContent = 'Danger confirmed' }
+    $('confirm').onclick = () => { fetch('/api/confirm'); $('status').textContent = 'Confirmed' }
+    $('alertsave').onclick = () => { const p = document.createElement('p'); p.setAttribute('role', 'alert'); p.textContent = 'Saved your changes'; $('slot').append(p) }
+    $('edit').onclick = () => { $('name').focus() }
+    $('darkred').onclick = () => { const p = document.createElement('p'); p.style.color = '#f87171'; p.textContent = 'Could not save'; $('slot').append(p) }
   </script>
 </main></body></html>

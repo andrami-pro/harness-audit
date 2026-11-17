@@ -3056,18 +3056,20 @@ check('develop-phase uiCheck: a BLOCK goes back before review, warnings reach th
     const AsyncFn = Object.getPrototypeOf(async function () {}).constructor;
     const REPORT = { block: 'ui-check: 2 screen(s)\nBLOCK conversation-starved (1) — a conversation keeps 40%\n      1280x800 #room ol.thread — 64px\nRESULT: FAIL — blocking: conversation-starved',
       warn: 'ui-check: 2 screen(s)\nWARN  silent-click (1) — a pressed button answers\n      1280x800 #room «Send» — nothing visible changed\nRESULT: PASS — 1 rule(s) warn',
-      down: 'ui-check: NOT VERIFIED — http://localhost:5175/ did not answer (start the app, or set "serve")' };
-    const run = async (args, uiSeq) => {
+      down: 'ui-check: NOT VERIFIED — http://localhost:5175/ did not answer (start the app, or set "serve")',
+      broken: 'ui-check: error — unknown rule "conversation-starve" in config' };
+    const run = async (args, uiSeq, reviews = []) => {
       const calls = [];
       let ui = 0;
       const agent = async (prompt, o) => {
         const l = String(o.label); calls.push({ label: l, prompt });
         if (l.startsWith('ui:')) {
           const k = uiSeq[Math.min(ui++, uiSeq.length - 1)];
-          return { exitCode: { block: 2, warn: 0, pass: 0, down: 3 }[k], blocking: k === 'block' ? ['conversation-starved'] : [],
+          return { exitCode: { block: 2, warn: 0, pass: 0, down: 3, broken: 1 }[k], blocking: k === 'block' ? ['conversation-starved'] : [],
             warnings: k === 'warn' ? ['silent-click'] : [], report: REPORT[k] ?? 'ui-check: 2 screen(s)\nRESULT: PASS' };
         }
         if (l === 'preflight') return { exitCode: 0, skipped: [], failedCheck: null, tail: '' };
+        if (l.startsWith('review') && reviews.length) return reviews.shift();
         return l.startsWith('review') || l.startsWith('spec') ? '[PASS] a — x\nAPPROVED' : l === 'scout' ? 'B' : l === 'analyst' ? 'P' : 'impl';
       };
       const out = await new AsyncFn('args', 'agent', 'log', 'phase', src)({ task: 'T', maxIter: 3, preparer: false, ...args }, agent, () => {}, () => {});
@@ -3081,6 +3083,10 @@ check('develop-phase uiCheck: a BLOCK goes back before review, warnings reach th
       const down = await run({ uiCheck: true }, ['down']);
       const allowed = await run({ uiCheck: true, allowSkipped: ['ui-check'] }, ['down']);
       const stuck = await run({ uiCheck: true }, ['block']);
+      const broken = await run({ uiCheck: true, allowSkipped: ['ui-check'] }, ['broken']);
+      const loose = await run({ uiCheck: true, allowSkipped: ['localhost'] }, ['down']);
+      const carry = await run({ uiCheck: true }, ['pass', 'block', 'pass'], ['[FAIL] rubric-7 — the handler swallows the error\nREJECTED']);
+      const impl3 = carry.calls.find((c) => c.label === 'impl:iter3')?.prompt ?? '';
       const impl2 = fix.calls.find((c) => c.label === 'impl:iter2')?.prompt ?? '';
       console.log(JSON.stringify({
         off: labels(off).includes('ui:'),
@@ -3090,6 +3096,10 @@ check('develop-phase uiCheck: a BLOCK goes back before review, warnings reach th
           !warn.calls.find((c) => c.label.startsWith('spec')).prompt.includes('UI CHECK'), warn.out.handoff.status],
         down: [down.out.approved, down.out.handoff.status, down.out.nextStep.includes('ui-check NOT VERIFIED'), allowed.out.handoff.status],
         stuck: [stuck.out.approved, stuck.out.handoff.status, stuck.calls.some((c) => c.label.startsWith('review')), /^ui-check BLOCK — BLOCK conversation-starved/.test(stuck.out.handoff.blocker ?? ''), stuck.out.handoff.summary],
+        broken: [broken.out.handoff.status, broken.out.nextStep.includes('FAILED (exit 1)'), broken.calls.some((c) => c.label === 'commit')],
+        loose: loose.out.handoff.status,
+        carry: [impl3.includes('ui-check BLOCKED'), impl3.includes('rubric-7 — the handler swallows the error')],
+        preflightLabel: down.out.handoff.evidence.some((e) => e.startsWith('preflight skipped') && e.includes('ui-check')),
       }));
     })().catch((e) => console.log('THREW ' + e.stack));
   };
@@ -3103,6 +3113,10 @@ check('develop-phase uiCheck: a BLOCK goes back before review, warnings reach th
     warn: [[true, true, true, 'complete'], 'the configured uiCheck command was not run as given, or WARN lines did not reach the code reviewer (and only it)'],
     down: [[true, 'continue', true, 'complete'], 'a ui-check that could not open the app passed as verified, or allowSkipped could not accept it'],
     stuck: [[false, 'blocked', false, true, 'ui-check still blocks after 3 iteration(s)'], 'a change ui-check blocks every round was reviewed, approved, or handed off without the BLOCK lines as its blocker'],
+    broken: [['continue', true, false], 'a ui-check that failed on its own config (exit 1) was accepted by allowSkipped, committed, or not named in nextStep'],
+    loose: ['continue', 'an allowSkipped entry that merely appears in the ui-check line (the URL) accepted it — only the exact entry "ui-check" may'],
+    carry: [[true, true], "a UI block after a rejected review dropped the review's open [FAIL] items from the implementer's next prompt"],
+    preflightLabel: [false, 'a ui-check skip was reported as a preflight skip — they are two checks'],
   };
   for (const [k, [v, why]] of Object.entries(want)) {
     if (JSON.stringify(r[k]) !== JSON.stringify(v)) throw new Error(`${why} (got ${JSON.stringify(r[k])})`);
@@ -4042,59 +4056,100 @@ esac
 // The pinned-bar control first came back green: controls were filtered on being painted somewhere, so a control
 // hidden whole under another never entered the comparison — the worst case was invisible. Fixed before recording.
 const UI_CHECK = 'plugins/harness-loops/scripts/ui-check.js';
+const UI_SERVE = path.join(ROOT, 'scripts/fixtures/ui-check/serve.js');
+// One ui-check run against the fixtures. {port} makes ui-check pick a free port; the fixture server logs its pid and
+// every /api/ path to `hits`, so a check can prove a destructive button was never pressed and the server was stopped.
 const uiCheckRun = (cfg, extra = []) => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ui-check-'));
-  const port = 47000 + Math.floor(Math.random() * 2000);
+  const hits = path.join(tmp, 'hits');
   const conf = path.join(tmp, 'ui-check.json');
-  fs.writeFileSync(conf, JSON.stringify({
-    url: `http://127.0.0.1:${port}/`, serve: `node ${path.join(ROOT, 'scripts/fixtures/ui-check/serve.js')} ${port}`, ...cfg,
-  }));
+  fs.writeFileSync(conf, JSON.stringify({ url: 'http://127.0.0.1:{port}/', serve: `node ${UI_SERVE} {port} ${hits}`, ...cfg }));
   const json = path.join(tmp, 'out.json');
   const r = require('node:child_process').spawnSync('node', [path.join(ROOT, UI_CHECK), '--config', conf, '--json', json, ...extra], { encoding: 'utf8', timeout: 240000 });
   const out = fs.existsSync(json) ? JSON.parse(fs.readFileSync(json, 'utf8')) : null;
+  const log = fs.existsSync(hits) ? fs.readFileSync(hits, 'utf8').split('\n').filter(Boolean) : [];
+  const pid = Number((log.find((l) => l.startsWith('pid ')) || '').slice(4)) || null;
+  let serverAlive = false;
+  if (pid) {
+    try {
+      process.kill(pid, 0);
+      // A zombie still answers kill(pid, 0) until its parent reaps it; only a running process counts as alive.
+      const state = fs.readFileSync(`/proc/${pid}/stat`, 'utf8').split(') ')[1]?.[0];
+      serverAlive = state !== 'Z';
+      if (serverAlive) process.kill(pid, 'SIGKILL');
+    } catch { /* stopped, as it should be (or no /proc: nothing more to learn) */ }
+  }
   fs.rmSync(tmp, { recursive: true, force: true });
-  return { code: r.status, stdout: r.stdout || '', out };
+  return { code: r.status, stdout: r.stdout || '', out, api: log.filter((l) => l.startsWith('/api/')), serverAlive };
 };
 const uiHits = (out, rule) => (out?.violations?.[rule]?.hits ?? []).map((h) => `${h.where} ${h.detail}`);
-check('ui-check finds each static rule on bad.html, nothing on good.html, and a promoted rule blocks', () => {
+const uiCantRun = (r) => r.code === 3 && /Playwright not found|no browser could start/.test(r.stdout);
+check('ui-check finds each static rule on bad.html, nothing on good.html, refuses typos, and a partial run is NOT VERIFIED', () => {
   const bad = uiCheckRun({ routes: ['bad.html', 'good.html'], viewports: [[1280, 800], [390, 800]], rules: { 'conversation-starved': 'block', accessibility: 'off' } });
-  if (bad.code === 3) skip(`ui-check could not run here: ${bad.stdout.trim().split('\n')[0]}`);
+  if (uiCantRun(bad)) skip(`ui-check could not run here: ${bad.stdout.trim().split('\n')[0]}`);
   if (bad.code !== 2) throw new Error(`a blocking rule did not exit 2 (exit ${bad.code}): ${bad.stdout.trim().split('\n').slice(-1)[0]}`);
+  if (bad.serverAlive) throw new Error('the server ui-check started for the run was still running after it exited');
   if (JSON.stringify(bad.out.blocking) !== '["conversation-starved"]') throw new Error(`blocking should be exactly the promoted rule, got ${JSON.stringify(bad.out.blocking)}`);
   const want = ['page-scrolls-sideways', 'scroll-area-squeezed', 'text-cut-silently', 'control-off-screen', 'controls-overlap', 'text-over-text', 'tap-target-small', 'console-error', 'request-failed'];
   const missing = want.filter((r) => !bad.out.warnings.includes(r));
   if (missing.length) throw new Error(`bad.html: no ${missing.join(', ')} — a rule went blind`);
   if (!uiHits(bad.out, 'text-over-text').some((h) => h.includes('hidden under select'))) throw new Error('bad.html: a select laid over a heading was not reported as text-over-text');
+  if (!uiHits(bad.out, 'text-cut-silently').some((h) => h.includes('cut off at the bottom'))) throw new Error('bad.html: wrapped text cut at the bottom of a fixed-height box was not reported');
   const onGood = Object.entries(bad.out.violations).flatMap(([rule, v]) => v.hits.filter((h) => h.screen.includes('good.html')).map((h) => `${rule}: ${h.where} ${h.detail}`));
   if (onGood.length) throw new Error(`good.html raised a false alarm — ${onGood[0]}`);
-  const typo = uiCheckRun({ routes: ['good.html'], rules: { 'conversation-starve': 'block' } });
-  if (typo.code !== 1) throw new Error(`an unknown rule name in the config did not exit 1 (exit ${typo.code}) — a typo would silently switch a rule off`);
+  for (const [cfg, what] of [
+    [{ routes: ['good.html'], rules: { 'conversation-starve': 'block' } }, 'an unknown rule name'],
+    [{ routes: ['good.html'], ignore: [{ rul: 'tap-target-small' }] }, 'an ignore entry without a known rule (it would silence every rule)'],
+    [{ routes: ['good.html'], rule: { 'conversation-starved': 'block' } }, 'an unknown top-level key'],
+  ]) {
+    const r = uiCheckRun(cfg);
+    if (r.code !== 1) throw new Error(`${what} in the config did not exit 1 (exit ${r.code}) — a typo would silently switch a check off`);
+  }
+  const partial = uiCheckRun({ routes: ['good.html', 'missing.html'], ready: 'main', viewports: [[1280, 800]], rules: { accessibility: 'off' } });
+  if (partial.code !== 3 || !/RESULT: NOT VERIFIED/.test(partial.stdout)) throw new Error(`a route that never became ready still passed (exit ${partial.code}) — a partial run is NOT VERIFIED`);
   const down = require('node:child_process').spawnSync('node', [path.join(ROOT, UI_CHECK), '--url', 'http://127.0.0.1:9/'], { encoding: 'utf8' });
   if (down.status !== 3 || !/NOT VERIFIED/.test(down.stdout)) throw new Error(`an app that never answers did not exit 3 NOT VERIFIED (exit ${down.status})`);
-  return `${want.length + 1} static rules fire on bad.html · good.html silent · promoted rule exits 2 · typo exits 1 · no app exits 3`;
+  // With "serve", something already answering on the URL would be checked instead of the app this run starts.
+  const taken = execFileSync('node', ['-e', `
+    const http = require('http'); const { spawn } = require('child_process');
+    // spawn, not spawnSync: a blocked event loop would stop this server answering, and the check would test nothing.
+    const srv = http.createServer((q, s) => s.end('<main>other app</main>')).listen(0, '127.0.0.1', () => {
+      const port = srv.address().port;
+      const c = spawn('node', [process.argv[1], '--url', 'http://127.0.0.1:' + port + '/', '--serve', 'node ' + process.argv[2] + ' ' + port]);
+      let out = ''; c.stdout.on('data', (d) => { out += d; });
+      c.on('close', (code) => { console.log(JSON.stringify({ code, out: out.trim().split('\\n')[0] })); srv.close(); });
+    });`, path.join(ROOT, UI_CHECK), UI_SERVE], { encoding: 'utf8' });
+  const t = JSON.parse(taken);
+  if (t.code !== 3 || !/already answers/.test(t.out)) throw new Error(`a port another server already answers on was checked as if it were the app (exit ${t.code}: ${t.out})`);
+  return `${want.length + 1} static rules fire on bad.html · good.html silent · promoted rule exits 2 · 3 config typos exit 1 · partial run, no app, port taken exit 3 · server stopped`;
 });
-check('ui-check presses buttons: silent, unannounced, abrupt and loose-red answers are reported, unsafe labels never pressed', () => {
-  const base = { routes: ['clicks.html'], viewports: [[1280, 800]], interactions: { enabled: true }, rules: { accessibility: 'off', 'console-error': 'off' } };
+check('ui-check presses buttons: silent, unannounced, abrupt and loose-red answers are reported, no destructive or skipped button is ever pressed', () => {
+  const base = { routes: ['clicks.html'], viewports: [[1280, 800]], interactions: { enabled: true, maxPerScreen: 30, skip: ['[data-danger]'] }, rules: { accessibility: 'off', 'console-error': 'off' } };
   const ok = uiCheckRun(base);
-  if (ok.code === 3) skip(`ui-check could not run here: ${ok.stdout.trim().split('\n')[0]}`);
-  const failing = uiCheckRun({ ...base, failRequests: ['**/api/**'] });
+  if (uiCantRun(ok)) skip(`ui-check could not run here: ${ok.stdout.trim().split('\n')[0]}`);
+  const failing = uiCheckRun({ ...base, failRequests: ['**/api/send'] });
+  const quiet = (label) => !Object.values(ok.out.violations).some((v) => v.hits.some((h) => h.where === `«${label}»`));
   const expect = [
+    [!ok.api.some((a) => /wiped|deleted-account|trashed|danger/.test(a)), `a destructive or skipped button was pressed: ${ok.api.join(' ')}`],
+    [ok.api.includes('/api/confirm'), 'the benign "Confirm" was not pressed — the skip selector caught the wrong button of two with the same label'],
+    [ok.out.stats.unsafe.length === 3, `"Delete everything", aria-label "More" over "Delete account" and a bare 🗑 were not all held back (${ok.out.stats.unsafe.length})`],
     [uiHits(ok.out, 'silent-click').some((h) => h.includes('«Silence»')), 'a button that does nothing was not reported as silent-click'],
     [uiHits(ok.out, 'change-unannounced').some((h) => h.includes('«Mute change»')), 'a change nobody announced was not reported'],
     [uiHits(ok.out, 'abrupt-insert').some((h) => h.includes('«Shove»')), 'a 300 px block prepended above the content was not reported as abrupt-insert'],
     [uiHits(ok.out, 'error-unannounced').some((h) => h.includes('«Loose red»')), 'loose red error text was not reported as error-unannounced'],
-    [!Object.values(ok.out.violations).some((v) => v.hits.some((h) => /«(Save|Menu|Load|Send to API)»/.test(h.where))), 'a button that announces its answer (status, aria-expanded, its own label) was reported'],
-    [!uiHits(ok.out, 'silent-click').length || uiHits(ok.out, 'silent-click').length === 1, 'a ticking clock was read as the answer to a press, or as noise'],
-    [ok.out.stats.unsafe === 1, `"Delete everything" was not skipped as unsafe (unsafe=${ok.out.stats.unsafe})`],
+    [uiHits(ok.out, 'error-unannounced').some((h) => h.includes('«Dark red»')), 'a dark-theme error colour (#f87171) was not read as an error'],
+    [['Save', 'Menu', 'Load', 'Send to API', 'Alert save', 'Edit name'].every(quiet), 'an announced answer (status text, aria-expanded, its own label, an added role=alert, a focus move) was reported'],
+    [ok.out.stats.pressed > 0 && ok.code === 0, `the probe did not complete (exit ${ok.code})`],
     [uiHits(failing.out, 'error-unannounced').some((h) => h.includes('«Send to API»')), 'with failRequests the API error shown as loose red text was not reported — the failing-backend condition does nothing'],
+    [!ok.serverAlive && !failing.serverAlive, 'the fixture server outlived ui-check'],
   ];
   const bad = expect.find(([pass]) => !pass);
   if (bad) throw new Error(bad[1]);
-  return `${ok.out.stats.pressed} buttons pressed, 1 unsafe skipped · 4 interaction rules fire · announced answers stay silent · failRequests surfaces the loose error`;
+  return `${ok.out.stats.pressed} buttons pressed, 3 held back as unsafe, none of them reached the server · 4 interaction rules fire · announced answers stay silent`;
 });
 check('ui-check accessibility: axe-core reports bad.html and stays silent on good.html', () => {
   const r = uiCheckRun({ routes: ['bad.html', 'good.html'], viewports: [[1280, 800]] });
-  if (r.code === 3) skip(`ui-check could not run here: ${r.stdout.trim().split('\n')[0]}`);
+  if (uiCantRun(r)) skip(`ui-check could not run here: ${r.stdout.trim().split('\n')[0]}`);
   if ((r.out?.skipped ?? []).some((n) => n.startsWith('accessibility'))) skip('axe-core is not installed in the project or the global npm root (npm i -g axe-core)');
   const hits = r.out.violations.accessibility?.hits ?? [];
   if (!hits.some((h) => h.screen.includes('bad.html') && /image-alt/.test(h.detail))) throw new Error('an image with no alt on bad.html was not reported');

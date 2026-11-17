@@ -12,7 +12,8 @@
 //   0  no blocking violation (warnings may be printed)
 //   2  at least one blocking violation
 //   1  usage or runtime error
-//   3  could not run: no Playwright, no browser, or the app never answered — NOT VERIFIED, never a pass
+//   3  could not run, or ran only in part: no Playwright, no browser, the app never answered, a route never became
+//      ready, a blocking rule could not run, or the probe pressed nothing — NOT VERIFIED, never a pass
 //
 // Zero dependencies of its own: Playwright and axe-core are resolved from the project, then from the global npm
 // root. The browser is Playwright's own; when that build is missing, the newest cached Chromium is used.
@@ -25,6 +26,7 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const net = require('node:net')
 const { spawn, execFileSync } = require('node:child_process');
 const { createRequire } = require('node:module');
 
@@ -49,8 +51,11 @@ const RULES = {
 }
 const LEVELS = ['off', 'warn', 'block']
 
-// Labels a probe never presses: pressing every button is safe on demo data, not on a real account.
-const UNSAFE = /delet|borr|elimin|supprim|remov|quitar|destroy|purge|reset|log ?out|sign ?out|cerrar sesi|d[ée]connex|pay|pag(ar|o)|buy|compr|deploy|desplegar|publish|publicar|merge|fusionar|drop/i
+// Words a probe never presses: pressing every button is safe on demo data, not on a real account. Whole words only
+// ("Display" is not "pay", "Borrador" is not "borrar"), tested on every name the button has — aria-label, text, title,
+// value — untruncated. A button with no readable name at all (a bare 🗑) is not pressed either: its intent is unknown.
+const UNSAFE = /(?<![\p{L}\p{N}])(delete|deleting|remove|erase|wipe|clear|purge|destroy|reset|revoke|archive|drop|unsubscribe|transfer|withdraw|eliminar|elimina|borrar|borra|vaciar|quitar|revocar|archivar|retirar|transferir|supprimer|supprime|effacer|vider|r[ée]voquer|log ?out|sign ?out|cerrar sesi[oó]n|d[ée]connexion|se d[ée]connecter|pay|payer|pagar|paga|buy|comprar|acheter|deploy|desplegar|d[ée]ployer|publish|publicar|publier|merge|fusionar|fusionner)(?![\p{L}\p{N}])/iu
+const unsafeReason = (words) => (!/\p{L}/u.test(words) ? 'no readable name' : UNSAFE.test(words) ? `«${words.match(UNSAFE)[0]}»` : null)
 
 // Runs inside the page. One self-contained function: Playwright serialises it, so it may not close over anything.
 function staticRules(document, window) {
@@ -119,25 +124,29 @@ function staticRules(document, window) {
       while (panel && panel !== document.body && !/^(SECTION|ARTICLE|ASIDE|MAIN|DIALOG)$/.test(panel.tagName)) panel = panel.parentElement
       const ph = panel ? panel.getBoundingClientRect().height : vh
       const share = Math.round((el.clientHeight / ph) * 100)
-      if (vh >= 600 && (el.clientHeight < 240 || share < 40)) add('conversation-starved', el, `${el.clientHeight}px, ${share}% of its ${Math.round(ph)}px panel`)
+      // A short conversation that fits is not starved; one that hides messages in a small box is.
+      if (vh >= 600 && el.scrollHeight > el.clientHeight + 2 && (el.clientHeight < 240 || share < 40)) add('conversation-starved', el, `${el.clientHeight}px, ${share}% of its ${Math.round(ph)}px panel`)
     }
 
     const clamped = s.webkitLineClamp && s.webkitLineClamp !== 'none'
     if (ownText && !srOnly && !clamped && s.overflowX === 'hidden' && s.textOverflow !== 'ellipsis' && el.scrollWidth > el.clientWidth + 2) {
       add('text-cut-silently', el, `${el.scrollWidth - el.clientWidth}px of text hidden, no ellipsis`)
+    } else if (ownText && !srOnly && !clamped && s.overflowY === 'hidden' && el.scrollHeight > el.clientHeight + 4) {
+      add('text-cut-silently', el, `${el.scrollHeight - el.clientHeight}px of text cut off at the bottom, no line clamp`)
     }
 
     if (CONTROL.test(el.tagName) && r.right > 0 && (r.right > vw + 1 || r.left < -1) && r.top < vh && r.bottom > 0) {
       let p = el.parentElement
-      let excused = false
-      while (p && p !== document.body) {
+      let excused = shown(el).width < 1
+      while (!excused && p && p !== document.body) {
         if (/(auto|scroll)/.test(window.getComputedStyle(p).overflowX)) { excused = true; break }
         p = p.parentElement
       }
       if (!excused) add('control-off-screen', el, `spans ${Math.round(r.left)}–${Math.round(r.right)}px in a ${vw}px window`)
     }
 
-    if (vw <= 480 && /^(BUTTON|A|INPUT|SELECT)$/.test(el.tagName) && s.display !== 'inline' && (r.width < 24 || r.height < 24) && painted(el)) {
+    const labelled = el.tagName === 'INPUT' && /^(checkbox|radio)$/.test(el.type) && el.labels && el.labels.length > 0
+    if (vw <= 480 && /^(BUTTON|A|INPUT|SELECT)$/.test(el.tagName) && !labelled && s.display !== 'inline' && (r.width < 24 || r.height < 24) && painted(el)) {
       add('tap-target-small', el, `${Math.round(r.width)}×${Math.round(r.height)} px`)
     }
 
@@ -233,6 +242,8 @@ function settleProbe() {
   for (const m of p.muts) p.idle.add(m.target.nodeType === 1 ? m.target : m.target.parentElement)
   p.muts = []
   p.shifts = 0
+  p.focus = document.activeElement
+  p.scroll = [window.scrollX, window.scrollY]
 }
 
 // Runs inside the page, one second after the press: what changed, and how it was announced.
@@ -254,11 +265,16 @@ function readProbe(id) {
     return t && !p.idle.has(t) && !(m.type === 'attributes' && m.attributeName === 'data-ui-probe')
   })
   let self = false, live = false, opened = false, other = false, red = null
+  // Moving the focus elsewhere (an "Edit" that focuses a field) or scrolling the page is a visible answer.
+  const moved = (document.activeElement !== p.focus && document.activeElement !== btn && document.activeElement !== document.body)
+    || window.scrollX !== p.scroll[0] || window.scrollY !== p.scroll[1]
+  // Error-red by hue, light or dark theme: #d00000, #f87171, #cf6679 all qualify; orange and pink-grey do not.
+  const reddish = (c) => c.length >= 3 && c[0] > 140 && c[0] - c[1] > 70 && c[0] - c[2] > 60
   for (const m of real) {
     const t = el(m.target)
     if (btn && (btn === t || btn.contains(t))) { self = true; continue }
-    if (t.closest(LIVE)) live = true
     const added = [...m.addedNodes].map(el).filter(vis)
+    if (t.closest(LIVE) || added.some((a) => a.matches?.(LIVE) || a.querySelector?.(LIVE))) live = true
     if (added.some((a) => a.matches?.('[role=dialog],dialog,[role=menu],[role=listbox],[popover]') || a.querySelector?.('[role=dialog],dialog,[role=menu],[role=listbox]'))) opened = true
     if (m.type === 'attributes' && /^(open|aria-expanded|aria-pressed|aria-selected|aria-checked|aria-current|hidden)$/.test(m.attributeName)) opened = true
     for (const a of added.length ? added : vis(t) ? [t] : []) {
@@ -268,11 +284,36 @@ function readProbe(id) {
         if (!vis(x) || x.closest(LIVE)) continue
         const own = [...x.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim().length > 2)
         const c = (getComputedStyle(x).color.match(/[\d.]+/g) || []).map(Number)
-        if (own && c[0] > 150 && c[1] < 95 && c[2] < 95) { red = x.textContent.trim().slice(0, 70); break }
+        if (own && reddish(c)) { red = x.textContent.trim().slice(0, 70); break }
       }
     }
   }
-  return { self: self || !btn || !btn.isConnected, live, opened, other, red, shift: Math.round(p.shifts * 1000) / 1000 }
+  return { self: self || !btn || !btn.isConnected, live, opened, other, moved, red, shift: Math.round(p.shifts * 1000) / 1000 }
+}
+
+// Runs inside the page: the buttons a probe may press, in order, one per name. The listing and the re-find after a
+// reload both call it, so every filter — disabled, selected, drag handle, the project's skip selectors — holds for the
+// element actually pressed. `mark` tags the n-th one for the click.
+function probeCandidates({ max, skip, mark, id }) {
+  const scope = document.querySelector('main, [role=main]') || document.body
+  const out = []
+  const seen = new Set()
+  for (const b of scope.querySelectorAll('button, [role=button], input[type=submit], input[type=button]')) {
+    const r = b.getBoundingClientRect()
+    if (b.disabled || b.getAttribute('aria-disabled') === 'true' || r.width < 2 || r.height < 2) continue
+    // A tab already selected and a drag handle legitimately do nothing on a plain click.
+    if (/^(true|page)$/.test(b.getAttribute('aria-pressed') || b.getAttribute('aria-selected') || b.getAttribute('aria-current') || '')) continue
+    if (/grab|move/.test(getComputedStyle(b).cursor)) continue
+    if (skip.some((sel) => b.closest(sel))) continue
+    const names = [b.getAttribute('aria-label'), b.textContent, b.getAttribute('title'), b.value].filter(Boolean)
+    const words = names.join(' ').replace(/\s+/g, ' ').trim()
+    if (seen.has(words)) continue
+    seen.add(words)
+    if (out.length === mark) { b.setAttribute('data-ui-probe', id); b.scrollIntoView({ block: 'center' }) }
+    out.push({ label: (names[0] || '').replace(/\s+/g, ' ').trim().slice(0, 60) || '(no name)', words })
+    if (out.length >= max) break
+  }
+  return out
 }
 
 // ── Plumbing ─────────────────────────────────────────────────────────────────────────────────────────────────
@@ -296,9 +337,15 @@ function parseArgs(argv) {
 }
 
 // Config file, then flags. Unknown rule names and levels are refused: a typo would silently switch a rule off.
+const KEYS = ['url', 'serve', 'ready', 'routes', 'viewports', 'colorSchemes', 'interactions', 'failRequests', 'rules', 'ignore']
+const INTERACTION_KEYS = ['enabled', 'maxPerScreen', 'routes', 'skip']
 function loadConfig(args, cwd) {
   const file = args.config ?? (fs.existsSync(path.join(cwd, '.harness', 'ui-check.json')) ? '.harness/ui-check.json' : null)
   const fromFile = file ? JSON.parse(fs.readFileSync(path.resolve(cwd, file), 'utf8')) : {}
+  // Keys starting with $ or // are comments. Anything else unknown is a typo, and a typo must not switch a check off.
+  const unknown = (obj, known) => Object.keys(obj ?? {}).filter((k) => !known.includes(k) && !/^(\$|\/\/)/.test(k))
+  const bad = [...unknown(fromFile, KEYS), ...unknown(fromFile.interactions, INTERACTION_KEYS).map((k) => `interactions.${k}`)]
+  if (bad.length) throw new Error(`unknown key(s) in config: ${bad.join(', ')} — known: ${KEYS.join(', ')}; interactions: ${INTERACTION_KEYS.join(', ')}`)
   const cfg = {
     url: args.url ?? fromFile.url,
     serve: args.serve ?? fromFile.serve ?? null,
@@ -321,6 +368,13 @@ function loadConfig(args, cwd) {
   for (const [rule, level] of Object.entries(cfg.rules)) {
     if (!RULES[rule]) throw new Error(`unknown rule "${rule}" in config — known: ${Object.keys(RULES).join(', ')}`)
     if (!LEVELS.includes(level)) throw new Error(`rule "${rule}": level "${level}" is not one of ${LEVELS.join(', ')}`)
+  }
+  // An ignore entry names a known rule, and may narrow it with "where". Without a rule it would silence everything.
+  for (const i of cfg.ignore) {
+    const extra = unknown(i, ['rule', 'where'])
+    if (!i || typeof i !== 'object' || !RULES[i.rule] || extra.length || (i.where !== undefined && typeof i.where !== 'string')) {
+      throw new Error(`ignore entry ${JSON.stringify(i)}: needs a known "rule" and at most a string "where"`)
+    }
   }
   return cfg
 }
@@ -364,22 +418,42 @@ async function launch(pw) {
   }
 }
 
-async function reachable(url, ms) {
+async function reachable(url, ms, server) {
   const until = Date.now() + ms
   while (Date.now() < until) {
+    if (server && server.exited !== null) return false
     try { const r = await fetch(url, { redirect: 'manual' }); if (r.status < 500) return true } catch { /* not yet */ }
     await new Promise((r) => setTimeout(r, 500))
   }
   return false
 }
 
+function freePort() {
+  return new Promise((resolve, reject) => {
+    const srv = net.createServer()
+    srv.once('error', reject)
+    srv.listen(0, '127.0.0.1', () => { const { port } = srv.address(); srv.close(() => resolve(port)) })
+  })
+}
+
+// The server runs in a process group of its own, so the whole tree goes: TERM, then KILL if it is still there.
 function serveStart(cmd, cwd) {
   const child = spawn(cmd, { cwd, shell: true, detached: true, stdio: 'ignore' })
-  return () => { try { process.kill(-child.pid, 'SIGTERM') } catch { /* gone */ } }
+  const state = { exited: null }
+  child.on('exit', (code) => { state.exited = code ?? 'signal' })
+  const alive = () => { try { process.kill(-child.pid, 0); return true } catch { return false } }
+  state.stop = () => {
+    if (!alive()) return
+    try { process.kill(-child.pid, 'SIGTERM') } catch { return }
+    const until = Date.now() + 3000
+    while (alive() && Date.now() < until) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100)
+    if (alive()) { try { process.kill(-child.pid, 'SIGKILL') } catch { /* gone */ } }
+  }
+  return state
 }
 
 const routeUrl = (base, route) => (/^https?:/.test(route) ? route : new URL(route, base).href)
-const ignored = (cfg, v) => cfg.ignore.some((i) => (!i.rule || i.rule === v.rule) && (!i.where || `${v.screen} ${v.where}`.includes(i.where)))
+const ignored = (cfg, v) => cfg.ignore.some((i) => i.rule === v.rule && (!i.where || `${v.screen} ${v.where}`.includes(i.where)))
 
 // The first screen waits longer: a dev server compiles on first request (Vite took >15 s cold on Tama OS).
 // A hash route on an app already loaded is reached the way a user reaches it, without a reload: reloading a Vite
@@ -441,44 +515,30 @@ async function runInteractions(browser, cfg, found) {
   const routes = cfg.interactions.routes ?? cfg.routes
   const ctx = await browser.newContext({ viewport: { width, height } })
   for (const pattern of cfg.failRequests) await ctx.route(pattern, (r) => r.fulfill({ status: 500, body: '{"error":"ui-check: simulated failure"}', contentType: 'application/json' }))
-  ctx.on('page', (p) => { if (p !== ctx.pages()[0]) p.close().catch(() => {}) })
+  let popup = false
+  ctx.on('page', (p) => { if (p !== ctx.pages()[0]) { popup = true; p.close().catch(() => {}) } })
   const page = await ctx.newPage()
   page.on('dialog', (d) => d.dismiss().catch(() => {}))
-  let pressed = 0, skipped = 0
+  let download = false
+  page.on('download', (d) => { download = true; d.cancel().catch(() => {}) })
+  let pressed = 0, candidates = 0
+  const unsafe = [], failures = []
+  const opts = (mark, id) => ({ max: cfg.interactions.maxPerScreen, skip: cfg.interactions.skip, mark, id })
   for (const route of routes) {
     const screen = `${width}x${height} ${route || '/'}`
-    try { await openScreen(page, cfg, route, true) } catch { continue }
+    try { await openScreen(page, cfg, route, true) } catch (e) { failures.push(`${screen} — never became ready for the probe`); continue }
     // The buttons are listed once, then each is pressed on a freshly loaded screen so one answer never leaks into the next.
-    const labels = await page.evaluate(({ max, skip }) => {
-      const scope = document.querySelector('main, [role=main]') || document.body
-      const out = []
-      for (const b of scope.querySelectorAll('button, [role=button]')) {
-        const r = b.getBoundingClientRect()
-        if (b.disabled || b.getAttribute('aria-disabled') === 'true' || r.width < 2 || r.height < 2) continue
-        // A tab already selected and a drag handle legitimately do nothing on a plain click.
-        if (/^(true|page)$/.test(b.getAttribute('aria-pressed') || b.getAttribute('aria-selected') || b.getAttribute('aria-current') || '')) continue
-        if (/grab|move/.test(getComputedStyle(b).cursor)) continue
-        if (skip.some((sel) => b.matches(sel))) continue
-        const label = (b.getAttribute('aria-label') || b.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 60)
-        if (!label || out.includes(label)) continue
-        out.push(label)
-        if (out.length >= max) break
-      }
-      return out
-    }, { max: cfg.interactions.maxPerScreen, skip: cfg.interactions.skip })
-    for (const label of labels) {
-      if (UNSAFE.test(label)) { skipped++; continue }
-      try { await openScreen(page, cfg, route, true) } catch { continue }
+    const list = await page.evaluate(probeCandidates, opts(-1, ''))
+    candidates += list.length
+    for (let n = 0; n < list.length; n++) {
+      const { label, words } = list[n]
+      const why = unsafeReason(words)
+      if (why) { unsafe.push(`${screen} «${label}» (${why})`); continue }
+      try { await openScreen(page, cfg, route, true) } catch { failures.push(`${screen} «${label}» — screen not ready`); continue }
       const id = `b${pressed}`
-      const marked = await page.evaluate(({ label, id }) => {
-        const scope = document.querySelector('main, [role=main]') || document.body
-        for (const b of scope.querySelectorAll('button, [role=button]')) {
-          const l = (b.getAttribute('aria-label') || b.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 60)
-          if (l === label && !b.disabled) { b.setAttribute('data-ui-probe', id); b.scrollIntoView({ block: 'center' }); return true }
-        }
-        return false
-      }, { label, id })
-      if (!marked) continue
+      const again = await page.evaluate(probeCandidates, opts(n, id))
+      // After the reload the n-th candidate must be the same button, or the press would land on another one.
+      if (again[n]?.words !== words) { failures.push(`${screen} «${label}» — not found again after reload`); continue }
       await page.evaluate(armProbe)
       await page.waitForTimeout(500)
       await page.evaluate(settleProbe)
@@ -486,24 +546,26 @@ async function runInteractions(browser, cfg, found) {
       let chooser = false
       const onChooser = () => { chooser = true }
       page.once('filechooser', onChooser)
-      try { await page.locator(`[data-ui-probe="${id}"]`).click({ timeout: 2000 }) } catch { page.off('filechooser', onChooser); continue }
+      popup = false
+      download = false
+      try { await page.locator(`[data-ui-probe="${id}"]`).click({ timeout: 2000 }) } catch (e) { page.off('filechooser', onChooser); failures.push(`${screen} «${label}» — click failed: ${e.message.split('\n')[0]}`); continue }
       pressed++
       await page.waitForTimeout(1000)
       page.off('filechooser', onChooser)
       const r = await page.evaluate(readProbe, id).catch(() => ({ self: true }))
-      const navigated = page.url() !== before
+      const outside = page.url() !== before || chooser || popup || download
       const where = `«${label}»`
-      if (!(r.self || r.live || r.opened || r.other || navigated || chooser)) found.push({ rule: 'silent-click', screen, where, detail: 'nothing visible changed within 1 s' })
-      else if (r.other && !r.self && !r.live && !r.opened && !navigated && !chooser) found.push({ rule: 'change-unannounced', screen, where, detail: 'the screen changed, but neither the button, a status region nor a dialog said so' })
+      if (!(r.self || r.live || r.opened || r.other || r.moved || outside)) found.push({ rule: 'silent-click', screen, where, detail: 'nothing visible changed within 1 s' })
+      else if (r.other && !r.self && !r.live && !r.opened && !outside) found.push({ rule: 'change-unannounced', screen, where, detail: 'the screen changed, but neither the button, a status region nor a dialog said so' })
       if (r.red) found.push({ rule: 'error-unannounced', screen, where, detail: `red text outside any alert/status region: «${r.red}»` })
       if (r.shift > 0.05) found.push({ rule: 'abrupt-insert', screen, where, detail: `layout shift ${r.shift}` })
     }
   }
   await ctx.close()
-  return { pressed, skipped }
+  return { pressed, candidates, unsafe, failures }
 }
 
-function report(cfg, found, stats, notes) {
+function report(cfg, found, stats, notes, unverified) {
   const byRule = {}
   const seen = new Set()
   for (const v of found) {
@@ -514,7 +576,7 @@ function report(cfg, found, stats, notes) {
     if (level === 'off' || ignored(cfg, v)) continue
     ;(byRule[v.rule] ||= { level, hits: [] }).hits.push(v)
   }
-  const lines = [`ui-check: ${stats.screens} screen(s)${stats.pressed != null ? ` · ${stats.pressed} button(s) pressed${stats.unsafe ? `, ${stats.unsafe} skipped as unsafe` : ''}` : ''}`]
+  const lines = [`ui-check: ${stats.screens} screen(s)${stats.pressed != null ? ` · ${stats.pressed} button(s) pressed${stats.unsafe?.length ? `, ${stats.unsafe.length} not pressed as unsafe` : ''}` : ''}`]
   const order = Object.entries(byRule).sort(([, a], [, b]) => (a.level === b.level ? b.hits.length - a.hits.length : a.level === 'block' ? -1 : 1))
   for (const [rule, { level, hits }] of order) {
     lines.push(`${level.toUpperCase().padEnd(5)} ${rule} (${hits.length}) — ${RULES[rule]}`)
@@ -522,9 +584,13 @@ function report(cfg, found, stats, notes) {
     if (hits.length > 3) lines.push(`      … ${hits.length - 3} more`)
   }
   for (const n of notes) lines.push(`SKIP  ${n}`)
+  for (const u of (stats.unsafe ?? []).slice(0, 5)) lines.push(`SAFE  not pressed: ${u}`)
+  if ((stats.unsafe ?? []).length > 5) lines.push(`SAFE  … ${stats.unsafe.length - 5} more not pressed`)
   const blocking = order.filter(([, r]) => r.level === 'block').map(([rule]) => rule)
   const warnings = order.filter(([, r]) => r.level === 'warn').map(([rule]) => rule)
-  lines.push(blocking.length ? `RESULT: FAIL — blocking: ${blocking.join(', ')}` : `RESULT: PASS${warnings.length ? ` — ${warnings.length} rule(s) warn` : ''}`)
+  lines.push(blocking.length ? `RESULT: FAIL — blocking: ${blocking.join(', ')}`
+    : unverified.length ? `RESULT: NOT VERIFIED — ${unverified.join('; ')}`
+    : `RESULT: PASS${warnings.length ? ` — ${warnings.length} rule(s) warn` : ''}`)
   return { lines, blocking, warnings, byRule }
 }
 
@@ -536,15 +602,34 @@ async function main(argv) {
   }
   const cwd = process.cwd()
   const cfg = loadConfig(args, cwd)
+  // {port}: a free port picked now, so two worktrees checking the same project never share a server.
+  if (/\{port\}/.test(`${cfg.url} ${cfg.serve ?? ''}`)) {
+    const port = await freePort()
+    cfg.url = cfg.url.replaceAll('{port}', port)
+    if (cfg.serve) cfg.serve = cfg.serve.replaceAll('{port}', port)
+  }
   const pw = loadPlaywright(cwd)
   if (!pw) { console.log('ui-check: NOT VERIFIED — Playwright not found in the project or the global npm root (npm i -D playwright-core)'); return 3 }
   const axePath = resolveFrom('axe-core', cwd)
   const axeSrc = axePath ? fs.readFileSync(path.join(path.dirname(axePath), 'axe.min.js'), 'utf8') : null
   const notes = axeSrc || cfg.rules.accessibility === 'off' ? [] : ['accessibility — axe-core not found (npm i -D axe-core)']
+  const unverified = !axeSrc && cfg.rules.accessibility === 'block' ? ['accessibility is set to block and axe-core is missing'] : []
 
-  const stop = cfg.serve ? serveStart(cfg.serve, cwd) : () => {}
+  // With "serve", the app checked must be the one this run started: something already answering on the URL would be
+  // checked in its place (an orphan, the main checkout's dev server, another worktree).
+  if (cfg.serve && (await reachable(cfg.url, 500))) {
+    console.log(`ui-check: NOT VERIFIED — something already answers at ${cfg.url} before "serve" started; stop it, or use {port}`)
+    return 3
+  }
+  const server = cfg.serve ? serveStart(cfg.serve, cwd) : null
+  const stop = () => server?.stop()
+  const onSignal = (sig) => { stop(); process.exit(sig === 'SIGINT' ? 130 : 143) }
+  for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, onSignal)
   try {
-    if (!(await reachable(cfg.url, cfg.serve ? 60000 : 5000))) { console.log(`ui-check: NOT VERIFIED — ${cfg.url} did not answer${cfg.serve ? ' after starting the server' : ' (start the app, or set "serve")'}`); return 3 }
+    if (!(await reachable(cfg.url, cfg.serve ? 60000 : 5000, server))) {
+      console.log(`ui-check: NOT VERIFIED — ${cfg.url} did not answer${server?.exited != null ? ` ("serve" exited: ${server.exited})` : cfg.serve ? ' after starting the server' : ' (start the app, or set "serve")'}`)
+      return 3
+    }
     let browser
     try { browser = await launch(pw) } catch (e) { console.log(`ui-check: NOT VERIFIED — no browser could start: ${e.message.split('\n')[0]}`); return 3 }
     const found = []
@@ -557,18 +642,22 @@ async function main(argv) {
       if (cfg.interactions.enabled) {
         const r = await runInteractions(browser, cfg, found)
         stats.pressed = r.pressed
-        stats.unsafe = r.skipped
+        stats.unsafe = r.unsafe
+        notes.push(...r.failures)
+        if (r.candidates > r.unsafe.length && r.pressed === 0) unverified.push('interactions are on and no button could be pressed')
       }
     } finally {
       await browser.close()
     }
     notes.push(...notReady)
-    const rep = report(cfg, found, stats, notes)
-    if (args.json) fs.writeFileSync(args.json, JSON.stringify({ stats, blocking: rep.blocking, warnings: rep.warnings, skipped: notes, violations: rep.byRule }, null, 1))
-    if (!args.quiet || rep.blocking.length) console.log(rep.lines.join('\n'))
-    return rep.blocking.length ? 2 : 0
+    if (notReady.length) unverified.push(`${notReady.length} screen(s) never became ready`)
+    const rep = report(cfg, found, stats, notes, unverified)
+    if (args.json) fs.writeFileSync(args.json, JSON.stringify({ stats, blocking: rep.blocking, warnings: rep.warnings, unverified, skipped: notes, violations: rep.byRule }, null, 1))
+    if (!args.quiet || rep.blocking.length || unverified.length) console.log(rep.lines.join('\n'))
+    return rep.blocking.length ? 2 : unverified.length ? 3 : 0
   } finally {
     stop()
+    for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.off(sig, onSignal)
   }
 }
 
@@ -576,4 +665,4 @@ if (require.main === module) {
   main(process.argv.slice(2)).then((code) => process.exit(code), (e) => { console.log(`ui-check: error — ${e.message}`); process.exit(1) })
 }
 
-module.exports = { RULES, LEVELS, UNSAFE, staticRules, loadConfig, report, main }
+module.exports = { RULES, LEVELS, UNSAFE, unsafeReason, staticRules, probeCandidates, loadConfig, report, main }

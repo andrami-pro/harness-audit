@@ -24,6 +24,12 @@
   </section>
   <div style="height:900px">long content that scrolls under the tab bar</div>
   <a href="#a" style="position:absolute;top:750px;left:20px;padding:12px">Row link under the pinned bar</a>
+  <!-- a short conversation that fits is not starved -->
+  <section style="height:600px"><div role="log" aria-label="New thread"><p>only one message so far</p></div></section>
+  <!-- a carousel: the next slide's link is clipped away by overflow hidden, not off screen -->
+  <div style="width:300px;overflow:hidden;white-space:nowrap"><div style="display:inline-block;width:300px">Slide one</div><div style="display:inline-block;width:300px"><a href="#s2">Slide two link</a></div></div>
+  <!-- a native checkbox tapped through its label -->
+  <label style="display:inline-block;padding:12px"><input type="checkbox"> Remember me</label>
 </main>
 <nav style="position:fixed;bottom:0;left:0;right:0;height:60px;background:#fff;display:flex"><a href="#home" style="flex:1;padding:18px">Home</a><a href="#more" style="flex:1;padding:18px">More</a></nav>
 </body></html>
