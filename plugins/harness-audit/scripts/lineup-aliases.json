@@ -1,5 +1,5 @@
 {
-  "_comment": "Tabla de correcciones del asesor de line-up (lineup-advise.js). `aliases`: nombre tal como aparece en una fuente (AA slug, LMArena model_name, SWE-bench model_display, id de OpenRouter) → id de Pi (provider/id). Solo hace falta cuando el normalizador no acierta solo. `providers`: política de datos por proveedor con la fuente que la respalda; `unknown` es la respuesta honesta cuando no hay documento que citar. `notes`: advertencias que el informe copia literalmente junto al modelo. `providers.<x>.roles`: lista de roles a los que ese proveedor puede aspirar; ausente = todos. Es la forma de decir 'esta cuota no aguanta trabajo largo'.",
+  "_comment": "Tabla de correcciones del asesor de line-up (lineup-advise.js). `aliases`: nombre tal como aparece en una fuente (AA slug, LMArena model_name, SWE-bench model_display, id de OpenRouter) → id de Pi (provider/id). Solo hace falta cuando el normalizador no acierta solo. `providers`: política de datos por proveedor con la fuente que la respalda; `unknown` es la respuesta honesta cuando no hay documento que citar. `notes`: advertencias que el informe copia literalmente junto al modelo. `providers.<x>.roles`: lista de roles a los que ese proveedor puede aspirar; ausente = todos. Es la forma de decir 'esta cuota no aguanta trabajo largo'. `providers.<x>.billing: \"subscription\"`: la cuota ya está pagada, el precio por token no se cobra aparte, así que el asesor no lo penaliza por precio. `providers.<x>.prefer: <n>`: margen en puntos de score a favor de ese proveedor (los z-scores van de -3 a 3; un rival de fuera solo gana por encima de ese margen).",
   "aliases": {
     "kimi-k3-max": "opencode-go/kimi-k3",
     "Kimi K3 (max)": "opencode-go/kimi-k3",
@@ -32,7 +32,10 @@
     },
     "opencode-go": {
       "policy": "unknown",
-      "source": "opencode.ai/docs/zen — no publica política de retención por modelo"
+      "source": "opencode.ai/docs/zen — no publica política de retención por modelo",
+      "billing": "subscription",
+      "prefer": 1.0,
+      "why": "Cuota semanal de OpenCode Go, ya pagada: el precio por token que publican AA/OpenRouter no se cobra aparte, y lo que limita es el cupo, no el dólar. Es el proveedor por defecto del harness, así que el asesor lo prefiere salvo que otro modelo sea claramente mejor (prefer 1.0 = un rival de fuera tiene que ser una desviación mejor para ganarle el asiento)."
     },
     "openrouter": {
       "policy": "unknown",

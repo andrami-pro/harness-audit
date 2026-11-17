@@ -21,7 +21,7 @@
 //   node model-lineup.js ui [--global <path>]
 //     Editor de la matriz rol x harness. Sin TTY imprime la matriz y valida, sin editar.
 //
-//   node model-lineup.js advise [--offline] [--no-probe]
+//   node model-lineup.js advise [--offline] [--no-probe] [--only <provider[,provider]>]
 //     Asesor semanal (lineup-advise.js): rankings × precio × datos → ~/.agents/lineup-advice.md
 //
 //   node model-lineup.js ollama-sync
@@ -415,7 +415,10 @@ function main() {
     // Mismo motivo que `ui`: el asesor hace red y tarda un minuto; nadie que haga `require` de este
     // archivo para leer un id debe cargarlo.
     process.argv = [process.argv[0], require('node:path').join(__dirname, 'lineup-advise.js'), ...argv];
-    return require('./lineup-advise.js');
+    // Llamada explícita: con `require`, `require.main` sigue siendo este archivo, así que el guard
+    // `require.main === module` de lineup-advise.js no dispara y `advise` no hacía nada.
+    const advise = require('./lineup-advise.js');
+    return advise.main();
   }
   if (cmd === 'ui' || cmd === 'ollama-sync') {
     // The editor lives in its own file: it is TTY code (raw mode, redraws) and this one is required

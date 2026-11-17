@@ -17,7 +17,10 @@ serves them) — against `pi --list-models`, the only ids a line-up can name. Pe
 (`PROFILES` in `plugins/harness-audit/scripts/lineup-advise.js`: which metrics count, minimum context / output, whether strict
 JSON or tools are required, how much price weighs) and prints the top three plus a diff against the
 current line-up. The design seat `creativo` is ranked primarily on LMArena WebDev (`lm_webdev`), with
-intelligence and coding as support — “best at coding” and “best at UI” are not the same leaderboard. Two
+intelligence and coding as support — “best at coding” and “best at UI” are not the same leaderboard.
+Artificial Analysis retired its `/api/v2/data/*` endpoints on 2026-11-04 (HTTP 410); until that call is
+migrated the advisor reads its last cache, the AA `coding` index arrives empty, and `critic` ranks on
+LMArena coding instead. The report says so in its **Fuentes** block — a dead source is never silent. Two
 things it refuses on principle:
 
 - **A provider that retains prompts is never suggested for a role that sees code** while the repo's
@@ -31,6 +34,15 @@ things it refuses on principle:
   only; OpenRouter's free tier (20 rpm, 50-1,000/day) for `explainer` and `preflight`; ollama only for
   models actually pulled. A free model is not a free afternoon of implementation. The lists live in
   `plugins/harness-audit/scripts/lineup-aliases.json` (`providers.<x>.roles`, `freeTierRoles`).
+- **A subscription seat is not a per-token seat.** `providers.<x>.billing: "subscription"` (today
+  `opencode-go`, the harness default) means that quota is already paid: the advisor scores the seat
+  without the per-token price, because charging it there punishes exactly the models you intend to use.
+  `providers.<x>.prefer` adds an explicit margin on top (`opencode-go` ships with `1.0`, so an outsider
+  has to be about one standard deviation better to take the chair). Both live in
+  `lineup-aliases.json`, not in code. `bin/lineup-advise --only opencode-go` (or a comma list) writes the
+  report closed to those providers, with no foreign candidates and no OpenRouter free-tier table.
+  Without that flag a cheaper-looking OpenRouter or Anthropic model wins most seats on catalogue
+  volume, which is how the report gets ignored.
 
 Names differ per source (`claude-opus-5-high` / `Claude Opus 5 (High)` / `anthropic/claude-opus-5`);
 `normalize()` reduces them to one key and `plugins/harness-audit/scripts/lineup-aliases.json` catches the rest. Whatever still

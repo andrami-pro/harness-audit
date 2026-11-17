@@ -7,6 +7,11 @@
 // actual. No aplica nada: sugiere, y `/line-up` en Pi (o `bin/lineup`) aplica.
 //
 //   node lineup-advise.js [--out <dir>] [--project <path>] [--offline] [--fixtures <dir>] [--no-probe] [--json]
+//                          [--only opencode-go[,opencode]]
+//
+//   --only  cierra el informe a esos proveedores (sin la lista de rivales ajenos).
+//           La preferencia normal vive en lineup-aliases.json: `providers.<p>.billing = "subscription"`
+//           (cuota ya pagada: el precio por token no cuenta) y `.prefer = <puntos>` (margen a favor).
 //
 // Fuentes (cada una aislada: si falla, el informe lo dice y sigue con las demás):
 //   AA        artificialanalysis.ai/api/v2/data/llms/models   (key gratuita, 100 req/día; 1 req aquí)
@@ -61,7 +66,7 @@ const PROFILES = {
   orchestrator: { metrics: ['agentic', 'lm_agent'],                            minCtx: 500_000, price: 0.7, sensitive: true, tools: true },
   implementer:  { metrics: ['coding', 'swe', 'lm_coding'],                     minOut: 64_000,  price: 0.7, sensitive: true, tools: true },
   reviewer:     { metrics: ['coding', 'swe', 'lm_coding'],                     minOut: 32_000,  price: 0.7, sensitive: true, tools: true },
-  critic:       { metrics: ['coding'],                                         minCtx: 128_000, price: 1.2, sensitive: true },
+  critic:       { metrics: ['coding', 'lm_coding'],                            minCtx: 128_000, price: 1.2, sensitive: true },
   scorer:       { metrics: ['intelligence'],                                   json: true,      price: 1.2 },
   judge:        { metrics: ['intelligence'],                                   json: true,      price: 0.3 },
   preflight:    { metrics: [],                                                 tools: true,     price: 2.0 },
@@ -383,10 +388,19 @@ function rankRole(role, models, sensitivity, excludeFamilies) {
     const zs = p.metrics.map((k) => z[k](m)).filter((v) => v != null);
     if (p.metrics.length && !zs.length) continue;         // sin ninguna métrica no hay ranking, solo adivinar
     const quality = zs.length ? zs.reduce((a, b) => a + b, 0) / zs.length : 0;
-    const priceOut = m.price_out == null ? 5 : m.price_out;  // desconocido se trata como caro, no como gratis
-    const score = quality - p.price * Math.log10(1 + priceOut);
+    // Facturación del proveedor (`billing` en lineup-aliases.json): `subscription` es una cuota ya
+    // pagada — el precio por token no sale del bolsillo otra vez, así que penalizarlo por precio
+    // castiga justo lo que el usuario quiere usar. Ahí el límite es la cuota, no el dólar. El resto
+    // paga lista. `prefer` da un margen explícito a ese proveedor sin cerrarle la puerta a un rival
+    // claramente mejor; sin él, con 365 modelos de OpenRouter en catálogo, los otros proveedores
+    // ganan casi todos los asientos por volumen, no por mérito.
+    const bill = (ALIASES.providers || {})[m.provider] || {};
+    const subscription = bill.billing === 'subscription';
+    const priceOut = subscription ? 0 : m.price_out == null ? 5 : m.price_out;  // desconocido se trata como caro, no como gratis
+    const score = quality - p.price * Math.log10(1 + priceOut) + (bill.prefer || 0);
     if (m.data.policy === 'unknown' && p.sensitive) why.push('política de datos no verificada');
-    if (m.price_out == null) why.push('precio desconocido');
+    if (subscription) why.push('cuota de suscripción: sin coste por token');
+    else if (m.price_out == null) why.push('precio desconocido');
     if (m.provider === 'nvidia') why.push('cuota NIM: 40 rpm');
     if (m.free && m.provider === 'openrouter') why.push('free OR: 20 rpm, 50-1000/día');
     out.push({ m, score, quality, zs: zs.length, why });
@@ -410,6 +424,11 @@ function render(result) {
   const { sources, current, sensitivity, suggestions, freeOR, unmapped, probe } = result;
   L.push(`# Asesor de line-up — ${TODAY}`, '');
   L.push(`Sensibilidad del repo: **${sensitivity}**${sensitivity === 'client' ? ' (los roles que ven código no reciben proveedores que retienen prompts)' : ''}.`, '');
+  // La preferencia no se escribe a mano aquí: sale de los alias, que es donde vive la facturación.
+  const preferred = Object.entries(ALIASES.providers || {}).filter(([, v]) => v.billing === 'subscription' || v.prefer);
+  if (preferred.length) {
+    L.push(`Proveedor preferido: ${preferred.map(([k, v]) => `**${k}**${v.billing === 'subscription' ? ' (cuota de suscripción, el token no se paga aparte)' : ''}${v.prefer ? ` +${v.prefer} al score` : ''}`).join(', ')}. Uno de fuera solo le gana si supera ese margen.`, '');
+  }
   L.push('## Fuentes', '');
   for (const [k, s] of Object.entries(sources)) {
     L.push(`- ${k}: ${s.ok ? `${s.rows.length} filas` : `**FALLÓ** — ${s.error}`}${s.note ? ` _(${s.note})_` : ''}${s.fetchedAt ? ` · ${s.fetchedAt.slice(0, 16)}` : ''}`);
@@ -423,7 +442,8 @@ function render(result) {
     const top = suggestions[role] && suggestions[role][0];
     if (!top) { L.push(`| ${role} | ${cur} | _(sin candidato que cumpla el perfil)_ | |`); continue; }
     const same = top.m.id === cur;
-    const reason = same ? 'ya es el mejor según las fuentes' : `${p2(top, PROFILES[role].metrics)}${top.why.length ? ` · ⚠ ${top.why.join(', ')}` : ''}`;
+    const off = preferred.length && !preferred.some(([k]) => k === top.m.provider) ? 'fuera de la cuota · ' : '';
+    const reason = same ? 'ya es el mejor según las fuentes' : `${off}${p2(top, PROFILES[role].metrics)}${top.why.length ? ` · ⚠ ${top.why.join(', ')}` : ''}`;
     L.push(`| ${role} | ${cur} | ${same ? '=' : `**${top.m.id}**`} | ${reason} |`);
   }
   L.push('');
@@ -439,13 +459,17 @@ function render(result) {
     L.push('');
   }
 
-  L.push('## Gratis en OpenRouter hoy', '', 'Límites: 20 req/min; 50 req/día sin compra, 1.000/día con ≥ $10 acumulados (de por vida). Una cuenta en negativo bloquea también los gratis.', '');
-  L.push('| id | ctx / out | sirve | datos | JSON | tools | nota |', '|---|---|---|---|---|---|---|');
-  for (const f of freeOR.sort((a, b) => (b.ctx || 0) - (a.ctx || 0))) {
-    const json = f.params.includes('structured_outputs') ? 'strict' : f.params.includes('response_format') ? 'format' : '—';
-    L.push(`| \`${f.id}\` | ${K(f.ctx || 0)} / ${K(f.max_out || 0)} | ${f.provider || '?'}${f.quant && f.quant !== 'unknown' ? ` ${f.quant}` : ''} | ${f.data.policy} | ${json} | ${f.params.includes('tools') ? 'sí' : '—'} | ${f.note ? f.note : ''} |`);
+  // Con `--only` fuera de OpenRouter, la tabla de gratis de OpenRouter no pinta nada: es la lista de
+  // proveedores que el informe acaba de cerrar.
+  if (!result.only || result.only.includes('openrouter')) {
+    L.push('## Gratis en OpenRouter hoy', '', 'Límites: 20 req/min; 50 req/día sin compra, 1.000/día con ≥ $10 acumulados (de por vida). Una cuenta en negativo bloquea también los gratis.', '');
+    L.push('| id | ctx / out | sirve | datos | JSON | tools | nota |', '|---|---|---|---|---|---|---|');
+    for (const f of freeOR.sort((a, b) => (b.ctx || 0) - (a.ctx || 0))) {
+      const json = f.params.includes('structured_outputs') ? 'strict' : f.params.includes('response_format') ? 'format' : '—';
+      L.push(`| \`${f.id}\` | ${K(f.ctx || 0)} / ${K(f.max_out || 0)} | ${f.provider || '?'}${f.quant && f.quant !== 'unknown' ? ` ${f.quant}` : ''} | ${f.data.policy} | ${json} | ${f.params.includes('tools') ? 'sí' : '—'} | ${f.note ? f.note : ''} |`);
+    }
+    L.push('');
   }
-  L.push('');
 
   if (probe) {
     L.push('## Probe del line-up sugerido', '', '```', probe.trim(), '```', '');
@@ -475,13 +499,19 @@ async function main() {
     offline: argv.includes('--offline'), fixtures: opt(argv, '--fixtures', null),
     out: opt(argv, '--out', AGENTS_DIR), project: opt(argv, '--project', path.join(process.cwd(), '.agents', 'model-lineup.json')),
     probe: argv.includes('--probe') || (!argv.includes('--no-probe') && !argv.includes('--offline')), json: argv.includes('--json'),
+    only: opt(argv, '--only', null),
   };
   const [aa, lmarena, swebench, openrouter] = await Promise.all([srcAA(opts), srcLMArena(opts), srcSWE(opts), srcOpenRouter(opts)]);
   const pi = srcPi(opts);
   const sources = { AA: aa, LMArena: lmarena, 'SWE-bench': swebench, OpenRouter: openrouter, Pi: pi };
   if (!pi.ok) { process.stderr.write(`lineup-advise: sin catálogo de Pi no hay nada que sugerir — ${pi.error}\n`); process.exit(1); }
 
-  const { models, unmapped, freeOR } = buildTable({ aa, lmarena, swebench, openrouter }, pi.rows);
+  const table = buildTable({ aa, lmarena, swebench, openrouter }, pi.rows);
+  // `--only opencode-go[,opencode]`: informe cerrado a esos proveedores. La preferencia de arriba ya
+  // empuja hacia la cuota; esto es para cuando se quiere la lista sin ruido de proveedores ajenos.
+  const onlySet = opts.only ? new Set(opts.only.split(',').map((s) => s.trim()).filter(Boolean)) : null;
+  const models = onlySet ? table.models.filter((m) => onlySet.has(m.provider)) : table.models;
+  const { unmapped, freeOR } = table;
   const { pi: current, sensitivity } = currentLineup(opts.project);
 
   // Orden de resolución: implementer y reviewer primero, porque los demás asientos se definen contra
@@ -507,7 +537,7 @@ async function main() {
     fs.unlinkSync(tmp);
   }
 
-  const result = { date: TODAY, sensitivity, sources: Object.fromEntries(Object.entries(sources).map(([k, s]) => [k, { ok: s.ok, rows: s.rows, error: s.error, note: s.note, fetchedAt: s.fetchedAt }])), current, suggestions, freeOR, unmapped, probe };
+  const result = { date: TODAY, only: onlySet ? [...onlySet] : null, sensitivity, sources: Object.fromEntries(Object.entries(sources).map(([k, s]) => [k, { ok: s.ok, rows: s.rows, error: s.error, note: s.note, fetchedAt: s.fetchedAt }])), current, suggestions, freeOR, unmapped, probe };
   fs.mkdirSync(opts.out, { recursive: true });
   const md = render(result);
   fs.writeFileSync(path.join(opts.out, 'lineup-advice.md'), md);
@@ -523,4 +553,8 @@ async function main() {
 
 if (require.main === module) main().catch((e) => { process.stderr.write(`lineup-advise: ${e.stack || e}\n`); process.exit(1); });
 
-module.exports = { normalize, PROFILES, INDEPENDENT_OF, rankRole, buildTable, render, srcAA, srcLMArena, srcSWE, srcOpenRouter, srcPi };
+// `main` se exporta porque `model-lineup.js advise` carga este archivo con `require` (para no lanzar
+// la red desde un import): con `require.main` apuntando a model-lineup.js, el guard de abajo nunca
+// dispara, así que ese camino tiene que llamarla a mano. Sin esto, `advise` por CLI no hacía nada y
+// salía con 0 — silencio que parece éxito.
+module.exports = { main, normalize, PROFILES, INDEPENDENT_OF, rankRole, buildTable, render, srcAA, srcLMArena, srcSWE, srcOpenRouter, srcPi };

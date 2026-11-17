@@ -4,6 +4,26 @@ Every change to the harness that an operator can notice, newest first. Each entr
 not how it is built. Minor internal fixes live in the commits; they make the list only when they
 change behavior.
 
+## 2026-11-12 · The advisor stops recommending models you do not pay for that way
+
+The daily line-up report had stopped being usable: almost every suggestion was an OpenRouter or
+Anthropic model, priced per token, when the harness runs on the OpenCode Go quota.
+
+- **A paid-for quota is not billed twice.** `providers.opencode-go` is marked
+  `billing: "subscription"` in `lineup-aliases.json`: the advisor no longer charges its per-token price
+  in the score, so the Go models compete on quality instead of losing to whichever outsider is
+  superficially cheaper. `prefer: 1.0` gives the Go side a one-standard-deviation margin, which is
+  enough for roughly nine seats in ten while still letting a clearly better outsider win and say so.
+- **The report says who it prefers and why**, from the same alias table, so the rule cannot drift from
+  the ranking it explains. A suggestion from outside the quota is marked `fuera de la cuota`.
+- **`--only opencode-go`** (or a comma list) writes a report closed to those providers, with no foreign
+  candidates and no OpenRouter free-tier table, for when the operator wants the list without noise.
+- **`critic` is no longer empty.** Its profile ranked only on the AA coding index, which the retired AA
+  endpoint returns empty, so the seat had no candidate at all; it now falls back to LMArena coding.
+- **`model-lineup.js advise` actually runs.** It loaded the advisor with `require`, which skipped the
+  `require.main` guard, so the CLI printed nothing and exited 0 — silence that read as success. The
+  extension path was unaffected.
+
 ## 2026-10-28 · 3.1 — confirmed mission routing (Pi) and a daily design line-up
 
 **The operator no longer routes missions by hand on Pi.** Three changes, one design rule:
