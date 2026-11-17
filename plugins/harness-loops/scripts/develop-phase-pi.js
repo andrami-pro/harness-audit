@@ -23,13 +23,18 @@
 //   node develop-phase-pi.js --task "<task>" [--max-iter 5] [--no-preparer] [--no-commit]
 //                            [--preflight "<command>"] [--no-jev] [--run-dir <path>] [--no-tmux]
 //                            [--seams propose | --seams "<one per line>"] [--no-tdd] [--no-spec-review]
-//                            [--allow-skipped "<substring>"]… [--prd <path>]
+//                            [--allow-skipped "<substring>"]… [--prd <path>] [--ui-check ["<command>"]]
 //   --seams propose   stop after the analyst and return its seams in the result, for the human to agree once
 //   --seams "<list>"  the agreed seams: the analyst copies them or stops on BLOQUEO/BLOCKER; every seat gets them
 //   --no-tdd          the implementer is not asked to work test-first (default: test-first, one test per seam)
 //   --no-spec-review  no spec axis: the code reviewer alone approves (default: both axes, the spec model from
 //                     harness.pi.spec or, unset, the reviewer's)
 //   --allow-skipped   repeatable: a preflight SKIP line containing it (any case) is reported, not counted
+//   --ui-check        after every implementation, run the project's UI rules in a real browser (PRD-006): the command
+//                     given, or ui-check.js next to this script (it reads .harness/ui-check.json). Exit 2 (a BLOCK rule)
+//                     sends the change back with no review that round; WARN lines reach the code reviewer; exit 3 (could
+//                     not run, or ran in part) is NOT VERIFIED, accepted only by `--allow-skipped ui-check`; any other
+//                     exit is FAILED. The loop runs it itself — no seat relays it.
 // Progress goes to stderr, one line per event; the result (handoff JSON) goes to stdout. Every seat's
 // prompt and full transcript are kept under the run dir printed at start:
 //   <name>.live.log  — that seat's actions as they happen (tool calls, thinking, final answer)
@@ -38,8 +43,8 @@
 // Unless --no-tmux, a detached tmux session (never an existing pane — see scripts/dp-tmux.sh) opens a
 // live view: bus.log on top, the currently active seat's log on the bottom. The attach command is
 // printed once, at start. A missing tmux, or any failure starting it, is silent and never fails the run.
-// Exit 0 — approved and preflight PASS. Exit 1 — anything else (blocked, rejected, crash, preflight not
-// green). Exit 2 — line-up refused (D25a) or usage error.
+// Exit 0 — approved and preflight PASS (and, with --ui-check, ui-check PASS or accepted). Exit 1 — anything else
+// (blocked, rejected, crash, preflight or ui-check not green). Exit 2 — line-up refused (D25a) or usage error.
 
 'use strict';
 
@@ -60,7 +65,7 @@ const READ_ONLY = 'read,grep,find,ls';
 
 // ── args ─────────────────────────────────────────────────────────────────────────────────────────────
 function parseArgs(argv) {
-  const a = { task: '', maxIter: 5, preparer: true, commit: true, preflight: null, jev: true, runDir: null, tmux: true, seams: null, tdd: true, allowSkipped: [], spec: true, prd: null };
+  const a = { task: '', maxIter: 5, preparer: true, commit: true, preflight: null, jev: true, runDir: null, tmux: true, seams: null, tdd: true, allowSkipped: [], spec: true, prd: null, uiCheck: null };
   for (let i = 0; i < argv.length; i += 1) {
     const k = argv[i];
     if (k === '--task') a.task = argv[++i] || '';
@@ -76,6 +81,8 @@ function parseArgs(argv) {
     else if (k === '--no-spec-review') a.spec = false;
     else if (k === '--allow-skipped') a.allowSkipped.push(argv[++i] || '');
     else if (k === '--prd') a.prd = argv[++i] || null;
+    // The command is optional: a following flag, or nothing, means the ui-check.js this plugin ships.
+    else if (k === '--ui-check') a.uiCheck = argv[i + 1] && !argv[i + 1].startsWith('--') ? argv[++i] : `node ${JSON.stringify(path.join(__dirname, 'ui-check.js'))}`;
     else throw new Error(`unknown argument: ${k}`);
   }
   if (!a.task.trim()) throw new Error('--task is required');
@@ -348,6 +355,27 @@ function runPreflight(cmd, runDir, allow = []) {
   return { state, passed, exitCode, skipped, allowedSkips };
 }
 
+// ui-check, run by the loop itself (PRD-006). It reads the exit code and the BLOCK/WARN lines — no model reads them.
+function runUiCheck(cmd, runDir, iteration) {
+  const r = spawnSync('sh', ['-c', cmd], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, timeout: 30 * 60 * 1000 });
+  const report = `${r.stdout || ''}${r.stderr || ''}`.trim();
+  fs.writeFileSync(path.join(runDir, `ui-check-${iteration}.out.txt`), report);
+  const rules = (prefix) => report.split('\n').filter((l) => l.startsWith(prefix)).map((l) => l.slice(prefix.length).trim().split(/\s/)[0])
+  return { exitCode: r.status, blocking: rules('BLOCK'), warnings: rules('WARN'), report };
+}
+const uiFirstLine = (ui) => (ui && ui.report ? ui.report.split('\n')[0] : 'ui-check no devolvió salida');
+// The state the handoff carries. Exit 3 is a check that did not run; anything but 0/2/3 is a failure nothing accepts.
+function uiStateOf(ui, blocked, allowSkipped) {
+  if (!ui) return { state: null, ok: true, accepted: false };
+  const result = ui.report.split('\n').filter((l) => l.startsWith('RESULT')).pop();
+  const state = blocked ? `BLOCK (${ui.blocking.join(', ')})`
+    : ui.exitCode === 0 ? `PASS${ui.warnings.length ? ` (${ui.warnings.length} regla(s) en aviso: ${ui.warnings.join(', ')})` : ''}`
+      : ui.exitCode === 3 ? `NO VERIFICADO — ${result || uiFirstLine(ui)}`
+        : `FAILED (exit ${ui.exitCode ?? '?'}) — ${uiFirstLine(ui)}`;
+  const accepted = ui.exitCode === 3 && allowSkipped.some((s) => s.trim().toLowerCase() === 'ui-check');
+  return { state, ok: state.startsWith('PASS') || accepted, accepted };
+}
+
 // ── commit ───────────────────────────────────────────────────────────────────────────────────────────
 // The message is the one thing a model writes here; the git calls are code. A message that does not
 // look like one conventional line is replaced, not trusted.
@@ -431,7 +459,7 @@ async function main() {
     handoff: { status: 'crash', summary: `El ${who} no devolvió resultado en la iteración ${iteration}`, evidence: [], blocker: `${lastSeatFailure ? `${lastSeatFailure} — ` : ''}ver ${runDir}/${who}*.live.log` },
     nextStep: 'Cambios del implementer posiblemente a medias: git status antes de relanzar',
   });
-  const finish = (r) => { process.stdout.write(`${JSON.stringify(r, null, 2)}\n`); return r.approved && r.preflightPassed ? 0 : 1; };
+  const finish = (r) => { process.stdout.write(`${JSON.stringify(r, null, 2)}\n`); return r.handoff && r.handoff.status === 'complete' ? 0 : 1; };
 
   const implementerRole = firstExisting(root, ['.pi/agents/implementer.md', '.claude/agents/implementer.md']);
   const reviewerRole = firstExisting(root, ['.pi/agents/reviewer.md', '.claude/agents/reviewer.md']);
@@ -541,11 +569,19 @@ ${reads ? `Lee: ${reads}.` : ''}`
   let axes = null;
   let iteration = 0;
 
+  let lastUi = null;
+  let uiBlocked = false;
   while (!approved && iteration < a.maxIter) {
     iteration += 1;
     log(`── Iteración ${iteration}/${a.maxIter} · Implement`);
-    // Each rejected axis reaches the implementer as its own section; an approved one is left out.
-    const correction = iteration > 1
+    // Each rejected axis reaches the implementer as its own section; an approved one is left out. A UI block comes
+    // first, with the review's open FAILs still attached when the last review rejected.
+    const correction = iteration > 1 && uiBlocked
+      ? `\n\n⚠ ui-check BLOQUEÓ el cambio antes de la revisión. Corrige lo que nombran sus líneas BLOCK — cada una da la
+regla, la pantalla y el elemento. Vuelve a lanzarlo para confirmar: ${a.uiCheck}\n\n## ui-check\n${lastUi.report}${
+        axes && !axes.code.approved ? `\n\n## La última revisión también RECHAZÓ; sus [FAIL] siguen en pie. Code reviewer:\n${lastReview}` : ''}${
+        axes && axes.spec && !axes.spec.approved ? `\n\n## Spec reviewer:\n${lastSpec}` : ''}`
+      : iteration > 1
       ? `\n\n⚠ La revisión RECHAZÓ. Corrige SOLO los [FAIL].${!axes || !axes.code.approved ? `\n\n## El code reviewer RECHAZÓ (rúbrica). Razones:\n${lastReview}` : ''}${
         axes && axes.spec && !axes.spec.approved ? `\n\n## El spec reviewer RECHAZÓ (tarea, PRD, seams). Razones:\n${lastSpec}` : ''}`
       : '';
@@ -567,12 +603,28 @@ Al terminar: lista archivos creados/modificados + descripción de cada cambio.`,
       lastReview = '[FAIL] diff — el implementer no dejó ningún cambio en el worktree\nRECHAZADO';
       lastSpec = '';
       axes = null; // no review ran: the correction carries the diff [FAIL] as the code section
+      uiBlocked = false; // ui-check did not run on an empty diff: the correction is the diff [FAIL], not an old BLOCK
       log('  ✗ sin cambios en el worktree — cuenta como RECHAZADO');
       bus(`Implementer iter ${iteration} → sin cambios en el worktree (RECHAZADO)`);
       continue;
     }
     const touched = git(['diff', '--name-only', 'HEAD']).out.trim().split('\n').filter(Boolean);
     bus(`Implementer iter ${iteration} → diff (${touched.length} archivo(s)): ${touched.join(', ')}`);
+    if (a.uiCheck) {
+      log(`── Iteración ${iteration}/${a.maxIter} · UI check`);
+      lastUi = runUiCheck(a.uiCheck, runDir, iteration);
+      uiBlocked = lastUi.exitCode === 2;
+      const st = uiStateOf(lastUi, uiBlocked, a.allowSkipped).state;
+      log(`  ui-check: ${st}`);
+      bus(`UI check iter ${iteration} → ${st}`);
+      if (uiBlocked) continue;
+    }
+    // Warnings are evidence, not a verdict: a rule not yet promoted to block may fire on what this change did not touch.
+    const uiEvidence = lastUi && lastUi.exitCode === 0 && lastUi.warnings.length
+      ? `\n## ui-check — pasó con avisos (reglas que el proyecto no ha subido a bloqueo)
+Marca [FAIL] por un aviso solo si este diff lo causó; nombra la regla, la pantalla y el elemento.
+${lastUi.report}\n`
+      : '';
     const codeReview = runSeat({
       name: `reviewer-${iteration}`, model: seats.reviewer, tools: READ_ONLY, runDir, timeoutS: SEAT_TIMEOUT_S.reviewer,
       prompt: `${reviewerRole ? `${stripFrontmatter(fs.readFileSync(reviewerRole, 'utf8'))}\n\n---\n\n` : ''}Eres el revisor adversarial de un loop de desarrollo.
@@ -586,7 +638,7 @@ ${seamsBlock ? `\n${seamsBlock}` : ''}
 ${lastImpl.slice(0, 6000)}
 
 ## Cambios (git diff HEAD + archivos nuevos)
-${changes.text}
+${changes.text}${uiEvidence}
 Solo lectura: lee archivos del repositorio (read, grep, find, ls) para verificar una afirmación; no edites nada, no ejecutes nada que escriba.
 Un control que necesite editar (un control negativo) va en tu informe como sugerencia para el implementer.
 Prohibido: leer fuera del repositorio, .env*, *secret*, y cualquier archivo ignorado por git.${a.tdd ? '\nEvalúa también:\n[PASS|FAIL] test-first — every seam the report names has a test that exercises it through its public interface' : ''}
@@ -651,8 +703,9 @@ Una línea por criterio, como [PASS|FAIL] criterio — evidencia que cita la spe
   log(`Preflight${cmd ? ` (${cmd})` : ''}: ${pf.state}`);
   bus(`Preflight${cmd ? ` (${cmd})` : ''} → ${pf.state}`);
 
+  const ui = uiStateOf(a.uiCheck ? lastUi : null, uiBlocked, a.allowSkipped);
   let commit = null;
-  if (approved && pf.passed && a.commit) {
+  if (approved && pf.passed && ui.ok && a.commit) {
     log('── Commit');
     commit = await commitChanges(task, seats.orchestrator, runDir);
     log(commit.committed ? `✓ commit ${commit.hash} — ${commit.message}` : `⚠ sin commit: ${commit.note}`);
@@ -666,20 +719,23 @@ Una línea por criterio, como [PASS|FAIL] criterio — evidencia que cita la spe
   const specLines = a.spec ? linesOf(lastSpec).map((l) => `spec: ${l}`) : [];
   const openFails = [...verdictLines, ...specLines].filter((l) => /^(spec: )?\[FAIL\]/.test(l));
   const LABEL = 'Reportado por implementer/reviewer — no certificado de forma independiente: ';
-  const status = approved && pf.passed ? 'complete' : approved ? 'continue' : 'blocked';
+  const status = approved && pf.passed && ui.ok ? 'complete' : approved ? 'continue' : 'blocked';
   bus(`Fin: ${status}`);
   return finish(result({
-    iterations: iteration, approved, preflightPassed: pf.passed, commit, axes,
+    iterations: iteration, approved, preflightPassed: pf.passed, commit, axes, ...(a.uiCheck ? { uiCheck: ui.state } : {}),
     handoff: {
       status,
       summary: approved
-        ? `${a.spec ? 'Code y spec reviewer aprobaron' : 'Reviewer aprobó'} tras ${iteration} iteración(es); preflight ${pf.state}${commit && commit.committed ? `; commit ${commit.hash}` : ''}`
-        : `Reviewer sigue rechazando tras ${a.maxIter} iteración(es)`,
-      evidence: [...verdictLines, ...specLines, `preflight: ${pf.state}`, ...pf.skipped.map((l) => `preflight skip: ${l}`),
+        ? `${a.spec ? 'Code y spec reviewer aprobaron' : 'Reviewer aprobó'} tras ${iteration} iteración(es); ${ui.state ? `ui-check ${ui.state}; ` : ''}preflight ${pf.state}${commit && commit.committed ? `; commit ${commit.hash}` : ''}`
+        : uiBlocked ? `ui-check sigue bloqueando tras ${a.maxIter} iteración(es)` : `Reviewer sigue rechazando tras ${a.maxIter} iteración(es)`,
+      evidence: [...verdictLines, ...specLines, ...(ui.state ? [`ui-check: ${ui.state}${ui.accepted ? ' (aceptado por --allow-skipped)' : ''}`] : []), `preflight: ${pf.state}`, ...pf.skipped.map((l) => `preflight skip: ${l}`),
         ...pf.allowedSkips.map((l) => `preflight skip (declarada): ${l}`)],
-      ...(approved ? {} : { blocker: openFails.join(' · ') || 'reviewer devolvió RECHAZADO sin línea [FAIL]' }),
+      ...(approved ? {} : { blocker: uiBlocked ? `ui-check BLOCK — ${lastUi.report.split('\n').filter((l) => l.startsWith('BLOCK')).join(' · ')}`
+        : openFails.join(' · ') || 'reviewer devolvió RECHAZADO sin línea [FAIL]' }),
     },
-    nextStep: LABEL + (approved && pf.passed
+    nextStep: LABEL + (approved && pf.passed && !ui.ok
+      ? `ui-check ${ui.state} — ${ui.state.startsWith('FAILED') ? 'arreglar el comando o su .harness/ui-check.json' : 'hacer accesible la app (o las pantallas que nunca cargaron)'} y re-lanzar; un control que no corrió no es un PASS`
+      : approved && pf.passed
       ? (commit && commit.committed ? 'integrar la rama y desplegar desde el checkout principal' : 'git add -A && git commit en este worktree')
       : approved && pf.exitCode === 0 ? `Preflight con SKIP fuera de --allow-skipped: ${pf.skipped.join(' · ')} — falta un requisito; un SKIP no es un PASS`
         : approved ? 'Preflight falló o no existe — corregir antes de commit'
@@ -691,4 +747,4 @@ if (require.main === module) {
   main().then((code) => process.exit(code), (e) => { log(`develop-phase-pi: ${e.stack || e}`); process.exit(1); });
 }
 
-module.exports = { parseArgs, verdictOf, seamsOf, preflightCommand, runPreflight, resolveSeats, runSeat, SIZES };
+module.exports = { parseArgs, verdictOf, seamsOf, preflightCommand, runPreflight, runUiCheck, uiStateOf, resolveSeats, runSeat, SIZES };

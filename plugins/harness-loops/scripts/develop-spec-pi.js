@@ -12,7 +12,9 @@
 //   node develop-spec-pi.js --tickets <folder> [--confirmed] [--max-parallel 2] [--worktree-setup "<command>"]
 //                           [--integrate "<command with {branch}>"] [--prd <path>] [--run-dir <path>]
 //                           [any develop-phase-pi.js flag: --max-iter N --preflight "<cmd>" --allow-skipped "<s>"…
-//                            --no-tdd --no-spec-review --no-jev --no-preparer --no-tmux]
+//                            --no-tdd --no-spec-review --no-jev --no-preparer --no-tmux --ui-check ["<cmd>"]]
+//   --ui-check        reaches every ticket. Tickets run side by side, so the project's ui-check config should use {port}
+//                     in url and serve: a second ticket would otherwise find the first one's server and stop NOT VERIFIED
 //   --confirmed       run the waves. Without it the tickets are read and the plan printed: the human approves the
 //                     breakdown once, before any code
 //   --worktree-setup  run in each new worktree before its ticket starts (`pnpm install --frozen-lockfile`, or a `cp`
@@ -53,6 +55,8 @@ function parseArgs(argv) {
     else if (k === '--run-dir') a.runDir = argv[++i] || null;
     else if (PHASE_FLAGS.has(k)) a.phase.push(k);
     else if (PHASE_VALUES.has(k)) a.phase.push(k, argv[++i] || '');
+    // Its command is optional, as in develop-phase-pi.js: the next argument is it unless it is another flag.
+    else if (k === '--ui-check') a.phase.push(k, ...(argv[i + 1] && !argv[i + 1].startsWith('--') ? [argv[++i]] : []));
     else if (k === '--seams' || k === '--task') throw new Error(`${k} is per ticket: a ticket's task is its file, its seams its ## Seams section`);
     else throw new Error(`unknown argument: ${k}`);
   }

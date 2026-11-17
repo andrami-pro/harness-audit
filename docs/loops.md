@@ -300,7 +300,7 @@ unset, refused like the reviewer's when Claude or the implementer's family (D25a
 `--allow-skipped "<substring>"`, repeatable, makes a matching `SKIP` line reported, not counted. From a Pi session, a
 small extension can expose it as `/develop-phase <task>`; from a shell: `node scripts/develop-phase-pi.js --task "…"
 [--no-preparer] [--no-commit] [--max-iter N] [--preflight "<cmd>"] [--no-jev] [--run-dir <path>] [--no-tmux] [--seams
-propose|"<list>"] [--no-tdd] [--no-spec-review] [--allow-skipped "<substring>"] [--prd <path>]`.
+propose|"<list>"] [--no-tdd] [--no-spec-review] [--allow-skipped "<substring>"] [--prd <path>] [--ui-check ["<cmd>"]]` (ui-check: [below](#ui-check)).
 
 <a id="tmux"></a>
 **Live view (tmux).** `--mode json` is what lets each seat's actions show up as they happen instead of only at the
@@ -366,7 +366,10 @@ Config, `.harness/ui-check.json` in the project:
   loose red text surfaces. It is slow: about 4 s a button.
 - **Navigation:** a hash route on an app already loaded is reached without a reload — reloading a Vite dev app for
   every screen exhausted Chromium (`net::ERR_INSUFFICIENT_RESOURCES`). The first screen waits up to 90 s for a cold dev server.
-- **Not on Pi yet**: `develop-phase-pi.js` has no ui-check seat; run the script from the shell.
+- **On Pi**: `develop-phase-pi.js --ui-check ["<command>"]` (default: the `ui-check.js` beside it) runs it in code after
+  every implementation, no seat in between, with the same rules: BLOCK back to the implementer before review, WARN to
+  the code reviewer, exit 3 accepted only by `--allow-skipped ui-check`, any other exit FAILED. `develop-spec-pi.js`
+  forwards the flag to every ticket; tickets run side by side, so use `{port}` in the config.
 
 ## develop-spec: waves
 
