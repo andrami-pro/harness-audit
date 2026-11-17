@@ -1,0 +1,56 @@
+<!doctype html>
+<!-- Buttons for the interaction rules. Each label says what ui-check must report. -->
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>clicks</title>
+<style>body{margin:0;font:16px sans-serif}button{min-height:44px;margin:4px}.err{color:#d00000}</style></head>
+<body><main>
+  <h1>Clicks fixture</h1>
+  <div id="slot"></div>
+  <div role="status" id="status"></div>
+  <button id="silent">Silence</button>
+  <button id="mute">Mute change</button>
+  <button id="shove">Shove</button>
+  <button id="red">Loose red</button>
+  <button id="save">Save</button>
+  <button id="menu" aria-expanded="false">Menu</button>
+  <ul id="menulist" hidden style="position:absolute;margin:0;background:#fff;border:1px solid #999"><li>One</li></ul>
+  <button id="self">Load</button>
+  <button id="send">Send to API</button>
+  <button id="wipe">Delete everything</button>
+  <button id="more" aria-label="More">Delete account</button>
+  <button id="trash">🗑</button>
+  <div data-danger><button id="danger">Confirm</button></div>
+  <button id="confirm">Confirm</button>
+  <button id="alertsave">Alert save</button>
+  <button id="edit">Edit name</button>
+  <input id="name" aria-label="Name" value="Ada">
+  <button id="darkred">Dark red</button>
+  <button id="orange">Orange note</button>
+  <p>Content below the buttons, so an insert above them shoves it.</p>
+  <p id="clock"></p>
+  <script>
+    const $ = (id) => document.getElementById(id)
+    setInterval(() => { $('clock').textContent = String(Date.now()) }, 200)
+    $('silent').onclick = () => {}
+    $('mute').onclick = () => { const d = document.createElement('div'); d.textContent = 'A row appeared'; $('slot').append(d) }
+    $('shove').onclick = () => { const d = document.createElement('div'); d.style.height = '300px'; d.textContent = 'Big block'; document.querySelector('main').prepend(d) }
+    $('red').onclick = () => { const p = document.createElement('p'); p.className = 'err'; p.textContent = 'Something went wrong'; $('slot').append(p) }
+    $('save').onclick = () => { $('status').textContent = 'Saved' }
+    $('menu').onclick = () => { const open = $('menu').getAttribute('aria-expanded') === 'true'; $('menu').setAttribute('aria-expanded', String(!open)); $('menulist').hidden = open }
+    $('self').onclick = () => { $('self').textContent = 'Loading…' }
+    $('send').onclick = async () => {
+      const r = await fetch('/api/send', { method: 'POST' })
+      if (r.ok) $('status').textContent = 'Sent'
+      else { const p = document.createElement('p'); p.className = 'err'; p.textContent = 'Sending failed'; $('slot').append(p) }
+    }
+    // The destructive ones call the server, which logs the path: the check proves none was ever pressed.
+    $('wipe').onclick = () => { fetch('/api/wiped'); $('status').textContent = 'Everything deleted' }
+    $('more').onclick = () => { fetch('/api/deleted-account'); $('status').textContent = 'Account deleted' }
+    $('trash').onclick = () => { fetch('/api/trashed'); $('status').textContent = 'Trashed' }
+    $('danger').onclick = () => { fetch('/api/danger'); $('status').textContent = 'Danger confirmed' }
+    $('confirm').onclick = () => { fetch('/api/confirm'); $('status').textContent = 'Confirmed' }
+    $('alertsave').onclick = () => { const p = document.createElement('p'); p.setAttribute('role', 'alert'); p.textContent = 'Saved your changes'; $('slot').append(p) }
+    $('edit').onclick = () => { $('name').focus() }
+    $('orange').onclick = () => { const p = document.createElement('p'); p.style.color = '#f97316'; p.textContent = 'Heads up: draft not shared'; $('slot').append(p) }
+    $('darkred').onclick = () => { const p = document.createElement('p'); p.style.color = '#f87171'; p.textContent = 'Could not save'; $('slot').append(p) }
+  </script>
+</main></body></html>

@@ -6,6 +6,7 @@ export const meta = {
     { title: 'Scout', detail: 'Gather context into a short brief (read-only)', model: 'haiku' },
     { title: 'Plan', detail: 'Turn the brief into a short plan, or stop on a blocker', model: 'opus' },
     { title: 'Implement', detail: 'Write code against the PRD + brief + plan', model: 'opus' },
+    { title: 'UI check', detail: "uiCheck only: run the project's UI rules in a real browser; a blocking rule sends the change back before review", model: 'sonnet' },
     { title: 'Review', detail: 'Two axes, side by side: the code against the rubric, the change against the task, PRD and seams', model: 'fable' },
     { title: 'Preflight', detail: "Run the project's preflight gate", model: 'sonnet' },
     { title: 'Commit', detail: 'Commit on the current branch when approved and the gate is green', model: 'sonnet' },
@@ -48,6 +49,11 @@ export const meta = {
 //   workdir         absolute path every seat works in (develop-spec gives each ticket its own git worktree)
 //   allowSkipped    substrings of preflight lines the project accepts as skipped (checks that need a live key):
 //                   a matching skip is reported, not counted. Anything else skipped is still NOT VERIFIED
+//   uiCheck         true, or the command that runs the project's UI rules (default `node ~/.claude/harness/ui-check.js`,
+//                   which reads .harness/ui-check.json). It runs after every implementation: a BLOCK rule sends the change
+//                   back before any reviewer token; WARN rules reach the code reviewer as evidence. A run that could not
+//                   open the app, or ran only in part (exit 3), is NOT VERIFIED; allowSkipped: ['ui-check'] accepts that.
+//                   Any other exit (a config typo, a crash) is a failure nothing accepts
 const cfg = args && typeof args === 'object' ? args : { task: typeof args === 'string' ? args : undefined }
 const task = cfg.task ?? 'implement the active task in TASKS.md or equivalent'
 const maxIter = cfg.maxIter ?? 5
@@ -77,6 +83,7 @@ const readFirst = list(cfg.context).length
   ? [...list(cfg.context), ...(cfg.prd ? [cfg.prd] : [])].join(', ')
   : `memory/, ${prdHint}, TASKS.md or equivalent`
 const PREFLIGHT_CMD = cfg.preflight ?? 'npm run preflight'
+const UI_CMD = cfg.uiCheck === true ? 'node ~/.claude/harness/ui-check.js' : (typeof cfg.uiCheck === 'string' && cfg.uiCheck.trim()) || null
 const BRIDGE = cfg.externalReview ?? 'scripts/external-review.sh'
 const BRIDGE_REFUSED = 'BRIDGE NOT RUN'
 
@@ -337,16 +344,35 @@ Last line (no extra text): APPROVED or REJECTED`
 
 let approved = false, lastImpl = '', lastReview = '', lastSpec = '', iteration = 0
 let axes = null
+// ui-check runs in the loop, not after it: a rule is cheapest to satisfy while the implementer still holds the change.
+// Its seat reports fields, like the preflight's — an exit code cannot be misread the way a paragraph can.
+const UI_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['exitCode', 'blocking', 'warnings', 'report'],
+  properties: {
+    exitCode: { type: 'integer' },
+    blocking: { type: 'array', items: { type: 'string' } },
+    warnings: { type: 'array', items: { type: 'string' } },
+    report: { type: 'string' },
+  },
+}
+let lastUi = null, uiBlocked = false
+const uiFirstLine = () => (lastUi?.report ?? '').trim().split('\n')[0] || 'the ui-check seat returned nothing'
 
 while (!approved && iteration < maxIter) {
   iteration++
   log(`── Iteration ${iteration}/${maxIter} ──`)
 
   phase('Implement')
-  const correctionCtx = iteration > 1
-    ? `\n\n⚠ The review REJECTED. Fix ONLY the [FAIL] items.${axes.code.approved ? '' : `\nCODE REVIEW (rubric):\n${lastReview}`}${
-      axes.spec && !axes.spec.approved ? `\nSPEC REVIEW (task, PRD, seams):\n${lastSpec}` : ''}`
-    : ''
+  const correctionCtx = iteration === 1 ? ''
+    : uiBlocked
+      ? `\n\n⚠ ui-check BLOCKED the change before review. Fix what its BLOCK lines name — each gives the rule, the screen
+and the element. Re-run it yourself to confirm: ${UI_CMD}\nUI CHECK:\n${lastUi.report}${
+        axes && !axes.code.approved ? `\nThe last review also REJECTED; its [FAIL] items still stand.\nCODE REVIEW (rubric):\n${lastReview}` : ''}${
+        axes?.spec && !axes.spec.approved ? `\nSPEC REVIEW (task, PRD, seams):\n${lastSpec}` : ''}`
+      : `\n\n⚠ The review REJECTED. Fix ONLY the [FAIL] items.${axes.code.approved ? '' : `\nCODE REVIEW (rubric):\n${lastReview}`}${
+        axes.spec && !axes.spec.approved ? `\nSPEC REVIEW (task, PRD, seams):\n${lastSpec}` : ''}`
 
   lastImpl = await agent(
     `${SEAT_RULES}Act as the implementer defined in .claude/agents/implementer.md.
@@ -357,7 +383,36 @@ When done: list created/modified files + a description of each change.`,
   )
   if (!lastImpl) return crash('implementer', iteration)
 
+  if (UI_CMD) {
+    phase('UI check')
+    lastUi = await agent(
+      `${SEAT_RULES}Run exactly this and change nothing: ${IN_DIR}${UI_CMD}; echo "EXIT=$?"
+It opens the app in a browser and checks UI rules. It can take several minutes: run it ONCE, in the foreground, with
+the maximum Bash timeout (timeout: 600000). Do not background it or poll it.
+Report, without interpreting:
+- exitCode: the number printed after EXIT=
+- blocking: the rule id of every line that starts with BLOCK
+- warnings: the rule id of every line that starts with WARN
+- report: the complete output, verbatim
+Do not fix anything.`,
+      { model: MODELS.preflight, label: `ui:iter${iteration}`, phase: 'UI check', schema: UI_SCHEMA }
+    )
+    uiBlocked = lastUi?.exitCode === 2
+    log(uiBlocked ? `✗ ui-check BLOCK (${lastUi.blocking.join(', ')}) — back to the implementer, no review this round`
+      : lastUi?.exitCode === 0 ? `✓ ui-check PASS${lastUi.warnings.length ? ` · ${lastUi.warnings.length} rule(s) warn` : ''}`
+      : lastUi?.exitCode === 3 ? `⚠ ui-check NOT VERIFIED — ${uiFirstLine()}`
+      : `✗ ui-check FAILED (exit ${lastUi?.exitCode ?? '?'}) — ${uiFirstLine()}`)
+    if (uiBlocked) continue
+  }
+
   phase('Review')
+  // Warnings are evidence, not a verdict: a rule not yet promoted to block may fire on what this change did not touch.
+  const uiWarned = lastUi?.exitCode === 0 && lastUi.warnings.length > 0
+  if (uiWarned && MODELS.reviewer.includes('/')) log('⚠ ui-check warnings do not reach an external reviewer (the bridge takes the diff only) — recorded in the handoff')
+  const uiEvidence = uiWarned
+    ? `\nUI CHECK — passed with warnings (rules the project has not promoted to block). [FAIL] the change for a warning only
+when this diff caused it; name the rule, the screen and the element.\n${lastUi.report}\n`
+    : ''
   // Both axes run at once: neither reads the other.
   const codeReview = MODELS.reviewer.includes('/')
     // Provider-qualified id: agent() dispatches Anthropic models only, so a cheap seat runs the bridge in
@@ -382,7 +437,7 @@ report as a suggestion for the implementer.
 
 Implementation received:
 ${lastImpl}
-
+${uiEvidence}
 Read harness-rubric.md and .claude/agents/reviewer.md from the repo.
 Evaluate the reviewer's mandatory criteria.${tdd ? '\n[PASS|FAIL] test-first — every seam the report names has a test that exercises it through its public interface' : ''}${list(cfg.reviewerCriteria).map((c) => `\n${c}`).join('')}
 Format: [PASS|FAIL] criterion — concrete evidence
@@ -450,6 +505,17 @@ const ALLOWED_SKIPS = list(cfg.allowSkipped).map((a) => String(a).toLowerCase())
 const isAllowedSkip = (l) => ALLOWED_SKIPS.some((a) => l.toLowerCase().includes(a))
 const skipped = (preflight?.skipped ?? []).filter((l) => !isAllowedSkip(l))
 const allowedSkips = (preflight?.skipped ?? []).filter(isAllowedSkip)
+// ui-check keeps its own state, next to the preflight's. Exit 3 (could not open the app, or ran in part) is a check
+// that did not run: NOT VERIFIED, accepted only by an allowSkipped entry that is exactly 'ui-check'. Any other exit — a
+// config typo, a crash, a seat that returned nothing — is a failure nothing accepts.
+const uiLast = lastUi?.report ? lastUi.report.trim().split('\n').filter((l) => l.startsWith('RESULT')).pop() : null
+const uiState = !UI_CMD ? null
+  : uiBlocked ? `BLOCK (${lastUi.blocking.join(', ')})`
+  : lastUi?.exitCode === 0 ? `PASS${lastUi.warnings.length ? ` (${lastUi.warnings.length} rule(s) warn: ${lastUi.warnings.join(', ')}${MODELS.reviewer.includes('/') ? ' — not seen by the external reviewer' : ''})` : ''}`
+  : lastUi?.exitCode === 3 ? `NOT VERIFIED — ${uiLast ?? uiFirstLine()}`
+  : `FAILED (exit ${lastUi?.exitCode ?? '?'}) — ${uiFirstLine()}`
+const uiAccepted = uiState?.startsWith('NOT VERIFIED') && ALLOWED_SKIPS.includes('ui-check')
+const uiOk = !UI_CMD || uiState.startsWith('PASS') || uiAccepted
 const preflightPassed = preflight?.exitCode === 0 && skipped.length === 0
 const preflightState = preflightPassed ? 'PASS'
   : preflight?.exitCode === 0 ? `NOT VERIFIED (${skipped.length} skipped)`
@@ -472,7 +538,7 @@ const COMMIT_SCHEMA = {
   },
 }
 let commit = null
-if (approved && preflightPassed && doCommit) {
+if (approved && preflightPassed && uiOk && doCommit) {
   phase('Commit')
   commit = await agent(
     `${ISOLATED}
@@ -505,13 +571,14 @@ const specLines = doSpec ? linesOf(lastSpec).map((l) => `spec: ${l}`) : []
 const openFails = [...verdictLines, ...specLines].filter((l) => /^(?:spec: )?\[FAIL\]/.test(l))
 const rejecting = axes ? `${[!axes.code.approved && 'code', axes.spec && !axes.spec.approved && 'spec'].filter(Boolean).join(' and ')} review` : 'review'
 const handoff = {
-  status: approved && preflightPassed ? 'complete' : approved ? 'continue' : 'blocked',
+  status: approved && preflightPassed && uiOk ? 'complete' : approved ? 'continue' : 'blocked',
   summary: approved
-    ? `${doSpec ? 'Code and spec reviews' : 'Reviewer'} approved after ${iteration} iteration(s); preflight ${preflightState}${commit?.committed ? `; commit ${commit.hash}` : ''}`
-    : `The ${rejecting} still rejects after ${maxIter} iteration(s)`,
-  evidence: [...verdictLines, ...specLines, `preflight: ${preflightState}`, ...skipped.map((l) => `preflight skipped: ${l}`),
+    ? `${doSpec ? 'Code and spec reviews' : 'Reviewer'} approved after ${iteration} iteration(s); ${uiState ? `ui-check ${uiState}; ` : ''}preflight ${preflightState}${commit?.committed ? `; commit ${commit.hash}` : ''}`
+    : uiBlocked ? `ui-check still blocks after ${maxIter} iteration(s)` : `The ${rejecting} still rejects after ${maxIter} iteration(s)`,
+  evidence: [...verdictLines, ...specLines, ...(uiState ? [`ui-check: ${uiState}${uiAccepted ? ' (accepted by allowSkipped)' : ''}`] : []), `preflight: ${preflightState}`, ...skipped.map((l) => `preflight skipped: ${l}`),
     ...allowedSkips.map((l) => `preflight skipped (allowed by config): ${l}`)],
-  ...(approved ? {} : { blocker: openFails.join(' · ') || 'reviewer returned REJECTED with no [FAIL] line' }),
+  ...(approved ? {} : { blocker: uiBlocked ? `ui-check BLOCK — ${lastUi.report.split('\n').filter((l) => l.startsWith('BLOCK')).join(' · ')}`
+    : openFails.join(' · ') || 'reviewer returned REJECTED with no [FAIL] line' }),
 }
 const LABEL = 'Reported by the implementer/reviewer seats — not independently certified: '
 const integrate = cfg.integrate ? `, then ${cfg.integrate}` : ''
@@ -519,7 +586,10 @@ const integrate = cfg.integrate ? `, then ${cfg.integrate}` : ''
 return {
   task, iterations: iteration, approved, preflightPassed, commit, handoff, routing, axes,
   seams: { agreed: agreedSeams.length > 0, list: seams },
-  nextStep: LABEL + (approved && preflightPassed
+  ...(UI_CMD ? { uiCheck: uiState } : {}),
+  nextStep: LABEL + (approved && preflightPassed && !uiOk
+    ? `ui-check ${uiState} — ${uiState.startsWith('FAILED') ? 'fix the command or its .harness/ui-check.json' : 'make the app reachable (or fix the screens that never became ready)'} and re-run; a check that did not run is not a pass`
+    : approved && preflightPassed
     ? (commit?.committed ? `committed ${commit.hash}${integrate}` : `${cfg.doneStep ?? 'git add -p && git commit'}${integrate}`)
     : approved && preflight?.exitCode === 0 ? `Preflight skipped checks outside allowSkipped: ${skipped.join(' · ')} — supply what they need and re-run; a SKIP is not a PASS`
     : approved ? 'Preflight failed — fix before commit'

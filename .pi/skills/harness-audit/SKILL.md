@@ -128,6 +128,7 @@ Also detect: package manager (`pnpm-lock.yaml` → pnpm, `yarn.lock` → yarn, `
 | Lint | Linter configured + `lint` script | Match `eslint.config.*`, `.eslintrc.*`, `.flake8`, `ruff.toml`, `clippy.toml`, etc. |
 | Typecheck | Typechecker available (only if typed lang) | `tsc --noEmit` script, `mypy`, `pyright`, `cargo check` |
 | Tests | Test runner installed + `test` script | Detect Vitest/Jest/Playwright/pytest/cargo test/go test/rspec |
+| UI checked in a browser (web UI only) | A project with a web interface opens it in a real browser in its loop: the wrapper sets `uiCheck` and `.harness/ui-check.json` lists the screens. Unit tests in jsdom pass a squeezed panel or a button that answers nothing (Tama OS, 2026-11-16) | `grep -q 'uiCheck: *true' .claude/workflows/develop-phase.js && test -f .harness/ui-check.json; echo $?` → 0 — no web UI = `applies: false`; ⚠ (aspirational), not ✗ |
 | Test quality (anti-false-convergence) | Tests contain real assertions — they would FAIL if the code broke. Trivial always-green tests satisfy the letter of "tests pass" while lying to the loop | open 1–2 test files: assertions on behavior, not `expect(true)`; flag suites with 0 assertions |
 | Pre-commit hook | Hook framework installed | `test -f lefthook.yml` OR `.husky/` OR `.pre-commit-config.yaml` OR `pre-commit` in git hooks |
 | CI workflow | At least one CI pipeline runs preflight on PR | `ls .github/workflows/*.yml` or equivalent |
@@ -315,6 +316,11 @@ whose only content is its config:
    `implementer`/`reviewer` subagents), `prd`, `implementerRules`, `reviewerCriteria`, `externalReview`
    (a renamed bridge), `commit: true` with `commitRules`, and `integrate` (the script that merges a session
    branch). The header of the global script documents every key.
+   A project with a web interface also gets `uiCheck: true` and a `.harness/ui-check.json` naming its `url`,
+   the `serve` command that starts it, the `ready` selector and the `routes` to visit. Every rule starts at
+   `warn`; promote one to `block` only after it stays quiet on this project (`node ~/.claude/harness/ui-check.js`
+   prints what each rule found). Turn `interactions` on only against demo data: the probe presses every button
+   whose label is not destructive.
 4. Check that the global script is reachable. `workflow()` only loads a file the session can already read
    (the working directory or an added directory), so the wrapper reads `.claude/harness/develop-phase.js`
    inside the project first: the `harness-loops` SessionStart hook writes it there, git-ignored, in every

@@ -2287,6 +2287,7 @@ check('install.sh --lineup stamps the project roles and never clobbers a customi
     || read('plugins/harness-loops/workflows/develop-phase.js') !== fs.readFileSync(path.join(wfDir, 'develop-phase.js'), 'utf8')) {
     throw new Error('install.sh --target claude did not copy the global develop-phase loop where the wrapper calls it');
   }
+  if (!fs.existsSync(path.join(wfDir, 'ui-check.js'))) throw new Error('install.sh --target claude did not copy ui-check.js where the uiCheck seat runs it');
 
   const modelOf = (f) => {
     const src = fs.readFileSync(path.join(agents, f), 'utf8');
@@ -3038,6 +3039,95 @@ check('develop-phase workdir, allowSkipped and a read-only reviewer', () => {
   return 'every seat cd\'s into the workdir · declared skips reported, not counted · any other skip still NOT VERIFIED · reviewer read-only';
 });
 
+// uiCheck (PRD-006): ui-check runs after every implementation, before any reviewer. A BLOCK sends the change back with
+// the report and no review that round; WARN lines reach the code reviewer as evidence; a run that could not open the app
+// is NOT VERIFIED, joining the preflight's skips (allowSkipped may accept it). Stub seats, as the checks above.
+//
+// Negative controls (2026-11-16, each applied to develop-phase.js, observed, reverted — all exit 1):
+//   `if (uiBlocked) continue` disabled ...............................................................................
+//     "a BLOCK did not go straight back to the implementer … (got [\"impl:iter1,ui:iter1,review:iter1,spec:iter1,preflight\",…])"
+//   uiSkip = [] (a run that could not open the app is not a skip) .....................................................
+//     "a ui-check that could not open the app passed as verified, or allowSkipped could not accept it (got [true,\"complete\",…])"
+//   ${uiEvidence} dropped from the code reviewer's prompt .............................................................
+//     "the configured uiCheck command was not run as given, or WARN lines did not reach the code reviewer (got [true,false,…])"
+//   uiAccepted through the substring allowSkipped match, any non-PASS state (2026-11-17) ..............................
+//     "a ui-check that failed on its own config (exit 1) was accepted by allowSkipped, committed, or not named in nextStep"
+//   the review's open [FAIL] items dropped from the UI-block correction ...............................................
+//     "a UI block after a rejected review dropped the review's open [FAIL] items from the implementer's next prompt"
+check('develop-phase uiCheck: a BLOCK goes back before review, warnings reach the reviewer, a run that cannot open the app is NOT VERIFIED', () => {
+  const harness = (file) => {
+    const src = require('fs').readFileSync(file, 'utf8').replace(/^export /m, '');
+    const AsyncFn = Object.getPrototypeOf(async function () {}).constructor;
+    const REPORT = { block: 'ui-check: 2 screen(s)\nBLOCK conversation-starved (1) — a conversation keeps 40%\n      1280x800 #room ol.thread — 64px\nRESULT: FAIL — blocking: conversation-starved',
+      warn: 'ui-check: 2 screen(s)\nWARN  silent-click (1) — a pressed button answers\n      1280x800 #room «Send» — nothing visible changed\nRESULT: PASS — 1 rule(s) warn',
+      down: 'ui-check: NOT VERIFIED — http://localhost:5175/ did not answer (start the app, or set "serve")',
+      broken: 'ui-check: error — unknown rule "conversation-starve" in config' };
+    const run = async (args, uiSeq, reviews = []) => {
+      const calls = [];
+      let ui = 0;
+      const agent = async (prompt, o) => {
+        const l = String(o.label); calls.push({ label: l, prompt });
+        if (l.startsWith('ui:')) {
+          const k = uiSeq[Math.min(ui++, uiSeq.length - 1)];
+          return { exitCode: { block: 2, warn: 0, pass: 0, down: 3, broken: 1 }[k], blocking: k === 'block' ? ['conversation-starved'] : [],
+            warnings: k === 'warn' ? ['silent-click'] : [], report: REPORT[k] ?? 'ui-check: 2 screen(s)\nRESULT: PASS' };
+        }
+        if (l === 'preflight') return { exitCode: 0, skipped: [], failedCheck: null, tail: '' };
+        if (l.startsWith('review') && reviews.length) return reviews.shift();
+        return l.startsWith('review') || l.startsWith('spec') ? '[PASS] a — x\nAPPROVED' : l === 'scout' ? 'B' : l === 'analyst' ? 'P' : 'impl';
+      };
+      const out = await new AsyncFn('args', 'agent', 'log', 'phase', src)({ task: 'T', maxIter: 3, preparer: false, ...args }, agent, () => {}, () => {});
+      return { out, calls };
+    };
+    const labels = (r) => r.calls.map((c) => c.label).join(',');
+    (async () => {
+      const off = await run({}, ['pass']);
+      const fix = await run({ uiCheck: true }, ['block', 'pass']);
+      const warn = await run({ uiCheck: 'node tools/ui-check.js --quiet' }, ['warn']);
+      const down = await run({ uiCheck: true }, ['down']);
+      const allowed = await run({ uiCheck: true, allowSkipped: ['ui-check'] }, ['down']);
+      const stuck = await run({ uiCheck: true }, ['block']);
+      const broken = await run({ uiCheck: true, allowSkipped: ['ui-check'] }, ['broken']);
+      const loose = await run({ uiCheck: true, allowSkipped: ['localhost'] }, ['down']);
+      const carry = await run({ uiCheck: true }, ['pass', 'block', 'pass'], ['[FAIL] rubric-7 — the handler swallows the error\nREJECTED']);
+      const impl3 = carry.calls.find((c) => c.label === 'impl:iter3')?.prompt ?? '';
+      const impl2 = fix.calls.find((c) => c.label === 'impl:iter2')?.prompt ?? '';
+      console.log(JSON.stringify({
+        off: labels(off).includes('ui:'),
+        fix: [labels(fix), fix.out.handoff.status, impl2.includes('ui-check BLOCKED') && impl2.includes('#room ol.thread — 64px'), fix.out.handoff.evidence.includes('ui-check: PASS')],
+        warn: [warn.calls.find((c) => c.label.startsWith('ui:')).prompt.includes('node tools/ui-check.js --quiet; echo "EXIT=$?"'),
+          warn.calls.find((c) => c.label.startsWith('review')).prompt.includes('#room «Send» — nothing visible changed'),
+          !warn.calls.find((c) => c.label.startsWith('spec')).prompt.includes('UI CHECK'), warn.out.handoff.status],
+        down: [down.out.approved, down.out.handoff.status, down.out.nextStep.includes('ui-check NOT VERIFIED'), allowed.out.handoff.status],
+        stuck: [stuck.out.approved, stuck.out.handoff.status, stuck.calls.some((c) => c.label.startsWith('review')), /^ui-check BLOCK — BLOCK conversation-starved/.test(stuck.out.handoff.blocker ?? ''), stuck.out.handoff.summary],
+        broken: [broken.out.handoff.status, broken.out.nextStep.includes('FAILED (exit 1)'), broken.calls.some((c) => c.label === 'commit')],
+        loose: loose.out.handoff.status,
+        carry: [impl3.includes('ui-check BLOCKED'), impl3.includes('rubric-7 — the handler swallows the error')],
+        preflightLabel: down.out.handoff.evidence.some((e) => e.startsWith('preflight skipped') && e.includes('ui-check')),
+      }));
+    })().catch((e) => console.log('THREW ' + e.stack));
+  };
+  const out = execFileSync('node', ['-e', `(${harness})(process.argv[1])`, path.join(ROOT, DEVELOP_PHASE)], { encoding: 'utf8' }).trim();
+  if (out.startsWith('THREW')) throw new Error(`the develop-phase loop throws with uiCheck — ${out.slice(6, 300)}`);
+  const r = JSON.parse(out);
+  const want = {
+    off: [false, 'a run without uiCheck started a ui-check seat'],
+    fix: [['impl:iter1,ui:iter1,impl:iter2,ui:iter2,review:iter2,spec:iter2,preflight', 'complete', true, true],
+      'a BLOCK did not go straight back to the implementer with the report (no review that round), or the fixed run did not complete with ui-check: PASS'],
+    warn: [[true, true, true, 'complete'], 'the configured uiCheck command was not run as given, or WARN lines did not reach the code reviewer (and only it)'],
+    down: [[true, 'continue', true, 'complete'], 'a ui-check that could not open the app passed as verified, or allowSkipped could not accept it'],
+    stuck: [[false, 'blocked', false, true, 'ui-check still blocks after 3 iteration(s)'], 'a change ui-check blocks every round was reviewed, approved, or handed off without the BLOCK lines as its blocker'],
+    broken: [['continue', true, false], 'a ui-check that failed on its own config (exit 1) was accepted by allowSkipped, committed, or not named in nextStep'],
+    loose: ['continue', 'an allowSkipped entry that merely appears in the ui-check line (the URL) accepted it — only the exact entry "ui-check" may'],
+    carry: [[true, true], "a UI block after a rejected review dropped the review's open [FAIL] items from the implementer's next prompt"],
+    preflightLabel: [false, 'a ui-check skip was reported as a preflight skip — they are two checks'],
+  };
+  for (const [k, [v, why]] of Object.entries(want)) {
+    if (JSON.stringify(r[k]) !== JSON.stringify(v)) throw new Error(`${why} (got ${JSON.stringify(r[k])})`);
+  }
+  return 'off by default · BLOCK → implementer, no review · WARN → code reviewer only · cannot run → NOT VERIFIED (allowSkipped accepts) · stuck → blocked';
+});
+
 // develop-spec (PRD-004 §4) is develop-phase's loop inlined by scripts/build-workflows.js — a workflow runs another
 // only one level deep and the wrapper spends it — plus a scheduler. Each scheduling rule is a way to go quiet wrong:
 // code before the human approved the breakdown, a dependent started before its blocker merged, more tickets in
@@ -3337,6 +3427,9 @@ check('sync-workflows keeps the stable copy equal to the shipped loop, and only 
     if (fs.readFileSync(target, 'utf8') !== read(DEVELOP_PHASE)) throw new Error('first session start did not copy the loop');
     if (fs.readFileSync(path.join(dir, 'harness', 'jev.js'), 'utf8') !== read('plugins/harness-loops/scripts/jev.js')) {
       throw new Error("jev.js was not copied next to the loop — routeByJev's seat runs ~/.claude/harness/jev.js");
+    }
+    if (fs.readFileSync(path.join(dir, 'harness', 'ui-check.js'), 'utf8') !== read('plugins/harness-loops/scripts/ui-check.js')) {
+      throw new Error("ui-check.js was not copied next to the loop — uiCheck's seat runs ~/.claude/harness/ui-check.js");
     }
     const before = fs.statSync(target).mtimeMs;
     execFileSync('node', [hook], { input: start, env, stdio: 'pipe' });
@@ -3943,6 +4036,149 @@ esac
     fs.rmSync(tmp, { recursive: true, force: true });
   }
   return '--prd reaches every ticket; without it the child prompts stay as before';
+});
+
+// ui-check (PRD-006) opens a project's interface in a real browser and checks UI rules that hold for any web app.
+// The fixtures carry one violation of each rule (bad.html, clicks.html) and the patterns that raised false alarms
+// while it was calibrated on Tama OS (good.html: screen-reader-only text, an ellipsis, a line clamp, a button inside
+// a field's box, a selected tab, content scrolling under a pinned tab bar). It needs Playwright and a Chromium: without
+// them ui-check exits 3 and this check is NOT VERIFIED, never green.
+//
+// Negative controls (2026-11-16, each applied to ui-check.js, observed, reverted — all exit 1):
+//   conversation-starved thresholds 240 px / 40 % lowered to 24 px / 10 % ...........................................
+//     "a blocking rule did not exit 2 (exit 0): RESULT: PASS — 9 rule(s) warn"
+//   layout shifts filtered on hadRecentInput again ..................................................................
+//     "a 300 px block prepended above the content was not reported as abrupt-insert" — the click IS the recent input
+//   UNSAFE label pattern emptied ....................................................................................
+//     "\"Delete everything\" was not skipped as unsafe (unsafe=0)"
+//   srOnly = false (screen-reader-only text counted) ..................................................................
+//     "good.html raised a false alarm — text-cut-silently: span.sr-only 435px of text hidden, no ellipsis"
+//   the pinned-bar guard in controls-overlap removed ...................................................................
+//     "good.html raised a false alarm — controls-overlap: button 68% hidden under a"
+//   the field-over-text pass removed (fields = []) ...................................................................
+//     "bad.html: a select laid over a heading was not reported as text-over-text"
+// The pinned-bar control first came back green: controls were filtered on being painted somewhere, so a control
+// hidden whole under another never entered the comparison — the worst case was invisible. Fixed before recording.
+// After the independent review (2026-11-17), each also applied to ui-check.js, observed, reverted — all exit 1:
+//   the skip selector tested with matches() instead of closest() ..............................................
+//     "a destructive or skipped button was pressed: /api/send /api/danger"
+//   the unsafe test reads only the first name (aria-label "More" over "Delete account") ...........................
+//     "a destructive or skipped button was pressed: /api/send /api/deleted-account /api/confirm"
+//   an added role=alert node not counted as announced ............................................................
+//     "an announced answer (status text, aria-expanded, its own label, an added role=alert, a focus move) was reported"
+//   a focus move not counted as an answer .........................................................................
+//     same message — «Edit name» reported as silent-click
+//   a partial run allowed to exit 0 ..............................................................................
+//     "a route that never became ready still passed (exit 0) — a partial run is NOT VERIFIED"
+//   the "something already answers before serve" guard removed ...................................................
+//     "a port another server already answers on was checked as if it were the app (exit 0: ui-check: 2 screen(s))"
+//   ignore entries no longer validated ...........................................................................
+//     "an ignore entry without a known rule (it would silence every rule) in the config did not exit 1 (exit 0)"
+// Not covered by a check: the SIGINT/SIGTERM/SIGHUP handlers that stop the server when ui-check itself is killed.
+const UI_CHECK = 'plugins/harness-loops/scripts/ui-check.js';
+const UI_SERVE = path.join(ROOT, 'scripts/fixtures/ui-check/serve.js');
+// One ui-check run against the fixtures. {port} makes ui-check pick a free port; the fixture server logs its pid and
+// every /api/ path to `hits`, so a check can prove a destructive button was never pressed and the server was stopped.
+const uiCheckRun = (cfg, extra = []) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ui-check-'));
+  const hits = path.join(tmp, 'hits');
+  const conf = path.join(tmp, 'ui-check.json');
+  fs.writeFileSync(conf, JSON.stringify({ url: 'http://127.0.0.1:{port}/', serve: `node ${UI_SERVE} {port} ${hits}`, ...cfg }));
+  const json = path.join(tmp, 'out.json');
+  const r = require('node:child_process').spawnSync('node', [path.join(ROOT, UI_CHECK), '--config', conf, '--json', json, ...extra], { encoding: 'utf8', timeout: 240000 });
+  const out = fs.existsSync(json) ? JSON.parse(fs.readFileSync(json, 'utf8')) : null;
+  const log = fs.existsSync(hits) ? fs.readFileSync(hits, 'utf8').split('\n').filter(Boolean) : [];
+  const pid = Number((log.find((l) => l.startsWith('pid ')) || '').slice(4)) || null;
+  let serverAlive = false;
+  if (pid) {
+    try {
+      process.kill(pid, 0);
+      // A zombie still answers kill(pid, 0) until its parent reaps it; only a running process counts as alive.
+      const state = fs.readFileSync(`/proc/${pid}/stat`, 'utf8').split(') ')[1]?.[0];
+      serverAlive = state !== 'Z';
+      if (serverAlive) process.kill(pid, 'SIGKILL');
+    } catch { /* stopped, as it should be (or no /proc: nothing more to learn) */ }
+  }
+  fs.rmSync(tmp, { recursive: true, force: true });
+  return { code: r.status, stdout: r.stdout || '', out, api: log.filter((l) => l.startsWith('/api/')), serverAlive };
+};
+const uiHits = (out, rule) => (out?.violations?.[rule]?.hits ?? []).map((h) => `${h.where} ${h.detail}`);
+const uiCantRun = (r) => r.code === 3 && /Playwright not found|no browser could start/.test(r.stdout);
+check('ui-check finds each static rule on bad.html, nothing on good.html, refuses typos, and a partial run is NOT VERIFIED', () => {
+  const bad = uiCheckRun({ routes: ['bad.html', 'good.html'], viewports: [[1280, 800], [390, 800]], rules: { 'conversation-starved': 'block', accessibility: 'off' } });
+  if (uiCantRun(bad)) skip(`ui-check could not run here: ${bad.stdout.trim().split('\n')[0]}`);
+  if (bad.code !== 2) throw new Error(`a blocking rule did not exit 2 (exit ${bad.code}): ${bad.stdout.trim().split('\n').slice(-1)[0]}`);
+  if (bad.serverAlive) throw new Error('the server ui-check started for the run was still running after it exited');
+  if (JSON.stringify(bad.out.blocking) !== '["conversation-starved"]') throw new Error(`blocking should be exactly the promoted rule, got ${JSON.stringify(bad.out.blocking)}`);
+  const want = ['page-scrolls-sideways', 'scroll-area-squeezed', 'text-cut-silently', 'control-off-screen', 'controls-overlap', 'text-over-text', 'tap-target-small', 'console-error', 'request-failed'];
+  const missing = want.filter((r) => !bad.out.warnings.includes(r));
+  if (missing.length) throw new Error(`bad.html: no ${missing.join(', ')} — a rule went blind`);
+  if (!uiHits(bad.out, 'text-over-text').some((h) => h.includes('hidden under select'))) throw new Error('bad.html: a select laid over a heading was not reported as text-over-text');
+  if (!uiHits(bad.out, 'text-cut-silently').some((h) => h.includes('cut off at the bottom'))) throw new Error('bad.html: wrapped text cut at the bottom of a fixed-height box was not reported');
+  const room = uiCheckRun({ routes: ['room.html'], viewports: [[1280, 800]], rules: { accessibility: 'off' } });
+  if (!uiHits(room.out, 'conversation-starved').some((h) => h.includes('collapsed to its content'))) throw new Error('room.html: a chat panel collapsed to its content over an empty window was not reported — the Tama OS room-thread bug');
+  const onGood = Object.entries(bad.out.violations).flatMap(([rule, v]) => v.hits.filter((h) => h.screen.includes('good.html')).map((h) => `${rule}: ${h.where} ${h.detail}`));
+  if (onGood.length) throw new Error(`good.html raised a false alarm — ${onGood[0]}`);
+  for (const [cfg, what] of [
+    [{ routes: ['good.html'], rules: { 'conversation-starve': 'block' } }, 'an unknown rule name'],
+    [{ routes: ['good.html'], ignore: [{ rul: 'tap-target-small' }] }, 'an ignore entry without a known rule (it would silence every rule)'],
+    [{ routes: ['good.html'], rule: { 'conversation-starved': 'block' } }, 'an unknown top-level key'],
+  ]) {
+    const r = uiCheckRun(cfg);
+    if (r.code !== 1) throw new Error(`${what} in the config did not exit 1 (exit ${r.code}) — a typo would silently switch a check off`);
+  }
+  const partial = uiCheckRun({ routes: ['good.html', 'missing.html'], ready: 'main', viewports: [[1280, 800]], rules: { accessibility: 'off' } });
+  if (partial.code !== 3 || !/RESULT: NOT VERIFIED/.test(partial.stdout)) throw new Error(`a route that never became ready still passed (exit ${partial.code}) — a partial run is NOT VERIFIED`);
+  const down = require('node:child_process').spawnSync('node', [path.join(ROOT, UI_CHECK), '--url', 'http://127.0.0.1:9/'], { encoding: 'utf8' });
+  if (down.status !== 3 || !/NOT VERIFIED/.test(down.stdout)) throw new Error(`an app that never answers did not exit 3 NOT VERIFIED (exit ${down.status})`);
+  // With "serve", something already answering on the URL would be checked instead of the app this run starts.
+  const taken = execFileSync('node', ['-e', `
+    const http = require('http'); const { spawn } = require('child_process');
+    // spawn, not spawnSync: a blocked event loop would stop this server answering, and the check would test nothing.
+    const srv = http.createServer((q, s) => s.end('<main>other app</main>')).listen(0, '127.0.0.1', () => {
+      const port = srv.address().port;
+      const c = spawn('node', [process.argv[1], '--url', 'http://127.0.0.1:' + port + '/', '--serve', 'node ' + process.argv[2] + ' ' + port]);
+      let out = ''; c.stdout.on('data', (d) => { out += d; });
+      c.on('close', (code) => { console.log(JSON.stringify({ code, out: out.trim().split('\\n')[0] })); srv.close(); });
+    });`, path.join(ROOT, UI_CHECK), UI_SERVE], { encoding: 'utf8' });
+  const t = JSON.parse(taken);
+  if (t.code !== 3 || !/already answers/.test(t.out)) throw new Error(`a port another server already answers on was checked as if it were the app (exit ${t.code}: ${t.out})`);
+  return `${want.length + 1} static rules fire on bad.html · good.html silent · promoted rule exits 2 · 3 config typos exit 1 · partial run, no app, port taken exit 3 · server stopped`;
+});
+check('ui-check presses buttons: silent, unannounced, abrupt and loose-red answers are reported, no destructive or skipped button is ever pressed', () => {
+  const base = { routes: ['clicks.html'], viewports: [[1280, 800]], interactions: { enabled: true, maxPerScreen: 30, skip: ['[data-danger]'] }, rules: { accessibility: 'off', 'console-error': 'off' } };
+  const ok = uiCheckRun(base);
+  if (uiCantRun(ok)) skip(`ui-check could not run here: ${ok.stdout.trim().split('\n')[0]}`);
+  const failing = uiCheckRun({ ...base, failRequests: ['**/api/send'] });
+  const quiet = (label) => !Object.values(ok.out.violations).some((v) => v.hits.some((h) => h.where === `«${label}»`));
+  const expect = [
+    [!ok.api.some((a) => /wiped|deleted-account|trashed|danger/.test(a)), `a destructive or skipped button was pressed: ${ok.api.join(' ')}`],
+    [ok.api.includes('/api/confirm'), 'the benign "Confirm" was not pressed — the skip selector caught the wrong button of two with the same label'],
+    [ok.out.stats.unsafe.length === 3, `"Delete everything", aria-label "More" over "Delete account" and a bare 🗑 were not all held back (${ok.out.stats.unsafe.length})`],
+    [uiHits(ok.out, 'silent-click').some((h) => h.includes('«Silence»')), 'a button that does nothing was not reported as silent-click'],
+    [uiHits(ok.out, 'change-unannounced').some((h) => h.includes('«Mute change»')), 'a change nobody announced was not reported'],
+    [uiHits(ok.out, 'abrupt-insert').some((h) => h.includes('«Shove»')), 'a 300 px block prepended above the content was not reported as abrupt-insert'],
+    [uiHits(ok.out, 'error-unannounced').some((h) => h.includes('«Loose red»')), 'loose red error text was not reported as error-unannounced'],
+    [uiHits(ok.out, 'error-unannounced').some((h) => h.includes('«Dark red»')), 'a dark-theme error colour (#f87171) was not read as an error'],
+    [!uiHits(ok.out, 'error-unannounced').some((h) => h.includes('«Orange note»')), 'orange text (#f97316) was read as an error — red is a hue, not a strong red channel'],
+    [['Save', 'Menu', 'Load', 'Send to API', 'Alert save', 'Edit name'].every(quiet), 'an announced answer (status text, aria-expanded, its own label, an added role=alert, a focus move) was reported'],
+    [ok.out.stats.pressed > 0 && ok.code === 0, `the probe did not complete (exit ${ok.code})`],
+    [uiHits(failing.out, 'error-unannounced').some((h) => h.includes('«Send to API»')), 'with failRequests the API error shown as loose red text was not reported — the failing-backend condition does nothing'],
+    [!ok.serverAlive && !failing.serverAlive, 'the fixture server outlived ui-check'],
+  ];
+  const bad = expect.find(([pass]) => !pass);
+  if (bad) throw new Error(bad[1]);
+  return `${ok.out.stats.pressed} buttons pressed, 3 held back as unsafe, none of them reached the server · 4 interaction rules fire · announced answers stay silent`;
+});
+check('ui-check accessibility: axe-core reports bad.html and stays silent on good.html', () => {
+  const r = uiCheckRun({ routes: ['bad.html', 'good.html'], viewports: [[1280, 800]] });
+  if (uiCantRun(r)) skip(`ui-check could not run here: ${r.stdout.trim().split('\n')[0]}`);
+  if ((r.out?.skipped ?? []).some((n) => n.startsWith('accessibility'))) skip('axe-core is not installed in the project or the global npm root (npm i -g axe-core)');
+  const hits = r.out.violations.accessibility?.hits ?? [];
+  if (!hits.some((h) => h.screen.includes('bad.html') && /image-alt/.test(h.detail))) throw new Error('an image with no alt on bad.html was not reported');
+  const good = hits.filter((h) => h.screen.includes('good.html'));
+  if (good.length) throw new Error(`good.html raised an accessibility alarm — ${good[0].detail}`);
+  return 'axe-core runs inside ui-check: image-alt on bad.html, nothing on good.html';
 });
 
 const GLYPH = { pass: '✓', fail: '✗', skip: '⊘' };

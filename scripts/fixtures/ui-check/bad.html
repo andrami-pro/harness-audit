@@ -1,0 +1,37 @@
+<!doctype html>
+<!-- One violation of each static rule, labelled. ui-check must find every one. -->
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>bad</title>
+<style>body{margin:0;font:16px sans-serif}main{padding:8px}</style></head>
+<body><main>
+  <h1>Bad fixture</h1>
+  <!-- tap-target-small (phone viewport only) -->
+  <button style="display:inline-block;width:16px;height:16px;padding:0" aria-label="Tiny">x</button>
+  <!-- page-scrolls-sideways -->
+  <div style="width:1700px;height:10px;background:#eee"></div>
+  <!-- scroll-area-squeezed -->
+  <div style="height:60px;overflow-y:auto"><div style="height:400px">squeezed scroll content</div></div>
+  <!-- conversation-starved -->
+  <section style="width:500px;height:600px;display:flex;flex-direction:column">
+    <ol role="log" aria-label="Conversation" style="height:100px;overflow-y:auto;margin:0"><li>message 1</li><li>message 2</li><li>message 3</li><li>message 4</li><li>message 5</li><li>message 6</li><li>message 7</li><li>message 8</li><li>message 9</li><li>message 10</li></ol>
+    <div style="height:480px">a mission panel that eats the room</div>
+  </section>
+  <!-- text-cut-silently -->
+  <div style="width:80px;overflow:hidden;white-space:nowrap">this sentence is far too long to fit</div>
+  <!-- text-cut-silently, vertically: wrapped text cut at the bottom of a fixed-height box -->
+  <div style="width:120px;height:20px;overflow:hidden">wrapped text that needs three lines and gets one</div>
+  <!-- control-off-screen -->
+  <button style="position:absolute;top:120px;left:1240px;width:120px">Off screen</button>
+  <!-- controls-overlap -->
+  <button style="position:absolute;top:300px;left:640px;width:100px;height:40px">Under</button>
+  <button style="position:absolute;top:305px;left:650px;width:100px;height:40px">Over</button>
+  <!-- text-over-text -->
+  <span style="position:absolute;top:380px;left:640px">Overlapping words</span>
+  <span style="position:absolute;top:382px;left:644px">Printed on top</span>
+  <!-- text-over-text: a field laid over a heading -->
+  <h2 style="position:absolute;top:440px;left:640px;margin:0;font-size:20px">Session title</h2>
+  <select style="position:absolute;top:438px;left:650px;width:120px" aria-label="Mode"><option>Ask</option></select>
+  <!-- accessibility: an image with no alt; request-failed: it does not exist -->
+  <img src="/missing.png" width="20" height="20">
+  <!-- console-error -->
+  <script>console.error('ui-check fixture: boom')</script>
+</main></body></html>

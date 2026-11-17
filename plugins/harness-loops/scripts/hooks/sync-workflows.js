@@ -17,8 +17,8 @@
 // template (WRAPPER_VERSION), one line of additionalContext asks the session to offer the user the update. It decides
 // nothing; the session asks, and the harness-audit skill does the work. Every other start prints nothing.
 //
-// jev.js rides along to ~/.claude/harness/ only: develop-phase's routeByJev seat runs it from a shell, which
-// reads $HOME whatever the session may load, so the project copy does not need it.
+// jev.js and ui-check.js ride along to ~/.claude/harness/ only: develop-phase's routeByJev and uiCheck seats run them
+// from a shell, which reads $HOME whatever the session may load, so the project copy does not need them.
 //
 //   HARNESS_WORKFLOWS_DIR overrides the destination (tests).
 
@@ -34,6 +34,7 @@ const SRC = path.join(__dirname, '..', '..', 'workflows');
 // v2: args with `tickets` go to develop-spec (loops 1.4.0).
 const WRAPPER_VERSION = 2;
 const JEV = path.join(__dirname, '..', 'jev.js');
+const UI_CHECK = path.join(__dirname, '..', 'ui-check.js');
 
 function destDir() {
   return process.env.HARNESS_WORKFLOWS_DIR || path.join(os.homedir(), '.claude', 'harness');
@@ -90,6 +91,7 @@ function syncInto(dest) {
 function sync(cwd) {
   syncInto(destDir());
   copyIfChanged(JEV, destDir());
+  copyIfChanged(UI_CHECK, destDir());
   const local = projectDir(cwd);
   if (!local) return;
   syncInto(local);
@@ -114,4 +116,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { sync, destDir, projectDir, wrapperState, notice, WRAPPER_VERSION, SRC, JEV };
+module.exports = { sync, destDir, projectDir, wrapperState, notice, WRAPPER_VERSION, SRC, JEV, UI_CHECK };
