@@ -28,7 +28,7 @@ const runs = text.split('\n').filter(Boolean).flatMap((line) => {
 
 const repos = new Map();
 for (const r of runs) {
-  const s = repos.get(r.root) || { repo: r.repo, runs: 0, green: 0, catches: 0, fixed: 0, gaveUp: 0, unenforced: 0, seconds: 0, open: false };
+  const s = repos.get(r.repo) || { repo: r.repo, runs: 0, green: 0, catches: 0, fixed: 0, gaveUp: 0, unenforced: 0, seconds: 0, open: false };
   s.runs += 1;
   s.seconds += r.seconds || 0;
   if (r.result === 'green') { s.green += 1; if (s.open) { s.fixed += 1; s.open = false; } }
@@ -36,7 +36,7 @@ for (const r of runs) {
   else if (r.result === 'blocked') { if (!s.open) s.catches += 1; s.open = true; }
   else if (r.result === 'gave-up') { s.gaveUp += 1; s.open = false; }
   else if (r.result === 'red-unenforced') s.unenforced += 1;
-  repos.set(r.root, s);
+  repos.set(r.repo, s);
 }
 
 const rows = [...repos.values()].sort((a, b) => b.catches - a.catches || b.runs - a.runs);
@@ -55,4 +55,4 @@ for (const s of rows) {
   console.log(`${s.repo.slice(0, 27).padEnd(28)}${pad(s.runs, 6)}${pad(s.green, 7)}${pad(s.catches, 9)}${pad(s.fixed, 7)}${pad(s.gaveUp, 9)}${pad(s.unenforced, 13)}${pad(Math.round(s.seconds / s.runs), 7)}`);
 }
 const total = (k) => rows.reduce((n, s) => n + s[k], 0);
-console.log(`\n${total('catches')} catches, ${total('fixed')} fixed before the turn ended, ${total('gaveUp')} left to the human.`);
+console.log(`\n${total('catches')} caught, ${total('fixed')} fixed before the turn ended, ${total('gaveUp')} left to the human.`);

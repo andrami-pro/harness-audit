@@ -16,7 +16,8 @@
 # Every run of the gate appends one line to ~/.claude/gate-log.ndjson (HARNESS_GATE_LOG overrides):
 # repo, gate, result, attempt, seconds. A turn skipped because the tree did not change writes nothing.
 # Results: green | blocked (red, Claude sent back) | red-unenforced (never green in this repo) |
-# gave-up (3 failures on the same tree).
+# still-red (blocked once in this reply, the fix did not turn it green) | gave-up (3 failures on the same tree).
+# `repo` is the main checkout's name, so the worktrees of one project count as one project.
 # `baseline/gate-stats.js` reads it; nothing else does, and nothing leaves the machine.
 set -uo pipefail
 
@@ -40,7 +41,9 @@ fi
 state_dir="${HARNESS_VERIFY_STATE:-$HOME/.cache/claude-verify}"
 gate_log="${HARNESS_GATE_LOG:-$HOME/.claude/gate-log.ndjson}"
 log_run() { # result attempt seconds
-  jq -cn --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg repo "$(basename "$root")" --arg root "$root" \
+  local main
+  main=$(dirname "$(cd "$(git rev-parse --git-common-dir 2>/dev/null)" 2>/dev/null && pwd)")
+  jq -cn --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg repo "$(basename "${main:-$root}")" --arg root "$root" \
     --arg gate "${gate[*]}" --arg result "$1" --argjson attempt "${2:-1}" --argjson seconds "${3:-0}" \
     '{ts:$ts,repo:$repo,root:$root,gate:$gate,result:$result,attempt:$attempt,seconds:$seconds}' \
     >> "$gate_log" 2>/dev/null || true
@@ -60,10 +63,8 @@ fingerprint=$(
 # Block at most once per reply. When a background agent keeps editing the tree, the fingerprint changes every time and
 # the 3-failure brake below never fires: each re-run blocked again, and the extra load made slow tests fail
 # (2026-11-16, 9 blocks in a row while develop-phase was working on the same worktree).
-if [ "$(printf '%s' "$input" | jq -r '.stop_hook_active // false' 2>/dev/null)" = "true" ]; then
-  jq -n --arg g "${gate[*]}" '{systemMessage: ("verify-on-stop: `" + $g + "` falló en esta respuesta; no vuelvo a bloquear hasta la siguiente.")}'
-  exit 0
-fi
+# The gate still runs this second time, so the log and the message say whether the fix worked; it does not block.
+already_blocked=$(printf '%s' "$input" | jq -r '.stop_hook_active // false' 2>/dev/null)
 
 started=$SECONDS
 out=$("${gate[@]}" 2>&1)
@@ -74,6 +75,12 @@ if [ $status -eq 0 ]; then
   printf '%s' "$fingerprint" > "$state_dir/$key.ok"
   rm -f "$state_dir/$key.fail"
   log_run green 1 "$took"
+  exit 0
+fi
+
+if [ "$already_blocked" = "true" ]; then
+  log_run still-red 1 "$took"
+  jq -n --arg g "${gate[*]}" '{systemMessage: ("verify-on-stop: `" + $g + "` sigue en rojo tras el arreglo de esta respuesta; no vuelvo a bloquear hasta la siguiente.")}'
   exit 0
 fi
 

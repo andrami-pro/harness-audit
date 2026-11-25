@@ -39,8 +39,10 @@ for pair in "${pairs[@]}"; do
   fi
   mkdir -p "$(dirname "$to")"
   if [ -f "$to" ]; then
-    cp -p "$to" "$to.bak-$(date +%Y-%m-%d)"
-    echo "updated: $to (previous kept as $(basename "$to").bak-$(date +%Y-%m-%d))"
+    bak="$to.bak-$(date +%Y-%m-%d)"
+    # A second install on the same day keeps the first backup: that one is the version from before today.
+    [ -e "$bak" ] || cp -p "$to" "$bak"
+    echo "updated: $to (previous kept as $(basename "$bak"))"
   else
     echo "created: $to"
   fi
