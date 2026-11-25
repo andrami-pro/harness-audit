@@ -1,0 +1,12 @@
+[
+  "Read(./.env)",
+  "Read(./.env.local)",
+  "Read(./.env.*.local)",
+  "Read(./.env.production)",
+  "Read(./.env.development)",
+  "Read(./.dev.vars)",
+  "Read(./.dev.vars.*)",
+  "Read(~/.ssh/**)",
+  "Bash(git push --force*)",
+  "Bash(git push -f*)"
+]
