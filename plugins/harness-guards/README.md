@@ -23,6 +23,21 @@ The guards are deliberately conservative (short, high-precision pattern lists �
 `loop-telemetry` (`SubagentStop`, `Stop`) appends one ndjson line per agent boundary to
 `~/.claude/loop-telemetry.ndjson` for the dashboard. It blocks nothing and sends nothing.
 
+## The baseline — `project-gate`, `baseline-check`, `/harness-guards:catch-up`
+
+What every project on the machine gets, whatever its stack:
+
+- `project-gate` (`Stop`) runs the project's own gate, `.claude/verify.sh` or else the `preflight` script, when the
+  tree changed since its last green run. On red the agent is sent back, once per reply and three times at most on
+  the same tree, and only where the gate has been green before. Each run is a line in `~/.claude/gate-log.ndjson`;
+  `node scripts/gate-stats.js` counts what it caught per project.
+- `baseline-check` (`SessionStart`) says when a project's stamp (`.claude/harness-baseline`) is older than
+  `baseline/VERSION` and offers `/harness-guards:catch-up`, which commits the deny rules of `baseline/deny.json`,
+  gets the gate green once, audits the project's prompts and checks CI. It keeps a copy of the baseline in
+  `~/.claude/harness-baseline/`, and of `pi/harness-baseline.ts` in `~/.pi/agent/extensions/` when Pi is installed.
+
+The deny rules themselves are yours to register in `~/.claude/settings.json`; no hook edits that file.
+
 ## Watch them run — `/dashboard-harness`
 
 `/dashboard-harness` is the observer the loops are watched through. It reads the transcripts Claude Code

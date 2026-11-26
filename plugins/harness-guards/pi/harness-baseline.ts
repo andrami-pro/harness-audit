@@ -1,12 +1,14 @@
-// The same harness baseline Claude Code gets from ~/.claude/settings.json and ~/.claude/hooks, for Pi.
+// The same harness baseline Claude Code gets from ~/.claude/settings.json and the harness-guards plugin, for Pi.
+// The plugin's baseline-check hook copies this file to ~/.pi/agent/extensions/ and the scripts it runs to
+// ~/.claude/harness-baseline/hooks/.
 // One source for both tools: the deny list is ~/.claude/harness-baseline/deny.json and the session-start
 // and stop checks are the same scripts, so a change there reaches Pi and Claude Code at once.
 //
 // - tool_call: blocks reads/edits of the secret files in deny.json, bash commands that name them, and
 //   force pushes. Pi has no permission system or sandbox, so this is a guard on what the model asks for,
 //   not on what a child process opens: a dependency run by a test can still read .env.
-// - session_start: runs baseline-check.sh and, when the repo is behind, tells the user and the model.
-// - agent_before_settle: runs verify-on-stop.sh; on exit 2 the failure goes back to the model, which
+// - session_start: runs baseline-check.js and, when the repo is behind, tells the user and the model.
+// - agent_before_settle: runs project-gate.js; on exit 2 the failure goes back to the model, which
 //   continues. The script itself skips unchanged trees and gives up after three failures.
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -17,7 +19,7 @@ import { basename, isAbsolute, join, resolve } from "node:path";
 
 const HOME = homedir();
 const BASELINE = join(HOME, ".claude", "harness-baseline");
-const HOOKS = join(HOME, ".claude", "hooks");
+const HOOKS = join(BASELINE, "hooks");
 const MARKER = "<!-- harness-baseline -->";
 
 type Rules = { files: RegExp[]; dirs: string[]; commands: string[] };
@@ -71,7 +73,7 @@ function blockedCommand(command: string, cwd: string, rules: Rules): string | un
 }
 
 function runHook(script: string, cwd: string, timeoutMs: number) {
-  return spawnSync(join(HOOKS, script), {
+  return spawnSync("node", [join(HOOKS, script), "--standalone"], {
     input: JSON.stringify({ cwd }),
     encoding: "utf8",
     timeout: timeoutMs,
@@ -103,11 +105,11 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("session_start", async (_event, ctx) => {
-    const r = runHook("baseline-check.sh", ctx.cwd, 10_000);
+    const r = runHook("baseline-check.js", ctx.cwd, 10_000);
     const msg = systemMessage(r.stdout);
     if (!msg) return;
     ctx.ui.notify(msg, "warning");
-    baselineNote = `${MARKER}\nEl baseline de arnés de este repo está atrasado. ${msg} En tu primera respuesta díselo al usuario en una línea y ofrécele /arnes-al-dia; no lo ejecutes sin que lo pida.`;
+    baselineNote = `${MARKER}\nEl baseline de arnés de este repo está atrasado. ${msg} En tu primera respuesta díselo al usuario en una línea y ofrécele /catch-up; no lo ejecutes sin que lo pida.`;
   });
 
   pi.on("before_agent_start", async (event) => {
@@ -116,7 +118,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("agent_before_settle", async (event, ctx) => {
-    const r = runHook("verify-on-stop.sh", ctx.cwd, 300_000);
+    const r = runHook("project-gate.js", ctx.cwd, 300_000);
     const msg = systemMessage(r.stdout);
     if (msg) ctx.ui.notify(msg, "warning");
     if (r.status !== 2) return;

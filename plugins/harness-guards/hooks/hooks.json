@@ -59,6 +59,12 @@
           {
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/hooks/loop-telemetry.js\""
+          },
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/hooks/project-gate.js\"",
+            "timeout": 300,
+            "statusMessage": "Verifying the project…"
           }
         ]
       }
@@ -74,6 +80,11 @@
           {
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/hooks/quota-watch.js\""
+          },
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/hooks/baseline-check.js\"",
+            "timeout": 10
           }
         ]
       }

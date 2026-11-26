@@ -4,6 +4,20 @@ Every change to the harness that an operator can notice, newest first. Each entr
 not how it is built. Minor internal fixes live in the commits; they make the list only when they
 change behavior.
 
+## 2026-11-26 · The baseline ships in the plugin (guards 1.4.0)
+
+The gate that stops a turn on a failing tree, the "this project is behind" notice and the command that brings a
+project up to date were hand-installed files outside any plugin. They are part of `harness-guards` now and update
+with it.
+
+- **`project-gate`** (Stop) and **`baseline-check`** (SessionStart) replace `~/.claude/hooks/verify-on-stop.sh` and
+  `baseline-check.sh`. Same behaviour, same log, same "has it ever been green here" memory.
+- **`/harness-guards:catch-up`** replaces `/arnes-al-dia`.
+- **Nothing runs twice.** While the old hooks are still registered in `~/.claude/settings.json`, the plugin's stay
+  silent and the session says, once a day, that they can be removed.
+- **Pi**: the extension is copied to `~/.pi/agent/extensions/` by the same hook, and runs the same two scripts.
+- `baseline/install.sh` is gone: there is nothing left to copy by hand.
+
 ## 2026-11-26 · ui-check on path-routed apps (loops 1.11.1)
 
 A screen that does not open is tried once more in a fresh tab, whatever the reason. 1.11.0 retried only a navigation

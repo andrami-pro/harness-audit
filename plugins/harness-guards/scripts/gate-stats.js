@@ -1,9 +1,9 @@
 #!/usr/bin/env node
-// Reads the log verify-on-stop.sh writes and counts, per repository, what the gate did.
+// Reads the log the project-gate hook writes and counts, per repository, what the gate did.
 // A "catch" is a blocked run: the agent was about to finish a turn on a tree that failed the
 // project's own checks. A catch is "fixed" when the next run of that repository is green.
 //
-//   node baseline/gate-stats.js [--since 30d] [--json]
+//   node gate-stats.js [--since 30d] [--json]
 //
 // What it does not show: whether a session without the harness would have left the same failure.
 // It counts failures that reached the end of a turn, which is the moment a session without a gate stops.

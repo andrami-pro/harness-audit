@@ -100,9 +100,9 @@ const SPLIT = {
   },
   'harness-guards': {
     skills: [],
-    commands: ['dashboard-harness', 'session-review'],
+    commands: ['catch-up', 'dashboard-harness', 'session-review'],
     agents: [],
-    hooks: ['block-no-verify', 'destructive-guard', 'loop-telemetry', 'quota-watch', 'repeat-tool-guard', 'secret-scan', 'weekly-review'],
+    hooks: ['baseline-check', 'block-no-verify', 'destructive-guard', 'loop-telemetry', 'project-gate', 'quota-watch', 'repeat-tool-guard', 'secret-scan', 'weekly-review'],
   },
 };
 // A module two plugins need ships in each of them, byte for byte; the first plugin listed holds the
@@ -242,7 +242,7 @@ check('each plugin is self-contained: copied alone, every path it names resolves
     }
   });
   const totals = Object.entries(union).map(([k, v]) => `${v.length} ${k}`).join(', ');
-  if (totals !== '1 skills, 6 commands, 7 agents, 10 hooks') throw new Error(`the three plugins ship ${totals}; expected 1 skills, 6 commands, 7 agents, 10 hooks (2.9.0's 7, sync-workflows, weekly-review, quota-watch)`);
+  if (totals !== '1 skills, 7 commands, 7 agents, 12 hooks') throw new Error(`the three plugins ship ${totals}; expected 1 skills, 7 commands, 7 agents, 12 hooks (2.9.0's 6 commands and 7 hooks, sync-workflows, weekly-review, quota-watch, and the baseline: catch-up, baseline-check, project-gate)`);
   return `${lines.join(' · ')} — union ${totals}`;
 });
 
@@ -377,13 +377,101 @@ check('every frontmatter survives a STRICT YAML parser (GitHub, Pi), not just a 
 // to 5 for session-review; PRD-003 §4 raises it from 5 to 6 for dashboard, on the grounds that the
 // observer is not a loop and that folding it into session-review would put a free report behind a
 // model pass that is deliberately run once a fortnight.
+// The baseline that used to be hand-installed shell scripts (baseline/, until 2026-11-26): the Stop gate and the
+// "this project is behind" notice, run here against a throwaway HOME and repository.
+// Negative controls (2026-11-26, each applied alone, observed, reverted — all exit 1):
+//   a never-green gate also blocks ........ "a gate that has never been green in the repository blocked the turn" (got [2,"blocked"])
+//   an unchanged tree runs again .......... "the gate ran again on a tree that did not change since its green run" (got [0,1])
+//   stop_hook_active ignored .............. "the gate blocked twice in one reply (stop_hook_active)" (got [2,"blocked"])
+//   the 3-failure brake removed ........... "three failures on the same tree did not let the agent stop" (got [2,2,"blocked"])
+//   the old registration ignored .......... "with the old hand-installed hooks still registered, the plugin gate ran too …" (got [2,1,true,"",2])
+//   versions compared as text ............. "2026.2.30 was read as newer than the current version …" (got false)
+//   no copy to ~/.claude/harness-baseline . "a project with no stamp was not told it is behind, or the baseline was not copied …" (got [true,true,false])
+//   the once-a-day mark ignored ........... same message as the old registration (the second notice is not empty)
+check('project-gate blocks a regression once per reply and only where the gate was green; baseline-check says when a project is behind and yields to the old hooks', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'baseline-'));
+  const home = path.join(tmp, 'home');
+  const repo = path.join(tmp, 'proj');
+  const H = (name) => path.join(ROOT, 'plugins/harness-guards/scripts/hooks', name);
+  const env = { ...process.env, HOME: home, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' };
+  delete env.HARNESS_GATE_LOG; delete env.HARNESS_VERIFY_STATE; delete env.HARNESS_WEEKLY_FILE; delete env.CLAUDE_PROJECT_DIR;
+  const run = (hook, input, args = []) => {
+    const r = require('node:child_process').spawnSync('node', [H(hook), ...args], { input: JSON.stringify(input), encoding: 'utf8', env, cwd: tmp });
+    return { code: r.status, out: r.stdout, err: r.stderr };
+  };
+  const log = () => { try { return fs.readFileSync(path.join(home, '.claude/gate-log.ndjson'), 'utf8').trim().split('\n').map((l) => JSON.parse(l).result); } catch { return []; } };
+  try {
+    fs.mkdirSync(path.join(home, '.claude'), { recursive: true });
+    fs.mkdirSync(path.join(repo, '.claude'), { recursive: true });
+    fs.writeFileSync(path.join(repo, '.claude/verify.sh'), '#!/bin/sh\necho checking; test ! -f broken\n', { mode: 0o755 });
+    execFileSync('sh', ['-c', 'git init -q && git add -A && git commit -qm init'], { cwd: repo, env });
+    const gate = (extra = {}, args = []) => run('project-gate.js', { cwd: repo, ...extra }, args);
+    const touch = (f) => fs.writeFileSync(path.join(repo, f), String(Math.random()));
+    const got = {};
+    touch('broken');
+    got.neverGreen = [gate().code, log().slice(-1)[0]];
+    fs.rmSync(path.join(repo, 'broken'));
+    got.green = [gate().code, log().slice(-1)[0]];
+    const before = log().length;
+    got.unchanged = [gate().code, log().length - before];
+    touch('broken');
+    const red = gate();
+    got.blocked = [red.code, log().slice(-1)[0], /checking/.test(red.err), /verification failed/.test(red.err)];
+    got.sameReply = [gate({ stop_hook_active: true }).code, log().slice(-1)[0]];
+    got.thirdTime = [gate().code, gate().code, log().slice(-1)[0]];
+    const bare = path.join(tmp, 'bare');
+    fs.mkdirSync(bare);
+    execFileSync('sh', ['-c', 'git init -q'], { cwd: bare, env });
+    got.noGate = [run('project-gate.js', { cwd: bare }).code, run('project-gate.js', { cwd: tmp }).code];
+
+    const start = (args = []) => run('baseline-check.js', { hook_event_name: 'SessionStart', cwd: repo }, args);
+    const version = read('plugins/harness-guards/baseline/VERSION').trim();
+    const first = start();
+    got.behind = [first.out.includes(`the current one is ${version}`), first.out.includes('/harness-guards:catch-up'),
+      ['VERSION', 'CHANGELOG.md', 'deny.json', 'hooks/project-gate.js', 'hooks/baseline-check.js'].every((f) => fs.existsSync(path.join(home, '.claude/harness-baseline', f)))];
+    fs.writeFileSync(path.join(repo, '.claude/harness-baseline'), `${version}\n`);
+    got.current = start().out;
+    fs.writeFileSync(path.join(repo, '.claude/harness-baseline'), '9999.1.1\n');
+    got.ahead = start().out;
+    fs.writeFileSync(path.join(repo, '.claude/harness-baseline'), '2026.2.30\n');
+    got.older = start().out.includes('baseline 2026.2.30');
+    got.otherEvent = run('baseline-check.js', { hook_event_name: 'Stop', cwd: repo }).out;
+    // The hand-installed hooks still registered: the plugin's stay silent (the gate would run twice), and say so once a day.
+    fs.writeFileSync(path.join(home, '.claude/settings.json'), JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command: '/h/.claude/hooks/verify-on-stop.sh' }] }] } }));
+    touch('again');
+    const n = log().length;
+    got.legacy = [gate().code, log().length - n, /still registered by hand/.test(start().out), start().out, gate({}, ['--standalone']).code];
+    const want = {
+      neverGreen: [[0, 'red-unenforced'], 'a gate that has never been green in the repository blocked the turn'],
+      green: [[0, 'green'], 'a green run was not logged'],
+      unchanged: [[0, 0], 'the gate ran again on a tree that did not change since its green run'],
+      blocked: [[2, 'blocked', true, true], 'a regression after a green run did not send the agent back with the gate output'],
+      sameReply: [[0, 'still-red'], 'the gate blocked twice in one reply (stop_hook_active)'],
+      thirdTime: [[2, 0, 'gave-up'], 'three failures on the same tree did not let the agent stop'],
+      noGate: [[0, 0], 'a repository with no gate, or a folder that is not a repository, was not left alone'],
+      behind: [[true, true, true], 'a project with no stamp was not told it is behind, or the baseline was not copied to ~/.claude/harness-baseline'],
+      current: ['', 'a project on the current baseline was told something'],
+      ahead: ['', 'a project ahead of the baseline was told it is behind'],
+      older: [true, '2026.2.30 was read as newer than the current version: the parts are numbers, not text'],
+      otherEvent: ['', 'baseline-check answered an event that is not SessionStart'],
+      legacy: [[0, 0, true, '', 2], 'with the old hand-installed hooks still registered, the plugin gate ran too (twice per turn), the notice was missing or repeated the same day, or --standalone did not run the gate'],
+    };
+    for (const [k, [v, why]] of Object.entries(want)) {
+      if (JSON.stringify(got[k]) !== JSON.stringify(v)) throw new Error(`${why} (got ${JSON.stringify(got[k])})`);
+    }
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+  return 'never green → reported, not enforced · green logged · unchanged tree skipped · regression → exit 2 with output · once per reply · gives up at 3 · behind / current / ahead · old hooks registered → silent';
+});
+
 //
 // Negative controls (2026-07-12, both reverted): argument-hint stripped from commands/iterate.md —
 // exit 1, "commands/iterate.md frontmatter missing argument-hint"; an extra command copied in —
 // exit 1, "commands/*.md = 7, expected exactly 6" (2026-09-06, reverted).
-check('exactly 6 commands — 5 loops and 1 observer — each with description + argument-hint', () => {
+check('exactly 7 commands — 5 loops, 1 observer and the baseline catch-up — each with description + argument-hint', () => {
   const files = commandsMd();
-  if (files.length !== 6) throw new Error(`commands/*.md = ${files.length}, expected exactly 6`);
+  if (files.length !== 7) throw new Error(`commands/*.md = ${files.length}, expected exactly 7`);
   for (const rel of files) {
     hasFrontmatterField(rel, 'description');
     hasFrontmatterField(rel, 'argument-hint');
