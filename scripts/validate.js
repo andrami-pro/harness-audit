@@ -1015,7 +1015,12 @@ check('loop-stats reads the skill inventory, the review lifecycle, and fires car
 // The counts are asserted on a transcript small enough to check by hand.
 //
 // Negative controls (2026-11-26, each applied to harness-panel.js, observed, reverted — all exit 1):
-//   CONTROLS
+//   subagent (sidechain) prompts counted ......... "the panel miscounts the fixture: …" (got [1,4,1,…])
+//   tool results counted as prompts .............. same message (got [1,4,1,…])
+//   every blocked run counted as a catch ......... same message (got […,3,1,…])
+//   the font link written without --web-fonts .... "the page names a network address without --web-fonts"
+//   a prompt's text written into the footer ...... "the page quotes a prompt — it may only count"
+//   the quota warning disabled ................... "a quota 30 points ahead of the week is not flagged"
 check('harness-panel counts from local files, quotes no prompt, and makes no network request unless asked', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-panel-'));
   try {

@@ -73,6 +73,22 @@ an invented price is worse than none in a dashboard whose whole claim is that it
 Claude Sonnet 5 carries a dated introductory rate; a run priced during that window is footnoted
 `priced at introductory rate` rather than silently re-priced at today's rate.
 
+## Is it helping? — `harness-panel`
+
+One page, built from files already on your machine, that you can read in a minute and show to someone else. It
+counts and never quotes a prompt.
+
+```bash
+harness-panel --open                 # last 60 days; the page lands in ~/.cache/harness-audit/panel/
+harness-panel --lang es --web-fonts  # Spanish labels; load the page's fonts from Google Fonts
+harness-panel --quota-file <json>    # add the weekly quota card from a statusline snapshot
+```
+
+It shows what the gate caught, how many waves tickets landed and why the rest were blocked, how parallel your
+plans are, how you prompt (bare "go on" turns, corrections, model switches), which skills you use, which harness
+commands you never ran, and one proposal for the week. No tokens, no model, and no network unless you pass
+`--web-fonts`. It does not compare against a session without the harness.
+
 ## Loop 6 · Operator — `/session-review [--since 30d] [--top 20]`
 
 The other loops improve the work. This one improves the person driving it — the loop the other five leave open.
