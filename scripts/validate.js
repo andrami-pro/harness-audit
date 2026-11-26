@@ -102,7 +102,7 @@ const SPLIT = {
     skills: [],
     commands: ['dashboard-harness', 'session-review'],
     agents: [],
-    hooks: ['block-no-verify', 'destructive-guard', 'loop-telemetry', 'repeat-tool-guard', 'secret-scan', 'weekly-review'],
+    hooks: ['block-no-verify', 'destructive-guard', 'loop-telemetry', 'quota-watch', 'repeat-tool-guard', 'secret-scan', 'weekly-review'],
   },
 };
 // A module two plugins need ships in each of them, byte for byte; the first plugin listed holds the
@@ -242,7 +242,7 @@ check('each plugin is self-contained: copied alone, every path it names resolves
     }
   });
   const totals = Object.entries(union).map(([k, v]) => `${v.length} ${k}`).join(', ');
-  if (totals !== '1 skills, 6 commands, 7 agents, 9 hooks') throw new Error(`the three plugins ship ${totals}; expected 1 skills, 6 commands, 7 agents, 9 hooks (2.9.0's 7, sync-workflows, weekly-review)`);
+  if (totals !== '1 skills, 6 commands, 7 agents, 10 hooks') throw new Error(`the three plugins ship ${totals}; expected 1 skills, 6 commands, 7 agents, 10 hooks (2.9.0's 7, sync-workflows, weekly-review, quota-watch)`);
   return `${lines.join(' · ')} — union ${totals}`;
 });
 
@@ -1117,6 +1117,85 @@ check('weekly-review invites once a week with a link, stays quiet otherwise, and
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
+});
+
+// quota-watch speaks at session start and economy mode changes which models review: both must be impossible to
+// trigger by accident. The hook is silent without a snapshot, warns once a day, never switches anything itself, and
+// economy mode ends with the week. In the loop, economy moves the review seats to sonnet and the implementer to
+// medium effort, and never breaks D25a to do it.
+//
+// Negative controls (2026-11-26, each applied, observed, reverted — all exit 1):
+//   CONTROLS
+check('quota-watch warns only when usage runs ahead of the week, economy mode ends with the week, and the loop honours economy without breaking D25a', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-quota-'));
+  try {
+    const script = path.join(ROOT, 'plugins/harness-guards/scripts/hooks/quota-watch.js');
+    const cfgFile = path.join(tmp, 'weekly.json'), stateFile = path.join(tmp, 'economy.json'), quotaFile = path.join(tmp, 'quota.json');
+    const env = { PATH: process.env.PATH, HOME: tmp, HARNESS_WEEKLY_FILE: cfgFile, HARNESS_ECONOMY_FILE: stateFile };
+    const start = JSON.stringify({ hook_event_name: 'SessionStart', source: 'startup' });
+    const hook = (input = start) => execFileSync('node', [script], { input, env, encoding: 'utf8' });
+    const cli = (...a) => execFileSync('node', [script, '--economy', ...a], { env, encoding: 'utf8' }).trim();
+    const snap = (used, daysLeft, at = new Date()) => fs.writeFileSync(quotaFile, JSON.stringify({ at: at.toISOString(), rate_limits: { seven_day: { used_percentage: used, resets_at: Math.floor(Date.now() / 1000 + daysLeft * 86400) } } }));
+    if (hook() !== '') throw new Error('with no quota snapshot configured the hook spoke');
+    fs.writeFileSync(cfgFile, JSON.stringify({ quotaFile, lang: 'es' }));
+    snap(55, 3.5);
+    if (hook() !== '') throw new Error('5 points ahead of the week is under the threshold, and the hook warned');
+    snap(80, 3.5, new Date(Date.now() - 3 * 86400000));
+    if (hook() !== '') throw new Error('a snapshot three days old describes another moment, and the hook warned from it');
+    snap(80, 3.5);
+    if (hook(JSON.stringify({ hook_event_name: 'SessionStart', source: 'resume' })) !== '') throw new Error('the hook spoke on a resumed session');
+    const warn = JSON.parse(hook());
+    const ctx = warn.hookSpecificOutput.additionalContext;
+    if (!/80 % usado con el 50 % de la semana transcurrido \(30 puntos por delante\)/.test(warn.systemMessage)) throw new Error(`the warning does not state used, elapsed and the lead (got ${warn.systemMessage})`);
+    if (!/single yes\/no question/.test(ctx) || !ctx.includes('--economy on') || fs.existsSync(stateFile) && JSON.parse(fs.readFileSync(stateFile, 'utf8')).on) throw new Error('the hook must have the session PROPOSE economy mode, and must not turn it on itself');
+    if (hook() !== '') throw new Error('the warning came back the same day');
+    if (cli('status') !== 'economy mode off') throw new Error('status reports economy on before anyone chose it');
+    if (!/^economy mode on until /.test(cli('on'))) throw new Error('--economy on did not turn it on');
+    const until = Date.parse(JSON.parse(fs.readFileSync(stateFile, 'utf8')).until);
+    if (Math.abs(until - (Date.now() + 3.5 * 86400000)) > 60000) throw new Error('economy mode does not end at the weekly reset the snapshot names');
+    const on = JSON.parse(hook());
+    if (!/economy: true/.test(on.hookSpecificOutput.additionalContext) || !/^Modo economía activo hasta el /.test(on.systemMessage)) throw new Error('while economy is on, the session is not told to pass economy: true to the loops');
+    fs.writeFileSync(stateFile, JSON.stringify({ on: true, until: new Date(Date.now() - 1000).toISOString() }));
+    const ended = JSON.parse(hook());
+    if (!/se apagó solo/.test(ended.systemMessage) || JSON.parse(fs.readFileSync(stateFile, 'utf8')).on !== false) throw new Error('economy mode outlived the week it was chosen for');
+    fs.writeFileSync(cfgFile, JSON.stringify({ quotaFile, quota: false }));
+    fs.writeFileSync(stateFile, '{}');
+    if (hook() !== '') throw new Error('"quota": false did not silence the hook');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+  const harness = `
+    const src = require('fs').readFileSync(process.argv[1], 'utf8').replace(/^export /m, '');
+    const AsyncFn = Object.getPrototypeOf(async function () {}).constructor;
+    const run = async (args) => {
+      const seen = {};
+      const out = await new AsyncFn('args', 'agent', 'log', 'phase', src)({ preparer: false, maxIter: 1, ...args }, async (_p, o) => {
+        const k = String(o.label).split(':')[0]; seen[k] = [o.model, o.effort || null];
+        return k === 'preflight' ? { exitCode: 0, skipped: [], failedCheck: null, tail: '' } : k === 'impl' ? 'impl' : '[PASS] a — x\\nAPPROVED';
+      }, () => {}, () => {});
+      return [seen.impl, seen.review, seen.spec, out.economy === true, out.handoff.status];
+    };
+    (async () => console.log(JSON.stringify({
+      off: await run({}),
+      on: await run({ economy: true }),
+      sonnetImpl: await run({ economy: true, models: { implementer: 'sonnet' } }),
+      external: await run({ economy: true, models: { reviewer: 'openrouter/z-ai/glm-5' } }),
+    })))().catch((e) => console.log('THREW ' + e.stack));
+  `;
+  const out = execFileSync('node', ['-e', harness, path.join(ROOT, 'plugins/harness-loops/workflows/develop-phase.js')], { encoding: 'utf8' }).trim();
+  if (out.startsWith('THREW')) throw new Error(`the develop-phase loop throws when run — ${out.slice(6)}`);
+  const r = JSON.parse(out);
+  const want = {
+    off: [[['opus', null], ['fable', null], ['fable', null], false, 'complete'], 'without economy the line-up or the effort changed'],
+    on: [[['opus', 'medium'], ['sonnet', null], ['sonnet', null], true, 'complete'], 'economy: true did not put the reviewers on sonnet and the implementer at medium effort, or the result does not say economy ran'],
+    sonnetImpl: [[['sonnet', 'medium'], ['fable', null], ['fable', null], true, 'complete'], "economy moved a reviewer into the implementer's family — D25a has no override, economy included"],
+  };
+  for (const [k, [v, why]] of Object.entries(want)) {
+    if (JSON.stringify(r[k]) !== JSON.stringify(v)) throw new Error(`${why} (got ${JSON.stringify(r[k])})`);
+  }
+  // An external reviewer runs through a relay seat (the scout tier), never as sonnet itself.
+  if (r.external[1][0] === 'sonnet') throw new Error(`economy replaced an external reviewer the operator configured (got ${JSON.stringify(r.external)})`);
+  return 'silent without a snapshot · threshold · stale snapshot ignored · once a day · proposes, never switches · ends at the reset · loop: reviewers → sonnet, implementer medium, D25a kept, external reviewer kept';
 });
 
 check('dashboard-harness runs the script and never parses transcripts itself', () => {

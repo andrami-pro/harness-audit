@@ -413,7 +413,9 @@ const waiting = tickets.filter((t) => state[t.id] === READY && !results[t.id])
 let finalReview = null
 if (landed.length) {
   phase('Final review')
-  const reviewer = String(cfg.models?.reviewer ?? cfg.reviewerModel ?? 'fable')
+  const configured = String(cfg.models?.reviewer ?? cfg.reviewerModel ?? 'fable')
+  // economy: the final review follows the tickets' reviewers down to sonnet, unless sonnet wrote the code.
+  const reviewer = cfg.economy === true && !configured.includes('/') && !String(cfg.models?.implementer ?? 'opus').includes('sonnet') ? 'sonnet' : configured
   const model = reviewer.includes('/') ? (String(cfg.models?.implementer ?? 'opus').includes('fable') ? 'opus' : 'fable') : reviewer
   const RANGE = `git diff ${read.head}..HEAD`
   const common = `${SEAT}Read-only: read files and run the tests, edit nothing. Work in ${read.root}. The change under review is

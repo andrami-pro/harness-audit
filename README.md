@@ -67,12 +67,13 @@ and `harness-guards` to keep what you had.
 
 The guards are deliberately conservative; to disable them, uninstall `harness-guards`.
 
-Five more hooks, none of which blocks anything (two with `harness-guards`, three with `harness-loops`):
+Six more hooks, none of which blocks anything (three with `harness-guards`, three with `harness-loops`):
 
 | Hook | Event | What it does |
 |---|---|---|
 | `loop-telemetry` | `SubagentStop`, `Stop` | Appends one ndjson line per agent boundary for `/dashboard-harness`. Local file, never sent anywhere |
 | `weekly-review` | `SessionStart` | Once a week, rebuilds the local `harness-panel` page and invites you to open it. Calls no model unless you set `"coach": true` in `~/.claude/harness-weekly.json`; `"enabled": false` silences it |
+| `quota-watch` | `SessionStart` | **Silent unless you name a quota snapshot** (`quotaFile` in `~/.claude/harness-weekly.json`). Says when the weekly quota runs ahead of the week and has the session propose economy mode; switches nothing itself |
 | `prompt-router` | `UserPromptSubmit` | **Off unless a TypeSafe key is present.** Suggests which installed skill and which subagent tier fit the prompt, in one advisory line. Sends the first 1500 chars of the prompt — see [§Jev](plugins/harness-loops/README.md#jev--the-optional-system-one-classifier) |
 | `jev-nudge` | `SessionStart` | While no key is present, says once a day that Jev is off and names `bin/jev-setup`. Silent with a key |
 | `sync-workflows` | `SessionStart` | Keeps a copy of the global `develop-phase` loop in `~/.claude/harness/`, and in `.claude/harness/` (git-ignored) of each project that has a wrapper. Writes nothing else; says one line when a project's develop-phase is a fork or an older wrapper |
@@ -114,8 +115,7 @@ Claude Code only.
    proposes one of four paths — chat answer, develop-phase loop, develop-spec plan, design seat — with
    the line-up model it would use. You approve or decline every switch. The daily advisor keeps those
    recommendations current without spending a token per request.
-6. **Watch.** `/dashboard-harness` reads your local transcripts and reports which tools failed, which
-   guards fired, which skills you installed and never used — free, local.
+6. **Watch.** `harness-panel` builds one local page: what the gate caught, why tickets blocked, how you prompt. Free.
 
 An independent reviewer beats self-critique; the often-cited ~62% → ~89% figures are directional, not
 reproduced yet ([WHITEPAPER §8.1](WHITEPAPER.md)). A minimal harness beats an inflated one.
