@@ -4,6 +4,18 @@ Every change to the harness that an operator can notice, newest first. Each entr
 not how it is built. Minor internal fixes live in the commits; they make the list only when they
 change behavior.
 
+## 2026-11-26 · The plan says how parallel it is, and questions its dependencies (harness-loops 1.9.0)
+
+**Two waves in three held a single ticket.** In the first 26 plans, 50 of 78 waves had one ticket and 86 of 116
+tickets waited on another. develop-spec only schedules what each ticket's `Blocked by:` declares, and no plan said
+how serial the result was.
+
+- **The shape, before you approve.** Tickets per wave, the longest chain, and whether migrations or `maxParallel`
+  are what keep it serial.
+- **A dependency review on the plan run.** One seat reads the tickets and marks each `Blocked by:` needed or
+  avoidable, with the seam to write in both tickets, and the plan shows the waves you would get without the
+  avoidable ones. It never changes the real waves: you edit the tickets, or not.
+
 ## 2026-11-26 · Waves stop losing tickets to plumbing (harness-loops 1.8.0)
 
 **Of 36 tickets blocked in six weeks of waves runs, about 30 were not blocked by their code.** Counted from the

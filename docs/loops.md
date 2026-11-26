@@ -395,6 +395,13 @@ The project wrapper runs it when the args carry `tickets`, with the same config 
   removed. A ticket that does not converge, or does not merge, is marked `blocked` with the reason. Its worktree stays for
   you to inspect, its dependents wait, and the rest of the graph goes on.
 - **Refuses** a checkout with uncommitted changes, since it merges into it, and two tickets that share an id.
+- **The plan says how parallel it is.** "13 tickets in 7 waves, 1.9 per wave; the longest chain is 01 → 02 → 05 →
+  09", plus a note when migrations or `maxParallel`, not dependencies, keep it serial. develop-spec schedules what
+  the tickets declare: the split is decided where the tickets are written.
+- **A seat reviews the dependencies, on the plan run only.** For each `Blocked by:` it answers needed or avoidable,
+  with the seam line that would let both tickets run at once, and the plan shows the waves you would get. It
+  suggests; the real waves follow the tickets as written. `dependencyReview: false` turns it off. Sonnet at high
+  effort unless `models.critic` says otherwise.
 - **One preflight before any ticket.** The first fresh worktree runs the project's preflight once, before an
   implementer starts. Red, or skipping a check `allowSkipped` does not name, stops the run there: that gate would be
   red for every ticket, whatever it wrote. `baselinePreflight: false` turns it off.

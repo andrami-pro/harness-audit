@@ -3412,7 +3412,13 @@ check('develop-spec plumbing: a red baseline preflight stops before any implemen
 // would be without them. It suggests: the real waves never change because of it.
 //
 // Negative controls (2026-11-26, each applied to workflow-src/develop-spec.js and rebuilt, observed, reverted — all exit 1):
-//   CONTROLS
+//   invented edges no longer filtered ............ "the dependency seat did not run once on the plan, an edge it invented was kept, or the what-if waves are wrong" (got [1,"sonnet","high",4,3,"03<-02 04<-01 03<-01",…])
+//   the `confirmed !== true` guard removed ....... "the dependency seat ran on a confirmed run, …" (got [0,null,1,"complete",0,…])
+//   the `dependencyReview !== false` guard removed  same message (got [1,{"reviewed":3,…},…])
+//   the real waves planned without one blocker ... "the plan does not say how parallel it is …" (got ["[[\"01\",\"02\",\"03\",\"04\"]]",…])
+//   chainOf() returning only the ticket .......... same message (got […,"… the longest chain is 01","01",true])
+//   the what-if set to the real waves ............ "… or the what-if waves are wrong" (got […,"[[\"01\"],[\"02\",\"04\"],[\"03\"]]","4 ticket(s) in 3 wave(s), 1.3 per wave",false,true])
+//   the migration clause dropped ................. "the plan does not say when migrations or maxParallel, not dependencies, are what keeps it serial"
 check('develop-spec plan: it states how parallel it is, and a seat names the avoidable dependencies without changing the waves', () => {
   const harness = (file) => {
     const src = require('fs').readFileSync(file, 'utf8').replace(/^export /m, '');
