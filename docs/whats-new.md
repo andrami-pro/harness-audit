@@ -4,6 +4,19 @@ Every change to the harness that an operator can notice, newest first. Each entr
 not how it is built. Minor internal fixes live in the commits; they make the list only when they
 change behavior.
 
+## 2026-11-26 · The harness starts counting what it catches; waves refuse a config that cannot work
+
+**Nothing said whether the harness helps.** The Stop gate sent the agent back on a failing tree and kept no record.
+
+- **The gate keeps a log.** Each run of a project's gate is one line on your machine: project, green or red, attempt,
+  seconds. `node baseline/gate-stats.js` counts, per project, the turns the gate stopped on a failing tree and how
+  many were fixed before the turn ended. Nothing leaves the machine.
+- **The user-level baseline lives in this repository** (`baseline/`): the `/arnes-al-dia` command, the deny list, the
+  SessionStart and Stop hooks, the Pi extension. `baseline/install.sh` copies them to `~/.claude` and `~/.pi`.
+- **develop-spec checks the config before the plan** (harness-loops 1.7.1). An agent type the session cannot run, or
+  an `integrate` that is a note and not a merge command, stops the run before any worktree exists. A
+  `worktreeSetup` that copies `.env` is a warning. In a live run the first of these cost about 400k tokens.
+
 ## 2026-11-17 · 3.2 — the loop opens the interface in a real browser
 
 **Unit tests never draw the screen, so a broken layout stayed green.** In Tama OS every test passed while the

@@ -15,7 +15,11 @@ const results = [];
 // from the pass count, so the summary can never claim coverage it does not have.
 class Skipped extends Error {}
 const skip = (reason) => { throw new Skipped(reason); };
+// VALIDATE_ONLY=<text> runs only the checks whose name contains it: one check in seconds while working on it.
+// The full run is still what says the repository is green.
+const ONLY = process.env.VALIDATE_ONLY;
 const check = (name, fn) => {
+  if (ONLY && !name.includes(ONLY)) return;
   try {
     const detail = fn();
     results.push({ name, state: 'pass', detail: detail || '' });
@@ -3158,7 +3162,7 @@ check('develop-spec waves: plan first, frontier by Blocked by, slots, one migrat
       let maxActive = 0, merging = 0, maxMerging = 0, mig = 0, maxMig = 0;
       const agent = async (prompt, o) => {
         const l = String(o.label); calls.push({ label: l, prompt });
-        if (l === 'read') return { root: '/r', branch: 'main', head: 'h0', dirty: opt.dirty ?? [], error: null, tickets };
+        if (l === 'read') return { root: '/r', branch: 'main', head: 'h0', dirty: opt.dirty ?? [], agents: opt.agents, error: null, tickets };
         const id = l.split(':')[0], seat = l.split(':').slice(1).join(':');
         if (id === 'final') return '[PASS] a — x\nAPPROVED';
         const t = tickets.find((x) => x.id === id);
@@ -3204,6 +3208,10 @@ check('develop-spec waves: plan first, frontier by Blocked by, slots, one migrat
       const evil = await run({ confirmed: true, worktreeSetup: 'pnpm install --frozen-lockfile' }, [T('01', { title: "x $(touch /tmp/p) it's" })]);
       const untidy = await run({ confirmed: true }, three(), { untidy: '01' });
       const titled = await run({ confirmed: true }, [T('01', { title: '01 — Pi: x' })]);
+      const noAgent = await run({ confirmed: true, agentTypes: { implementer: 'implementer', scout: 'Explore', reviewer: 'harness-loops:scorer' } }, three(), { agents: ['reviewer'] });
+      const hasAgent = await run({ confirmed: true, agentTypes: { implementer: 'implementer', scout: 'Explore', reviewer: 'harness-loops:scorer' } }, three(), { agents: ['implementer'] });
+      const prose = await run({ confirmed: true, integrate: 'the human deploys from the main checkout: pnpm build' }, three());
+      const secret = await run({ worktreeSetup: 'pnpm install && cp /abs/.env .' }, three());
       const st = (r) => r.out.tickets.map((t) => `${t.id}:${t.status}`).join(' ');
       console.log(JSON.stringify({
         plan: [JSON.stringify(plan.out.plan.waves), plan.started.length, plan.out.handoff.status, /approve the ticket breakdown/.test(plan.out.handoff.summary)],
@@ -3222,6 +3230,9 @@ check('develop-spec waves: plan first, frontier by Blocked by, slots, one migrat
         quoted: [evil.by('01:merge').prompt.includes("-m 'merge: 01 — x $(touch /tmp/p) it'\\''s'"), evil.by('01:worktree').prompt.includes('pnpm install --frozen-lockfile')],
         untidy: [st(untidy), /01 landed, tidy up by hand: .*worktree has untracked files/.test(untidy.out.brief), untidy.at('01:merge') < untidy.at('03:worktree')],
         doneDep: st(doneDep),
+        config: [noAgent.out.handoff.status, noAgent.started.length, /agentTypes\.implementer is 'implementer'/.test(noAgent.out.handoff.blocker), /scout|reviewer/.test(noAgent.out.handoff.blocker), st(hasAgent),
+          prose.out.handoff.status, prose.started.length, /neither \{branch\} nor a git merge/.test(prose.out.handoff.blocker),
+          secret.out.plan.warnings.filter((w) => /names a secret file/.test(w)).length, plan.out.plan.warnings.length],
         titled: [titled.by('01:merge').prompt.includes("-m 'merge: 01 — Pi: x'"), /01 — 01/.test(JSON.stringify(titled.calls.map((c) => c.prompt)) + titled.out.brief)],
       }));
     })().catch((e) => console.log('THREW ' + e.stack));
@@ -3244,6 +3255,7 @@ check('develop-spec waves: plan first, frontier by Blocked by, slots, one migrat
     quoted: [[true, true], "a ticket title reaches the merge seat's shell unquoted (its $(…) would run), or worktreeSetup did not reach the new worktree"],
     untidy: [['01:done 02:done 03:done', true, true], 'a merge that landed was reported not merged because its worktree could not be removed'],
     doneDep: ['01:done 02:done', 'a ticket already done did not count as a met blocker'],
+    config: [['blocked', 0, true, false, '01:done 02:done 03:done', 'blocked', 0, true, 1, 0], 'a config that cannot work was found after the run started: an agent type the session cannot run, an integrate that is a note and not a merge command, or a worktreeSetup that copies a secret (or a config that can work was refused)'],
     titled: [[true, false], 'a heading that starts with its id is said twice ("01 — 01 — Pi") in the merge message or the brief, as in the first pilot'],
   };
   for (const [k, [v, why]] of Object.entries(want)) {

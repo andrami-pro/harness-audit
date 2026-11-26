@@ -19,8 +19,10 @@ export const meta = {
 //   confirmed     true runs the waves. Without it the run reads the tickets and returns the plan: the human
 //                 approves the breakdown once, before any code
 //   maxParallel   tickets in flight at once (default 2)
-//   integrate     the command that merges a ticket's branch into this checkout; `{branch}` is replaced by the
-//                 branch name, or the branch is appended. Default: git merge --no-ff
+//   integrate     the command the merge seat RUNS to merge a ticket's branch into this checkout; `{branch}` is
+//                 replaced by the branch name (a `git merge …` without it gets the branch appended). Default:
+//                 git merge --no-ff. In develop-phase the same key is a note for the human; a value with neither
+//                 `{branch}` nor a git merge is refused here, so that note is never run as a command
 //   worktreeSetup a command run in each new worktree before its ticket starts (`pnpm install --frozen-lockfile`):
 //                 a worktree holds only what git tracks, so dependencies and untracked files are not there
 // A ticket's `## Seams` section is its agreed seams. A ticket without one runs with the analyst's own.
@@ -45,8 +47,9 @@ phase('Read')
 const READ_SCHEMA = {
   type: 'object',
   additionalProperties: false,
-  required: ['root', 'branch', 'head', 'dirty', 'tickets', 'error'],
+  required: ['root', 'branch', 'head', 'dirty', 'agents', 'tickets', 'error'],
   properties: {
+    agents: { type: 'array', items: { type: 'string' } },
     root: { type: 'string' },
     branch: { type: 'string' },
     head: { type: 'string' },
@@ -75,6 +78,8 @@ const read = await agent(
   `${SEAT}Read-only: change nothing. Run \`git rev-parse --show-toplevel\` (root), \`git branch --show-current\` (branch),
 \`git rev-parse --short HEAD\` (head), \`git status --short --untracked-files=no\` and \`git status --short -- ${q(TICKETS)}\`
 (dirty: every line of both, verbatim — a ticket file never committed is not in the worktrees branched from HEAD).
+Before any cd, list the .md files in \`.claude/agents/\` of the directory you were started in (\`pwd\`) and in
+\`~/.claude/agents/\` (agents: the \`name:\` value of each file's frontmatter; [] when neither folder exists).
 Then read every .md file in ${TICKETS} and return one entry per ticket:
 - id: the leading number of the file name, as written ("01")
 - file: the file name
@@ -102,6 +107,24 @@ const dupes = [...new Set(tickets.map((t) => t.id).filter((id, i, all) => all.in
 if (dupes.length) {
   return blocked('Two tickets share an id', `Renumber them: ${dupes.map((id) => tickets.filter((t) => t.id === id).map((t) => t.file).join(' and ')).join(' · ')}`)
 }
+
+// The config is checked here, before the plan is shown and long before a worktree exists. Each of these was found
+// at a later seat in a live run (2026-11-25), after the scout and the analyst had already been paid for.
+const configProblems = []
+// Claude Code loads project agents only from the folder the session started in, not from a nested repository.
+// A name with `:` is a plugin's agent, which the read seat cannot list.
+const BUILTIN_AGENTS = new Set(['general-purpose', 'Explore', 'Plan', 'claude'])
+if (Array.isArray(read.agents)) {
+  for (const [seat, type] of Object.entries(cfg.agentTypes ?? {})) {
+    if (typeof type !== 'string' || type.includes(':') || BUILTIN_AGENTS.has(type) || read.agents.includes(type)) continue
+    configProblems.push(`agentTypes.${seat} is '${type}', and this session has no agent of that name: project agents load only from .claude/agents/ of the folder the session started in (and ~/.claude/agents/). Start the session inside the repository, or use 'general-purpose' and tell the seat to read .claude/agents/${type}.md first`)
+  }
+}
+if (typeof cfg.integrate === 'string' && !cfg.integrate.includes('{branch}') && !/\bgit\s+(merge|rebase|cherry-pick)\b/.test(cfg.integrate)) {
+  configProblems.push(`integrate is the command the merge seat runs for every ticket, and '${cfg.integrate.slice(0, 80)}' has neither {branch} nor a git merge. Write the command with {branch} where the branch name goes, or drop the key to get git merge --no-ff`)
+}
+if (configProblems.length) return blocked('The run config cannot work — nothing was started', configProblems.join(' · '))
+
 const byId = Object.fromEntries(tickets.map((t) => [t.id, t]))
 const DONE = 'done', READY = 'ready-for-agent'
 const state = Object.fromEntries(tickets.map((t) => [t.id, t.status]))
@@ -109,6 +132,10 @@ const state = Object.fromEntries(tickets.map((t) => [t.id, t.status]))
 // The plan assumes every ticket lands: wave n holds the tickets whose blockers all land in earlier waves, and
 // at most one ticket that adds a migration. What can never start is named, not dropped.
 const warnings = []
+// Copying a secret into each worktree stops every ticket at setup in a project that denies reading it, as it should.
+if (/(^|[\s/'"=])\.(env|dev\.vars)\b/.test(String(cfg.worktreeSetup ?? ''))) {
+  warnings.push('worktreeSetup names a secret file (.env or .dev.vars): a project whose deny rules protect it blocks every ticket at setup. Make the preflight pass in a fresh worktree without secrets instead')
+}
 for (const t of tickets) {
   for (const b of t.blockedBy) if (!byId[b]) warnings.push(`${t.id} is blocked by ${b}, which is not a ticket in ${TICKETS}`)
 }
