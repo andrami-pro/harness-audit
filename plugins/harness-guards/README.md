@@ -89,6 +89,19 @@ plans are, how you prompt (bare "go on" turns, corrections, model switches), whi
 commands you never ran, and one proposal for the week. No tokens, no model, and no network unless you pass
 `--web-fonts`. It does not compare against a session without the harness.
 
+### The weekly invitation and the coach notes
+
+`weekly-review` (`SessionStart`) rebuilds the panel once a week and invites you to open it, with a link. It calls
+no model. `~/.claude/harness-weekly.json` configures it: `lang`, `webFonts`, `quotaFile`, `everyDays`, and
+`"enabled": false` to silence it.
+
+`"coach": true` adds the one part that costs tokens: once a week the session runs one background agent (Sonnet,
+high effort) on `harness-panel --coach-brief`, about 5k tokens of evidence from your last eight days: the moments
+you pushed back, how your sessions open, what you never used. It writes `~/.claude/harness-coach.json`: three to
+six observations about how you work, each with the rule to paste. The panel shows them first, marks a rule
+`Applied` once its text is in your `CLAUDE.md`, and the next edition says what happened after. The notes may
+paraphrase your prompts; `harness-panel --no-coach` builds a page without them.
+
 ## Loop 6 · Operator — `/session-review [--since 30d] [--top 20]`
 
 The other loops improve the work. This one improves the person driving it — the loop the other five leave open.

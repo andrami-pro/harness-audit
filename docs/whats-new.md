@@ -4,6 +4,18 @@ Every change to the harness that an operator can notice, newest first. Each entr
 not how it is built. Minor internal fixes live in the commits; they make the list only when they
 change behavior.
 
+## 2026-11-26 · The panel invites you, and a coach writes on it (harness-guards 1.2.0)
+
+**The first dashboard shipped in 2.7 and was not opened once in two months.** Nothing ever said it was there.
+
+- **A weekly invitation.** Once a week, at session start, the panel is rebuilt and you get one line with a link.
+  No model, no network. `"enabled": false` in `~/.claude/harness-weekly.json` silences it.
+- **Coach notes, off by default.** With `"coach": true`, one background agent a week reads the moments you pushed
+  back and writes three to six observations about how you work, each with the rule to paste. Counting cannot do
+  this part; it costs one Sonnet agent on about 5k tokens of evidence.
+- **It remembers.** A rule whose text is in your `CLAUDE.md` is marked Applied, and the next edition reports what
+  happened to the thing it was about.
+
 ## 2026-11-26 · One page that answers "is it helping?" (harness-guards 1.1.0)
 
 **The dashboard counted everything and was hard to read.** `harness-panel` is one page for one question: what the
