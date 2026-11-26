@@ -18,7 +18,8 @@ async function developPhase(args, agent, log, phase) {
 // args (config and per-run, merged by the wrapper):
 //   task            what to build (default: the active task in TASKS.md or equivalent)
 //   phase           PRD phase number, for the default `prd` hint
-//   maxIter         review rounds before giving up (default 5)
+//   maxIter         review rounds before giving up (default 5). A preflight that fails after the reviews approve
+//                   sends its output back to the implementer and spends one of these rounds
 //   preparer        false skips Scout + Plan: on a one-file task they cost more than the implementation
 //   lang            deliverable language: 'en' | 'fr' | 'es' | … — the commit message is written in it
 //   models          { scout, analyst, implementer, reviewer, spec, preflight, commit } — the line-up (Step 4a)
@@ -356,6 +357,33 @@ const UI_SCHEMA = {
     report: { type: 'string' },
   },
 }
+// The runtime has no shell, so a seat runs the gate — and reports FIELDS, not prose. A substring test
+// for "pass" turns "3 passed, 2 failed", "bypass", or a SKIP followed by the gate's closing PASS
+// banner into a green preflight. An exit code and a list of skipped checks cannot be misread that way.
+const PREFLIGHT_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['exitCode', 'skipped', 'failedCheck', 'tail'],
+  properties: {
+    exitCode: { type: 'integer' },
+    skipped: { type: 'array', items: { type: 'string' } },
+    failedCheck: { type: ['string', 'null'] },
+    tail: { type: 'string' },
+  },
+}
+const runPreflight = () => agent(
+  `${SEAT_RULES}Run exactly this and change nothing: ${IN_DIR}${PREFLIGHT_CMD}; echo "EXIT=$?"
+Report, without interpreting:
+- exitCode: the number printed after EXIT=
+- skipped: every output line that reports a check as skipped or not run (SKIP, skipped, ⊘, "not verified"), verbatim,
+  including a summary line that counts them
+- failedCheck: the check that failed, or null when exitCode is 0
+- tail: the last 60 lines of output, verbatim
+Do not fix anything.`,
+  { model: MODELS.preflight, label: 'preflight', phase: 'Preflight', schema: PREFLIGHT_SCHEMA }
+)
+
+let preflight = null, preflightFail = null
 let lastUi = null, uiBlocked = false
 const uiFirstLine = () => (lastUi?.report ?? '').trim().split('\n')[0] || 'the ui-check seat returned nothing'
 
@@ -365,6 +393,11 @@ while (!approved && iteration < maxIter) {
 
   phase('Implement')
   const correctionCtx = iteration === 1 ? ''
+    : preflightFail
+      ? `\n\n⚠ The review APPROVED, but the project's preflight then FAILED${preflightFail.failedCheck ? ` at: ${preflightFail.failedCheck}` : ''} (exit ${preflightFail.exitCode}).
+Make it pass: fix what your change broke, and nothing else. Re-run it yourself to confirm: ${IN_DIR}${PREFLIGHT_CMD}
+If it fails for a reason outside your change (a missing dependency, a file git does not track, a secret that is not
+here), change nothing and say so in the first line of your report, starting with ENVIRONMENT:\nPREFLIGHT OUTPUT (last lines):\n${preflightFail.tail}`
     : uiBlocked
       ? `\n\n⚠ ui-check BLOCKED the change before review. Fix what its BLOCK lines name — each gives the rule, the screen
 and the element. Re-run it yourself to confirm: ${UI_CMD}\nUI CHECK:\n${lastUi.report}${
@@ -373,13 +406,20 @@ and the element. Re-run it yourself to confirm: ${UI_CMD}\nUI CHECK:\n${lastUi.r
       : `\n\n⚠ The review REJECTED. Fix ONLY the [FAIL] items.${axes.code.approved ? '' : `\nCODE REVIEW (rubric):\n${lastReview}`}${
         axes.spec && !axes.spec.approved ? `\nSPEC REVIEW (task, PRD, seams):\n${lastSpec}` : ''}`
 
-  lastImpl = await agent(
-    `${SEAT_RULES}Act as the implementer defined in .claude/agents/implementer.md.
+  const implPrompt = `${SEAT_RULES}Act as the implementer defined in .claude/agents/implementer.md.
 ${implementerRules ? `${implementerRules}\n` : ''}${context}
 ${seamsBlock}TASK: ${task}${correctionCtx}
-When done: list created/modified files + a description of each change.`,
-    seat('implementer', { label: `impl:iter${iteration}`, phase: 'Implement' })
-  )
+When done: list created/modified files + a description of each change.`
+  lastImpl = await agent(implPrompt, seat('implementer', { label: `impl:iter${iteration}`, phase: 'Implement' }))
+  // A seat that dies (network, API) is retried once, told that the first attempt may have left work behind. Six
+  // tickets were blocked this way in the first six weeks of waves runs, each one a re-run by hand.
+  if (!lastImpl) {
+    log(`⚠ The implementer returned nothing in iteration ${iteration} — one retry`)
+    lastImpl = await agent(
+      `${implPrompt}\n\nAn earlier attempt at this same task died before reporting. Run \`git status\` and \`git diff\` first: keep
+what it left that is right, and finish the task from there.`,
+      seat('implementer', { label: `impl:iter${iteration}:retry`, phase: 'Implement' }))
+  }
   if (!lastImpl) return crash('implementer', iteration)
 
   if (UI_CMD) {
@@ -467,36 +507,25 @@ Last line (no extra text): APPROVED or REJECTED`,
   }
   approved = axes.code.approved && (!axes.spec || axes.spec.approved)
   log(approved ? `✓ APPROVED iter ${iteration}` : `✗ REJECTED (code ${axes.code.approved ? '✓' : '✗'}${axes.spec ? ` · spec ${axes.spec.approved ? '✓' : '✗'}` : ''}) — correcting`)
+  // An approved change whose preflight fails goes back to the implementer with the output, while rounds remain:
+  // the loop used to stop here and leave a red gate to the human. A skipped check is not sent back — the
+  // implementer cannot supply a key — and neither is a seat that returned nothing.
+  preflight = null; preflightFail = null
+  if (approved) {
+    phase('Preflight')
+    preflight = await runPreflight()
+    if (preflight && preflight.exitCode !== 0 && iteration < maxIter) {
+      preflightFail = preflight; preflight = null; approved = false
+      log(`✗ Preflight FAIL (exit ${preflightFail.exitCode}${preflightFail.failedCheck ? ` · ${preflightFail.failedCheck}` : ''}) — back to the implementer`)
+    }
+  }
 }
 
 if (!approved) log(`⚠ Did not converge after ${maxIter} iter — escalate to the human`)
 
 phase('Preflight')
-// The runtime has no shell, so a seat runs the gate — and reports FIELDS, not prose. A substring test
-// for "pass" turns "3 passed, 2 failed", "bypass", or a SKIP followed by the gate's closing PASS
-// banner into a green preflight. An exit code and a list of skipped checks cannot be misread that way.
-const PREFLIGHT_SCHEMA = {
-  type: 'object',
-  additionalProperties: false,
-  required: ['exitCode', 'skipped', 'failedCheck', 'tail'],
-  properties: {
-    exitCode: { type: 'integer' },
-    skipped: { type: 'array', items: { type: 'string' } },
-    failedCheck: { type: ['string', 'null'] },
-    tail: { type: 'string' },
-  },
-}
-const preflight = await agent(
-  `${SEAT_RULES}Run exactly this and change nothing: ${IN_DIR}${PREFLIGHT_CMD}; echo "EXIT=$?"
-Report, without interpreting:
-- exitCode: the number printed after EXIT=
-- skipped: every output line that reports a check as skipped or not run (SKIP, skipped, ⊘, "not verified"), verbatim,
-  including a summary line that counts them
-- failedCheck: the check that failed, or null when exitCode is 0
-- tail: the last 60 lines of output, verbatim
-Do not fix anything.`,
-  { model: MODELS.preflight, label: 'preflight', phase: 'Preflight', schema: PREFLIGHT_SCHEMA }
-)
+// The last round already ran it when the reviews approved; a run that never got there still reports its state.
+if (!preflight) preflight = await runPreflight()
 
 // A skipped check is not a passed one: exit 0 with a SKIP is NOT VERIFIED, and the handoff says so. The one
 // exception is a skip the project declared in allowSkipped (a live check with no key here): reported, not counted.

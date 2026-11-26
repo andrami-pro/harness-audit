@@ -2631,6 +2631,61 @@ check('develop-phase loop decides from the verdict line and the exit code, and a
   return `${seen.join(' + ')}: pass → complete · SKIP → continue · exit 1 → continue · "not APPROVED" → blocked`;
 });
 
+// Two ways a ticket used to stop that had nothing to do with its code (36 blocked tickets in the waves runs of
+// 2026-10-10 → 11-26: 11 on a red or skipped preflight, 6 on an implementer seat that died). A preflight that fails
+// after the reviews approve now goes back to the implementer with its output, inside maxIter; a dead implementer is
+// retried once and told to look at what the first attempt left.
+//
+// Negative controls (2026-11-26, each applied to develop-phase.js, observed, reverted — all exit 1):
+//   `preflight.exitCode !== 0 && iteration < maxIter` made `false &&` ... "a failed preflight was not sent back" (got [1,"continue",false,false])
+//   the retry block's `if (!lastImpl)` made `if (false)` ................. "a dead implementer was not retried" (got ["blocked",1,…])
+//   `iteration < maxIter` dropped from the preflight condition ........... "the last round's red preflight was hidden" (got ["blocked",…])
+//   the ENVIRONMENT/preflight branch of correctionCtx removed ............ "a failed preflight was not sent back" (got [2,"complete",false,true])
+check('develop-phase loop: a failed preflight goes back to the implementer, a dead implementer is retried once', () => {
+  const harness = `
+    const fs = require('fs');
+    const src = fs.readFileSync(process.argv[1], 'utf8').replace(/^export /m, '');
+    const AsyncFn = Object.getPrototypeOf(async function () {}).constructor;
+    const pf = (exitCode) => ({ exitCode, skipped: [], failedCheck: exitCode ? 'typecheck' : null, tail: exitCode ? 'TS2304: cannot find name x' : 'ok' });
+    const run = async (args, script) => {
+      const calls = []; const n = {};
+      const out = await new AsyncFn('args', 'agent', 'log', 'phase', src)({ preparer: false, specReview: false, ...args },
+        async (p, o) => { const l = String(o.label); const k = l.split(':')[0]; n[k] = (n[k] || 0) + 1; calls.push({ l, p }); return script(l, k, n[k]); },
+        () => {}, () => {});
+      return { out, calls, impl: calls.filter((c) => c.l.startsWith('impl')) };
+    };
+    const ok = (l, k) => (k === 'preflight' ? pf(0) : k === 'review' ? '[PASS] a — x\\nAPPROVED' : k === 'commit' ? { committed: true, hash: 'c1', message: 'm', note: '' } : 'impl');
+    (async () => {
+      const back = await run({}, (l, k, i) => (k === 'preflight' ? pf(i === 1 ? 1 : 0) : ok(l, k)));
+      const stuck = await run({ maxIter: 2 }, (l, k) => (k === 'preflight' ? pf(1) : ok(l, k)));
+      const dead = await run({}, (l, k, i) => (k === 'impl' && i === 1 ? null : ok(l, k)));
+      const deadTwice = await run({}, (l, k) => (k === 'impl' ? null : ok(l, k)));
+      const skip = await run({}, (l, k) => (k === 'preflight' ? { exitCode: 0, skipped: ['SKIP: no key'], failedCheck: null, tail: '' } : ok(l, k)));
+      console.log(JSON.stringify({
+        back: [back.impl.length, back.out.handoff.status, /preflight then FAILED at: typecheck/.test(back.impl[1]?.p || ''), /TS2304/.test(back.impl[1]?.p || ''), back.calls.filter((c) => c.l.startsWith('review')).length, back.out.iterations],
+        stuck: [stuck.out.handoff.status, stuck.out.approved, stuck.out.preflightPassed, stuck.impl.length, /Preflight failed/.test(stuck.out.nextStep)],
+        dead: [dead.out.handoff.status, dead.impl.map((c) => c.l).join(' '), /died before reporting/.test(dead.impl[1]?.p || '')],
+        deadTwice: [deadTwice.out.handoff.status, deadTwice.impl.length, /returned nothing/.test(deadTwice.out.handoff.summary)],
+        skip: [skip.impl.length, skip.out.handoff.status],
+      }));
+    })().catch((e) => console.log('THREW ' + e.stack));
+  `;
+  const out = execFileSync('node', ['-e', harness, path.join(ROOT, DEVELOP_PHASE)], { encoding: 'utf8' }).trim();
+  if (out.startsWith('THREW')) throw new Error(`the develop-phase loop throws when run — ${out.slice(6)}`);
+  const r = JSON.parse(out);
+  const want = {
+    back: [[2, 'complete', true, true, 2, 2], 'a failed preflight was not sent back to the implementer with its output, or the fix was not reviewed again'],
+    stuck: [['continue', true, false, 2, true], "the last round's red preflight was hidden, or the loop went past maxIter"],
+    dead: [['complete', 'impl:iter1 impl:iter1:retry', true], 'a dead implementer was not retried once, or the retry was not told to look at what the first attempt left'],
+    deadTwice: [['blocked', 2, true], 'an implementer that dies twice did not stop the run'],
+    skip: [[1, 'continue'], 'a skipped check was sent back to the implementer, who cannot supply a key'],
+  };
+  for (const [k, [v, why]] of Object.entries(want)) {
+    if (JSON.stringify(r[k]) !== JSON.stringify(v)) throw new Error(`${why} (got ${JSON.stringify(r[k])})`);
+  }
+  return 'red preflight → implementer with the output → reviewed again · bounded by maxIter · dead implementer → one retry · SKIP not sent back';
+});
+
 // The template also carries the seats around the loop: a scout and an analyst before the implementer, and a
 // reviewer that may be another vendor's model reached through scripts/external-review.sh. Each is a way for
 // the gate to go quiet wrong: a blocker that the implementer ignores, a reviewer that shares the
