@@ -4,6 +4,15 @@ Every change to the harness that an operator can notice, newest first. Each entr
 not how it is built. Minor internal fixes live in the commits; they make the list only when they
 change behavior.
 
+## 2026-11-26 · A warning when the quota runs ahead of the week, and economy mode (guards 1.3.0, loops 1.10.0)
+
+- **The warning.** Name a snapshot of your weekly quota and `quota-watch` compares what you used with how much of
+  the week has passed. More than 10 points ahead, it says so at session start and the session proposes economy
+  mode. It never switches anything itself.
+- **Economy mode.** Until the week resets, the loops run their reviewers on sonnet and the implementer at medium
+  effort. It ends by itself. On a 15-diff corpus sonnet and fable caught the same bugs as reviewers, which is why
+  the reviewer is the seat that moves.
+
 ## 2026-11-26 · The panel invites you, and a coach writes on it (harness-guards 1.2.0)
 
 **The first dashboard shipped in 2.7 and was not opened once in two months.** Nothing ever said it was there.

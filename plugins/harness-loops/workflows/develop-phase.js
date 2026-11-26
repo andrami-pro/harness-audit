@@ -19,6 +19,9 @@ export const meta = {
 // args (config and per-run, merged by the wrapper):
 //   task            what to build (default: the active task in TASKS.md or equivalent)
 //   phase           PRD phase number, for the default `prd` hint
+//   economy         true runs the cheaper profile for a week when the quota is short: Claude-tier reviewers (code
+//                   and spec) on sonnet, the implementer at medium effort. An external reviewer is left alone, and
+//                   so is a reviewer that sonnet would put in the implementer's family
 //   maxIter         review rounds before giving up (default 5). A preflight that fails after the reviews approve
 //                   sends its output back to the implementer and spends one of these rounds
 //   preparer        false skips Scout + Plan: on a one-file task they cost more than the implementation
@@ -76,7 +79,9 @@ const MODELS = {
 if (cfg.analystModel) MODELS.analyst = cfg.analystModel
 if (cfg.reviewerModel) MODELS.reviewer = cfg.reviewerModel
 const TYPES = cfg.agentTypes ?? {}
-const seat = (name, extra) => ({ model: MODELS[name], ...(TYPES[name] ? { agentType: TYPES[name] } : {}), ...extra })
+const ECONOMY = cfg.economy === true
+const EFFORT = ECONOMY ? { implementer: 'medium' } : {}
+const seat = (name, extra) => ({ model: MODELS[name], ...(EFFORT[name] ? { effort: EFFORT[name] } : {}), ...(TYPES[name] ? { agentType: TYPES[name] } : {}), ...extra })
 
 const prdHint = cfg.prd ?? (cfg.phase ? `docs/prd/prd-phase-${cfg.phase}-*.md` : 'the active phase in TASKS.md or equivalent')
 // A project's context list and a per-run PRD both reach the seats: the PRD names this run's spec.
@@ -133,6 +138,11 @@ const familyOf = (m) => {
   const claude = id.match(/(?:^|\/)(?:claude-)?(opus|fable|sonnet|haiku|mythos)/)
   return claude ? `claude-${claude[1]}` : id.split('/')[0]
 }
+// Economy moves the review seats, never the rule: sonnet only where it stays outside the implementer's family.
+if (ECONOMY && familyOf('sonnet') !== familyOf(MODELS.implementer)) {
+  for (const r of ['reviewer', 'spec']) if (MODELS[r] && !MODELS[r].includes('/') && /^claude-(opus|fable|mythos)$/.test(familyOf(MODELS[r]))) MODELS[r] = 'sonnet'
+}
+if (ECONOMY) log(`Economy mode: reviewer=${MODELS.reviewer} · implementer effort=medium`)
 if (familyOf(MODELS.reviewer) === familyOf(MODELS.implementer)) {
   return stop('Reviewer and implementer share a model family',
     `Both resolve to "${familyOf(MODELS.reviewer)}" — change reviewerModel to another family (D25a has no override)`)
@@ -615,6 +625,7 @@ const integrate = cfg.integrate ? `, then ${cfg.integrate}` : ''
 return {
   task, iterations: iteration, approved, preflightPassed, commit, handoff, routing, axes,
   seams: { agreed: agreedSeams.length > 0, list: seams },
+  ...(ECONOMY ? { economy: true } : {}),
   ...(UI_CMD ? { uiCheck: uiState } : {}),
   nextStep: LABEL + (approved && preflightPassed && !uiOk
     ? `ui-check ${uiState} — ${uiState.startsWith('FAILED') ? 'fix the command or its .harness/ui-check.json' : 'make the app reachable (or fix the screens that never became ready)'} and re-run; a check that did not run is not a pass`
