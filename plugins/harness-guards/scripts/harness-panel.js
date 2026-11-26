@@ -4,7 +4,12 @@
 // no model. It counts; it never quotes a prompt, so the page can be shown to someone else.
 //
 //   node harness-panel.js [--since 60d] [--lang en|es] [--out <file>] [--open] [--web-fonts]
-//                         [--quota-file <json>] [--json]
+//                         [--quota-file <json>] [--no-coach] [--json]
+//
+// The coach notes: ~/.claude/harness-coach.json (HARNESS_COACH_FILE) holds what a model wrote after reading how
+// the operator worked that week — { generatedAt, period, insights: [{ title, evidence, action, snippet, kind }] }.
+// This script only renders that file; writing it costs a model call and is someone else's job. The notes may
+// paraphrase the operator's prompts, so --no-coach leaves them out of a page meant for other eyes.
 //
 // --web-fonts adds one Google Fonts stylesheet link (the only network request the page can make, and it
 // carries no data). Without it the page uses the fonts installed on the machine.
@@ -32,6 +37,7 @@ const CUTOFF = NOW - DAYS * 86400000;
 const PROJECTS = process.env.HARNESS_PROJECTS_DIR || path.join(HOME, '.claude', 'projects');
 const GATE_LOG = process.env.HARNESS_GATE_LOG || path.join(HOME, '.claude', 'gate-log.ndjson');
 const QUOTA = flag('--quota-file') || process.env.HARNESS_QUOTA_FILE;
+const COACH = process.env.HARNESS_COACH_FILE || path.join(HOME, '.claude', 'harness-coach.json');
 const OUT = flag('--out') || path.join(process.env.XDG_CACHE_HOME || path.join(HOME, '.cache'), 'harness-audit', 'panel', 'index.html');
 
 // ---- read ---------------------------------------------------------------------------------------
@@ -159,6 +165,16 @@ try {
   }
 } catch { /* no snapshot: the card is left out */ }
 
+// ---- coach notes ---------------------------------------------------------------------------------------
+let coach = null;
+if (!has('--no-coach')) {
+  try {
+    const c = JSON.parse(fs.readFileSync(COACH, 'utf8'));
+    const insights = (Array.isArray(c.insights) ? c.insights : []).filter((i) => i && typeof i.title === 'string' && typeof i.action === 'string').slice(0, 6);
+    if (insights.length) coach = { insights, period: String(c.period || ''), ageDays: Math.max(0, Math.floor((NOW - Date.parse(c.generatedAt)) / 86400000)) };
+  } catch { /* no notes yet: the section is left out */ }
+}
+
 // ---- derived ---------------------------------------------------------------------------------------
 const pct = (a, b) => (b ? Math.round((a / b) * 100) : 0);
 const topSkills = [...d.skills.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5);
@@ -172,7 +188,7 @@ const data = {
   spec: { runs: spec.runs, landed: spec.landed, blocked: spec.blocked, causes: spec.causes, friction, working, plans: spec.plans, waves, perWave: Math.round(perWave * 10) / 10,
     widths: [1, 2, 3, 4].map((w) => spec.widths.get(w) || 0), tickets: spec.tickets, withBlocker: spec.withBlocker },
   gate: { catches: gate.catches, fixed: gate.fixed, since: gate.first ? new Date(gate.first).toISOString().slice(0, 10) : null, repos: [...gate.repos.entries()].map(([repo, s]) => [repo, s.catches]).filter(([, n]) => n).sort((a, b) => b[1] - a[1]).slice(0, 5) },
-  topSkills, unused, quota,
+  topSkills, unused, quota, coach: coach ? { insights: coach.insights.length, ageDays: coach.ageDays } : null,
 };
 if (has('--json')) { console.log(JSON.stringify(data, null, 2)); process.exit(0); }
 
@@ -184,6 +200,7 @@ const T = {
     caught: 'Failures the gate caught', caughtSub: (f, s) => `${f} fixed before the turn ended. Logged since ${s}.`, noGate: 'The gate log is empty: it starts counting on the next red gate.',
     perWave: 'Tickets per wave', perWaveSub: (one, all) => `${one} of ${all} waves hold a single ticket.`, noPlans: 'No waves plan in this window.',
     cont: 'Prompts that only say "go on"', contSub: (a, b) => `${a} of ${b} prompts.`,
+    coach: 'What I noticed in how you work', coachBy: (p, a) => `From your sessions${p ? `, ${p}` : ''}. Written ${a === 0 ? 'today' : `${a} day(s) ago`}.`, coachStale: 'These notes are more than a week old.', evidence: 'What I saw', action: 'What I would change', kinds: { rule: 'Rule to paste', command: 'Command', habit: 'Habit' },
     proposal: 'This week', decide: 'It runs only if you say so.',
     why: 'Why tickets get blocked', whySub: (f, w) => `${f} of ${f + w} blocks are harness plumbing, not code quality.`, noBlocks: 'No blocked ticket in this window.',
     cause: { preflight: 'Checks red in the worktree', setup: 'Config or setup', review: 'The reviewer rejected the code', dead: 'The implementer died midway', conflict: 'Merge conflict', ticket: 'Ticket impossible as written' },
@@ -200,6 +217,7 @@ const T = {
     caught: 'Fallos que atrapó el portero', caughtSub: (f, s) => `${f} arreglados antes de terminar el turno. Registro desde ${s}.`, noGate: 'El registro del portero está vacío: empieza a contar en el próximo fallo.',
     perWave: 'Tickets por oleada', perWaveSub: (one, all) => `${one} de ${all} oleadas llevan un solo ticket.`, noPlans: 'Ningún plan de oleadas en este periodo.',
     cont: 'Prompts solo para «seguir»', contSub: (a, b) => `${a} de ${b} prompts.`,
+    coach: 'Lo que noté en tu forma de trabajar', coachBy: (p, a) => `De tus sesiones${p ? `, ${p}` : ''}. Escrito ${a === 0 ? 'hoy' : `hace ${a} día(s)`}.`, coachStale: 'Estas notas tienen más de una semana.', evidence: 'Lo que vi', action: 'Lo que cambiaría', kinds: { rule: 'Regla para pegar', command: 'Comando', habit: 'Hábito' },
     proposal: 'Propuesta de la semana', decide: 'Solo se lanza si tú dices que sí.',
     why: 'Por qué se bloquean los tickets', whySub: (f, w) => `${f} de ${f + w} bloqueos son fontanería del arnés, no calidad del código.`, noBlocks: 'Ningún ticket bloqueado en este periodo.',
     cause: { preflight: 'Pruebas en rojo dentro del worktree', setup: 'Configuración o preparación', review: 'El revisor rechazó el código', dead: 'El implementador murió a medias', conflict: 'Conflicto al fusionar', ticket: 'Ticket imposible tal como estaba escrito' },
@@ -264,6 +282,13 @@ h1{margin:10px 0 0;font:400 52px/1.02 'Source Serif 4',Georgia,serif;letter-spac
 .cols i{display:block;width:100%;border-radius:4px 4px 0 0;background:var(--ok)}.cols div:first-child i{background:var(--ink)}.colsx{display:flex;gap:16px;font-size:13px;text-align:center}.colsx span{flex:1}
 .rows div{display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:12px 0;border-top:1px solid var(--line);font-size:15px}.rows .mono{white-space:nowrap;font-size:13px}.stack{display:flex;flex-direction:column;gap:16px}
 .meter{height:12px;border-radius:999px;background:var(--line);position:relative}.meter i{position:absolute;inset:0 auto 0 0;border-radius:999px}.meter b{position:absolute;top:-4px;bottom:-4px;width:2px;background:var(--ink)}
+.coach{display:flex;flex-direction:column;gap:20px}.coach>div:first-child{display:flex;flex-direction:column;gap:6px}.coach h2{font:400 34px/1.1 'Source Serif 4',Georgia,serif;letter-spacing:-.01em}
+.ins{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:28px;display:grid;grid-template-columns:44px minmax(0,1fr);gap:8px 20px}
+.ins .no{font:400 40px/1 'Source Serif 4',Georgia,serif;color:var(--ok)}.ins h3{margin:0;font:600 22px/1.2 'Source Serif 4',Georgia,serif}
+.ins .body{grid-column:2;display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:20px}.ins .body>div{display:flex;flex-direction:column;gap:6px}
+.ins p{margin:0;font-size:15px;line-height:1.5;color:var(--dim)}.snip{grid-column:2;display:flex;flex-direction:column;gap:6px}
+.snip pre{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;font:400 12.5px/1.55 'Martian Mono',ui-monospace,monospace;background:var(--soft);border:1px solid var(--line);border-radius:8px;padding:14px 16px;color:var(--ink)}
+@media (max-width:560px){.ins{grid-template-columns:1fr}.ins .body,.snip{grid-column:1}}
 footer{font-size:13px;color:var(--meta);border-top:1px solid var(--line);padding-top:16px}
 </style></head><body><main>
 <header><div><span class="mono eyebrow">${T.eyebrow(DAYS)}</span><h1>${T.title}</h1></div><span class="mono stamp">${T.updated(d.sessions)}</span></header>
@@ -273,6 +298,10 @@ ${gate.first ? kpi(T.caught, gate.catches, T.caughtSub(gate.fixed, data.gate.sin
 ${waves ? kpi(T.perWave, fmt(data.spec.perWave), T.perWaveSub(data.spec.widths[0], waves), perWave < 1.7 ? 'warn' : 'ok') : kpi(T.perWave, '—', T.noPlans, '')}
 ${kpi(T.cont, `${data.continuationPct}${LANG === 'es' ? ' %' : '%'}`, T.contSub(fmt(d.continuations), fmt(d.prompts)), data.continuationPct >= 20 ? 'warn' : 'ok')}
 </section>
+${coach ? `<section class="coach"><div><span class="mono eyebrow">${T.coachBy(esc(coach.period), coach.ageDays)}${coach.ageDays > 7 ? ` ${T.coachStale}` : ''}</span><h2>${T.coach}</h2></div>
+${coach.insights.map((i, n) => `<article class="ins"><span class="no">${n + 1}</span><h3>${esc(i.title)}</h3>
+<div class="body"><div><span class="mono lab">${T.evidence}</span><p>${esc(i.evidence || '')}</p></div><div><span class="mono lab">${T.action}</span><p>${esc(i.action)}</p></div></div>
+${i.snippet ? `<div class="snip"><span class="mono lab">${T.kinds[i.kind] || T.kinds.habit}</span><pre>${esc(i.snippet)}</pre></div>` : ''}</article>`).join('\n')}</section>` : ''}
 ${proposal ? `<section class="prop"><div><span class="mono eyebrow">${T.proposal}</span><h2>${proposal[0]}</h2><p>${proposal[1]}</p></div><div><span class="mono cmd">${esc(proposal[2])}</span><span class="sub" style="color:rgba(250,250,246,.72)">${T.decide}</span></div></section>` : ''}
 <section class="grid g2">
 <div class="card"><div><h2>${T.why}</h2><p class="note" style="margin-top:6px">${causeRows.length ? T.whySub(friction, working) : T.noBlocks}</p></div>
@@ -299,7 +328,8 @@ ${quota ? `<div class="card"><h2>${T.quota}</h2><div class="meter"><i class="f-$
 
 fs.mkdirSync(path.dirname(OUT), { recursive: true });
 fs.writeFileSync(OUT, html);
-console.log(OUT);
+// A link the terminal makes clickable, not a path to go and find.
+console.log(`file://${OUT.split(path.sep).map(encodeURIComponent).join('/')}`);
 if (has('--open')) {
   const cmd = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'cmd' : 'xdg-open';
   try { spawn(cmd, process.platform === 'win32' ? ['/c', 'start', '', OUT] : [OUT], { detached: true, stdio: 'ignore' }).on('error', () => {}).unref(); } catch { /* no display: the path above is the answer */ }
