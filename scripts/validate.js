@@ -4125,7 +4125,10 @@ check('develop-phase-pi: loop in code — pass commits, D25a refuses, BLOQUEO st
 // PRD-004 §7, ticket 01: the Pi loop agrees seams, works test-first, accepts the skips a project declares and
 // tells its reviewer it is read-only — the same rules as workflows/develop-phase.js, held here by stub seats.
 // The two loop fixes of loops 1.8, on Pi. Negative controls (2026-11-26, each applied to develop-phase-pi.js, observed,
-// reverted): see the list above the check's body.
+// reverted — all exit 1):
+//   the retry removed ..................... "an implementer that died once was not retried: crash"
+//   a failed preflight never sent back .... "a failed preflight did not go back to the implementer: continue after 1"
+//   a SKIP sent back as well .............. "a skipped check was sent back to the implementer, who cannot supply a key"
 check('develop-phase-pi: a dead implementer is retried once, a failed preflight goes back to the implementer', () => {
   const { tmp, run, done } = piLoop();
   try {
@@ -4354,6 +4357,15 @@ check('develop-phase-pi: reject without [FAIL] stops on the code axis', () => {
 //   setStatus case-sensitive again ........ "a lower-case status: line was read but never rewritten"
 //   the final verdict ignored by allDone .. "a final review that rejects still let the run report complete"
 //   a kept worktree not brought up to date  "a resumed ticket did not take what landed on the branch since it was blocked"
+//   The plumbing of loops 1.8–1.9 brought to Pi (2026-11-26, each applied alone, observed, reverted — all exit 1):
+//   the baseline preflight off ............ "… a preflight that cannot pass in a fresh worktree was found only after an implementer ran"
+//   a not-started ticket never tidied ..... same message (the empty worktree and branch stay: got "2" worktrees)
+//   the --integrate check off ............. "an --integrate that is a note and not a merge command was run" (got ["blocked",4,false,true])
+//   no resolution attempt ................. "a merge conflict between two tickets in flight was not resolved once …" (got ["01:done 02:blocked",…])
+//   conflict markers not checked .......... the marked file is merged and the worktree is gone ("Command failed: sh -c git -C .pi/worktrees/spec-w-02 log …")
+//   the preflight after a resolution off .. "a conflict resolution whose preflight is red was merged …"
+//   invented dependency edges kept ........ "the dependency review kept an edge the tickets do not declare …" (got [2,2,…])
+//   the run goes on after a red baseline .. "a preflight that is red before any ticket changed a line did not stop the run …" (02 becomes not-started)
 // The one-merge queue has no control: merges run synchronously in one Node process, so they cannot interleave.
 check('develop-spec-pi: plan first, frontier by Blocked by, slots, one migration at a time, merges in code, a brief', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ds-pi-'));
@@ -4446,6 +4458,7 @@ esac
     const envSetup = run(three, { args: ['--worktree-setup', 'cp ../.env .'] });
     const healed = run({ '01': T('01'), '02': T('02') }, { args: ['--confirmed'], env: { FAKE_CONFLICT: '1', FAKE_RESOLVE: 'both' } });
     const markers = run({ '01': T('01'), '02': T('02') }, { args: ['--confirmed'], env: { FAKE_CONFLICT: '1', FAKE_RESOLVE: 'markers' } });
+    const redResolve = run({ '01': T('01'), '02': T('02') }, { args: ['--confirmed', '--preflight', '[ ! -f shared.txt ] || [ "$(wc -l < shared.txt)" -lt 2 ]'], env: { FAKE_CONFLICT: '1', FAKE_RESOLVE: 'both' } });
     const deps = run(three, { env: { FAKE_DEPS: '1' } });
     const noDeps = run(three, { args: ['--no-dependency-review'], env: { FAKE_DEPS: '1' } });
     const got = {
@@ -4467,6 +4480,7 @@ esac
       config: [note.out?.handoff.status, note.order.length, /neither \{branch\} nor a git merge/.test(note.out?.handoff.blocker), /names a secret file/.test(envSetup.out?.plan.warnings[0] || '')],
       healed: [st(healed), healed.code, healed.sh('cat shared.txt | tr "\\n" ,'), /02 landed after a seat resolved a merge conflict with main/.test(healed.out?.brief), healed.sh('git worktree list | wc -l')],
       markers: [st(markers), /conflict in shared\.txt/.test(markers.out?.brief), markers.sh('git -C .pi/worktrees/spec-w-02 status --short | wc -l'), markers.sh('git -C .pi/worktrees/spec-w-02 log --format=%s -1')],
+      redResolve: [st(redResolve), redResolve.sh('git -C .pi/worktrees/spec-w-02 status --short | wc -l'), redResolve.sh('git -C .pi/worktrees/spec-w-02 log --format=%s -1')],
       shape: [plan.out?.plan.parallelism.summary, JSON.stringify(plan.out?.plan.parallelism.longestChain), plan.out?.plan.dependencyReview],
       deps: [deps.out?.plan.dependencyReview?.reviewed, deps.out?.plan.dependencyReview?.avoidable.length, JSON.stringify(deps.out?.plan.dependencyReview?.whatIf?.waves), /1 of 1 dependencies look avoidable/.test(deps.out?.handoff.blocker), deps.order.length, noDeps.out?.plan.dependencyReview],
       quoted: [st(evil), fs.existsSync(path.join(evil.cwd, 'pwned')), evil.sh('git log --format=%s | grep "^merge: "')],
@@ -4496,6 +4510,7 @@ esac
       config: [['blocked', 0, true, true], 'an --integrate that is a note and not a merge command was run, or a --worktree-setup that copies a secret was not warned about on the plan'],
       healed: [['01:done 02:done', 0, '01,02,', true, '1'], 'a merge conflict between two tickets in flight was not resolved once in the ticket\'s worktree (both sides kept, preflight green, merged), or the brief does not disclose the unreviewed resolution'],
       markers: [['01:done 02:blocked', true, '0', 'feat: ticket 02'], 'a resolution that left conflict markers was merged, or the ticket\'s worktree was left mid-merge'],
+      redResolve: [['01:done 02:blocked', '0', 'feat: ticket 02'], 'a conflict resolution whose preflight is red was merged, or was left in the ticket\'s worktree'],
       shape: [['3 ticket(s) in 2 wave(s), 1.5 per wave; the longest chain is 01 → 03', '["01","03"]', null], 'the plan does not say how parallel it is, or a dependency review appeared from a seat that returned nothing'],
       deps: [[1, 1, '[["01","02","03"]]', true, 0, null], 'the dependency review kept an edge the tickets do not declare, has no what-if plan, ran a ticket, or ran despite --no-dependency-review'],
       quoted: [['01:done', false, "merge: 01 — x $(touch pwned) it's"], 'a ticket title reached the shell unquoted'],
