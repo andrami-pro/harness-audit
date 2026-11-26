@@ -200,7 +200,7 @@ function translateEvent(d) {
 }
 
 let lastSeatFailure = ''; // why the last seat died, for the crash handoff
-function runSeat({ name, model, tools, prompt, runDir, timeoutS }) {
+function runSeat({ name, model, tools, prompt, runDir, timeoutS, cwd }) {
   const promptFile = path.join(runDir, `${name}.prompt.md`);
   const liveFile = path.join(runDir, `${name}.live.log`);
   fs.writeFileSync(promptFile, prompt);
@@ -208,7 +208,7 @@ function runSeat({ name, model, tools, prompt, runDir, timeoutS }) {
   const started = Date.now();
   return new Promise((resolve) => {
     const child = spawn('pi', ['-p', '--mode', 'json', '--no-session', '--model', model, '--tools', tools, `@${promptFile}`, 'Haz la tarea descrita arriba.'],
-      { cwd: process.cwd(), env: { ...process.env, HARNESS_SEAT: name }, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
+      { cwd: cwd || process.cwd(), env: { ...process.env, HARNESS_SEAT: name }, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
     // The seat runs in a process group of its own. pi starts helpers (MCP servers) that inherit its stdout; one that
     // outlives pi keeps the pipe open, so 'close' never fires and a SIGTERM to pi alone does nothing. In the first live
     // develop-spec-pi run a commit seat with a 300 s limit held its ticket for three hours that way.
@@ -337,9 +337,9 @@ function preflightCommand(root, explicit) {
 
 // A SKIP is not a PASS: a line starting with SKIP, or with ⊘ (the mark this repository's validate.js prints). The one exception is a skip the project declared with --allow-skipped (a live check with
 // no key here): a line containing one of those substrings, any case, is reported in allowedSkips, not counted.
-function runPreflight(cmd, runDir, allow = []) {
-  if (!cmd) return { state: 'NO VERIFICADO (sin preflight en el repo)', passed: false, exitCode: null, skipped: [], allowedSkips: [] };
-  const r = spawnSync('sh', ['-c', cmd], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, timeout: 30 * 60 * 1000 });
+function runPreflight(cmd, runDir, allow = [], cwd = undefined) {
+  if (!cmd) return { state: 'NO VERIFICADO (sin preflight en el repo)', passed: false, exitCode: null, skipped: [], allowedSkips: [], tail: '' };
+  const r = spawnSync('sh', ['-c', cmd], { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, timeout: 30 * 60 * 1000 });
   const output = `${r.stdout || ''}${r.stderr || ''}`;
   fs.writeFileSync(path.join(runDir, 'preflight.out.txt'), output);
   const allowed = allow.map((s) => String(s).toLowerCase());
@@ -352,7 +352,7 @@ function runPreflight(cmd, runDir, allow = []) {
   const state = passed ? 'PASS'
     : exitCode === 0 ? `NO VERIFICADO (${skipped.length} SKIP)`
       : `FAIL (exit ${exitCode ?? r.signal ?? '?'})`;
-  return { state, passed, exitCode, skipped, allowedSkips };
+  return { state, passed, exitCode, skipped, allowedSkips, tail: output.trim().split('\n').slice(-60).join('\n') };
 }
 
 // ui-check, run by the loop itself (PRD-006). It reads the exit code and the BLOCK/WARN lines — no model reads them.
@@ -571,12 +571,30 @@ ${reads ? `Lee: ${reads}.` : ''}`
 
   let lastUi = null;
   let uiBlocked = false;
+  const cmd = preflightCommand(root, a.preflight);
+  let pf = null;
+  let pfFail = null;
+  const preflightNow = () => {
+    log('── Preflight');
+    const r = runPreflight(cmd, runDir, a.allowSkipped);
+    log(`Preflight${cmd ? ` (${cmd})` : ''}: ${r.state}`);
+    bus(`Preflight${cmd ? ` (${cmd})` : ''} → ${r.state}`);
+    return r;
+  };
   while (!approved && iteration < a.maxIter) {
     iteration += 1;
     log(`── Iteración ${iteration}/${a.maxIter} · Implement`);
     // Each rejected axis reaches the implementer as its own section; an approved one is left out. A UI block comes
     // first, with the review's open FAILs still attached when the last review rejected.
-    const correction = iteration > 1 && uiBlocked
+    const correction = iteration > 1 && pfFail
+      ? `\n\n⚠ La revisión APROBÓ, pero el preflight del proyecto FALLÓ después (${pfFail.state}).
+Hazlo pasar: corrige lo que tu cambio rompió y nada más. Vuelve a lanzarlo para confirmar: ${cmd}
+Si falla por algo ajeno a tu cambio (una dependencia que falta, un archivo que git no sigue, un secreto que no está
+aquí), no cambies nada y dilo en la primera línea de tu informe, empezando por ENVIRONMENT:
+
+## Salida del preflight (últimas líneas)
+${pfFail.tail}`
+      : iteration > 1 && uiBlocked
       ? `\n\n⚠ ui-check BLOQUEÓ el cambio antes de la revisión. Corrige lo que nombran sus líneas BLOCK — cada una da la
 regla, la pantalla y el elemento. Vuelve a lanzarlo para confirmar: ${a.uiCheck}\n\n## ui-check\n${lastUi.report}${
         axes && !axes.code.approved ? `\n\n## La última revisión también RECHAZÓ; sus [FAIL] siguen en pie. Code reviewer:\n${lastReview}` : ''}${
@@ -585,16 +603,25 @@ regla, la pantalla y el elemento. Vuelve a lanzarlo para confirmar: ${a.uiCheck}
       ? `\n\n⚠ La revisión RECHAZÓ. Corrige SOLO los [FAIL].${!axes || !axes.code.approved ? `\n\n## El code reviewer RECHAZÓ (rúbrica). Razones:\n${lastReview}` : ''}${
         axes && axes.spec && !axes.spec.approved ? `\n\n## El spec reviewer RECHAZÓ (tarea, PRD, seams). Razones:\n${lastSpec}` : ''}`
       : '';
-    lastImpl = await runSeat({
-      name: `implementer-${iteration}`, model: seats.implementer, tools: 'read,bash,edit,write,grep,find,ls', runDir, timeoutS: SEAT_TIMEOUT_S.implementer,
-      prompt: `${implementerRole ? `${stripFrontmatter(fs.readFileSync(implementerRole, 'utf8'))}\n\n---\n\n` : ''}Eres el implementer de un loop de desarrollo.
+    const implPrompt = `${implementerRole ? `${stripFrontmatter(fs.readFileSync(implementerRole, 'utf8'))}\n\n---\n\n` : ''}Eres el implementer de un loop de desarrollo.
 PROHIBIDO: desplegar, migraciones remotas, escribir o consultar en bucle la base de producción, cambiar de rama,
 hacer commit o push. La sesión principal integra y despliega después de la revisión.
 ${ponytail ? `Antes de escribir, lee ${ponytail} y aplícala (nivel full): el diff más corto que funcione,
 reutilizar lo que ya existe, sin dependencia nueva sin justificación.\n` : ''}${context}
 ${seamsBlock}${a.tdd ? `${TDD_RULES}\n` : ''}TAREA: ${task}${correction}
-Al terminar: lista archivos creados/modificados + descripción de cada cambio.`,
-    });
+Al terminar: lista archivos creados/modificados + descripción de cada cambio.`;
+    const implement = (name, prompt) => runSeat({ name, model: seats.implementer, tools: 'read,bash,edit,write,grep,find,ls', runDir, timeoutS: SEAT_TIMEOUT_S.implementer, prompt });
+    lastImpl = await implement(`implementer-${iteration}`, implPrompt);
+    // A seat that dies (network, provider) is retried once, told that the first attempt may have left work behind —
+    // as workflows/develop-phase.js does. Six tickets were blocked this way in the first six weeks of waves runs.
+    if (!lastImpl) {
+      log(`⚠ El implementer no devolvió nada en la iteración ${iteration} — un reintento`);
+      bus(`Implementer iter ${iteration}: sin resultado — un reintento`);
+      lastImpl = await implement(`implementer-${iteration}-retry`, `${implPrompt}
+
+Un intento anterior de esta misma tarea murió antes de informar. Ejecuta primero \`git status\` y \`git diff\`: conserva
+lo que dejó y esté bien, y termina la tarea desde ahí.`);
+    }
     if (!lastImpl) { bus(`Implementer iter ${iteration}: sin resultado`); return finish(crash('implementer', iteration)); }
 
     log(`── Iteración ${iteration}/${a.maxIter} · Review`);
@@ -694,14 +721,25 @@ Una línea por criterio, como [PASS|FAIL] criterio — evidencia que cita la spe
     const fails = `${lastReview}\n${lastSpec}`.split('\n').filter((l) => FAIL_LINE.test(l)).length;
     log(approved ? `✓ APROBADO iter ${iteration}` : `✗ RECHAZADO (code ${axes.code.approved ? '✓' : '✗'}${axes.spec ? ` · spec ${axes.spec.approved ? '✓' : '✗'}` : ''}) — corrigiendo`);
     bus(`Review iter ${iteration} → ${approved ? 'APROBADO' : `RECHAZADO (code ${axes.code.approved ? '✓' : '✗'}${axes.spec ? ` · spec ${axes.spec.approved ? '✓' : '✗'}` : ''} · ${fails} FAIL)`}`);
+    // An approved change whose preflight fails goes back to the implementer with the output, while rounds remain: the
+    // loop used to stop here and leave a red gate to the human. A skipped check is not sent back — the implementer
+    // cannot supply a key — and neither is a repository with no preflight.
+    pf = null;
+    pfFail = null;
+    if (approved) {
+      pf = preflightNow();
+      if (cmd && pf.exitCode !== 0 && iteration < a.maxIter) {
+        pfFail = pf;
+        pf = null;
+        approved = false;
+        log('✗ Preflight falló — vuelve al implementer');
+      }
+    }
   }
   if (!approved) { log(`⚠ No convergió tras ${a.maxIter} iter — escalar al humano`); bus(`No convergió tras ${a.maxIter} iteración(es)`); }
 
-  log('── Preflight');
-  const cmd = preflightCommand(root, a.preflight);
-  const pf = runPreflight(cmd, runDir, a.allowSkipped);
-  log(`Preflight${cmd ? ` (${cmd})` : ''}: ${pf.state}`);
-  bus(`Preflight${cmd ? ` (${cmd})` : ''} → ${pf.state}`);
+  // The last round already ran it when the reviews approved; a run that never got there still reports its state.
+  if (!pf) pf = preflightNow();
 
   const ui = uiStateOf(a.uiCheck ? lastUi : null, uiBlocked, a.allowSkipped);
   let commit = null;

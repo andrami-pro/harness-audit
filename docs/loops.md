@@ -297,7 +297,9 @@ the code reviewer, with the task, the PRD (`--prd <path>`, else `docs/prds/`), t
 approval needs both, the result carries `axes: { code, spec }` and `spec: ` evidence lines, and each rejected axis
 reaches the implementer as its own section. Its model is `harness.pi.spec` (never `defaults`), or the reviewer's when
 unset, refused like the reviewer's when Claude or the implementer's family (D25a); `--no-spec-review` turns it off.
-`--allow-skipped "<substring>"`, repeatable, makes a matching `SKIP` line reported, not counted. From a Pi session, a
+`--allow-skipped "<substring>"`, repeatable, makes a matching `SKIP` line reported, not counted. An implementer that
+dies is retried once (`implementer-<n>-retry`), told to look at what the first attempt left; an approved change whose
+preflight fails goes back to the implementer with the output, inside `--max-iter`, as on Claude. From a Pi session, a
 small extension can expose it as `/develop-phase <task>`; from a shell: `node scripts/develop-phase-pi.js --task "…"
 [--no-preparer] [--no-commit] [--max-iter N] [--preflight "<cmd>"] [--no-jev] [--run-dir <path>] [--no-tmux] [--seams
 propose|"<list>"] [--no-tdd] [--no-spec-review] [--allow-skipped "<substring>"] [--prd <path>] [--ui-check ["<cmd>"]]` (ui-check: [below](#ui-check)).
@@ -445,7 +447,14 @@ tickets merge into: `node scripts/develop-spec-pi.js --tickets docs/tickets/<fol
 prints the plan and changes nothing. It refuses a ticket file that was never committed (the worktrees are branched from
 HEAD), and a `--worktree-setup` that leaves files git does not ignore, since develop-phase-pi commits with `git add -A`.
 A ticket set back to `ready-for-agent` resumes in its kept worktree after merging what landed since.
-A merge conflict is aborted and the ticket marked blocked: resolve it by hand in the kept worktree. Proven by stub seats
+The plumbing of the Claude loop is here too, in code: an `--integrate` with neither `{branch}` nor a git merge is
+refused before the plan; the plan carries `parallelism` and, unless `--no-dependency-review`, the architect's model
+reads every `Blocked by:` (`plan.dependencyReview`); the preflight runs once in the first fresh worktree
+(`--no-baseline-preflight` skips it) and a red one stops the run; a ticket that never started keeps `ready-for-agent`
+and leaves no worktree, branch or commit. A merge conflict gets one attempt in the ticket's worktree: the implementer's
+model resolves it, code checks the markers, runs the preflight and commits, and the brief names the ticket. If that
+fails the ticket is marked blocked with its worktree as it was. Economy mode is Claude-only: Pi seats are never Claude
+models. Proven by stub seats
 in `validate.js` and a live pilot ([2026-10-14](harness-dev/loop-runs/2026-10-14-develop-spec-pi-pilot.md)).
 
 **Why it is a built file.** A workflow runs another only one level deep, and the wrapper already spends that level, so
