@@ -3406,6 +3406,71 @@ check('develop-spec plumbing: a red baseline preflight stops before any implemen
   return 'red or skipping baseline → stop before any implementer · never-started ticket → tidied, still ready-for-agent · conflict → one attempt, disclosed';
 });
 
+// develop-spec schedules what the tickets declare; it never decided the split. In the first 26 plans (2026-10-10 →
+// 11-26) 50 of 78 waves held one ticket and 86 of 116 tickets waited on another, and no plan said so. The plan now
+// states its shape, and on the plan run one seat says which `Blocked by:` lines look avoidable and what the waves
+// would be without them. It suggests: the real waves never change because of it.
+//
+// Negative controls (2026-11-26, each applied to workflow-src/develop-spec.js and rebuilt, observed, reverted — all exit 1):
+//   CONTROLS
+check('develop-spec plan: it states how parallel it is, and a seat names the avoidable dependencies without changing the waves', () => {
+  const harness = (file) => {
+    const src = require('fs').readFileSync(file, 'utf8').replace(/^export /m, '');
+    const AsyncFn = Object.getPrototypeOf(async function () {}).constructor;
+    const T = (id, blockedBy = [], o = {}) => ({ id, file: `${id}-x.md`, title: `T${id}`, status: 'ready-for-agent', blockedBy, migration: false, seams: [], ...o });
+    const E = (ticket, blocker, verdict) => ({ ticket, blocker, verdict, why: 'w', how: verdict === 'avoidable' ? '- f(x) — agreed' : null });
+    const chain = () => [T('01'), T('02', ['01']), T('03', ['02']), T('04', ['01'])];
+    const run = async (args, tickets, deps) => {
+      const calls = [];
+      const agent = async (prompt, o) => {
+        const l = String(o.label); calls.push({ l, prompt, o });
+        if (l === 'read') return { root: '/r', branch: 'main', head: 'h0', dirty: [], agents: [], error: null, tickets };
+        if (l === 'deps') return deps;
+        if (l.endsWith(':worktree')) return { done: true, fresh: false, note: '' };
+        if (l.endsWith(':merge')) return { merged: true, hash: 'm', cleaned: true, note: '' };
+        if (l.endsWith(':commit')) return { committed: true, hash: 'c', message: 'm', note: '' };
+        if (l.endsWith(':preflight')) return { exitCode: 0, skipped: [], failedCheck: null, tail: '' };
+        return '[PASS] a — x\nAPPROVED';
+      };
+      const out = await new AsyncFn('args', 'agent', 'log', 'phase', src)({ tickets: 'docs/tickets/prd-9', maxIter: 1, ...args }, agent, () => {}, () => {});
+      return { out, deps: calls.filter((c) => c.l === 'deps') };
+    };
+    (async () => {
+      const verdicts = { edges: [E('02', '01', 'needed'), E('03', '02', 'avoidable'), E('04', '01', 'avoidable'), E('03', '01', 'avoidable')] };
+      const plan = await run({}, chain(), verdicts);
+      const allNeeded = await run({}, chain(), { edges: [E('02', '01', 'needed'), E('03', '02', 'needed'), E('04', '01', 'needed')] });
+      const dead = await run({}, chain(), null);
+      const off = await run({ dependencyReview: false }, chain(), verdicts);
+      const confirmed = await run({ confirmed: true }, chain(), verdicts);
+      const flat = await run({}, [T('01'), T('02'), T('03')], verdicts);
+      const migr = await run({ maxParallel: 1 }, [T('01', [], { migration: true }), T('02', [], { migration: true }), T('03')], verdicts);
+      const P = plan.out.plan, R = P.dependencyReview;
+      console.log(JSON.stringify({
+        shape: [JSON.stringify(P.waves), P.parallelism.summary, P.parallelism.longestChain.join('>'), /4 ticket\(s\) in 3 wave\(s\)/.test(plan.out.nextStep)],
+        review: [plan.deps.length, plan.deps[0]?.o.model, plan.deps[0]?.o.effort, R.reviewed, R.of, R.avoidable.map((e) => `${e.ticket}<-${e.blocker}`).join(' '), JSON.stringify(R.whatIf.waves), R.whatIf.summary,
+          /2 of 3 dependencies look avoidable: without them, 4 ticket\(s\) in 2 wave\(s\), 2\.0 per wave instead of 4 ticket\(s\) in 3 wave\(s\)/.test(R.note), /When in doubt, answer needed/.test(plan.deps[0]?.prompt || '')],
+        quiet: [allNeeded.out.plan.dependencyReview.whatIf, allNeeded.out.plan.dependencyReview.note, dead.out.plan.dependencyReview, JSON.stringify(dead.out.plan.waves)],
+        skipped: [off.deps.length, off.out.plan.dependencyReview, confirmed.deps.length, confirmed.out.handoff.status, flat.deps.length, flat.out.plan.parallelism.summary],
+        caps: [migr.out.plan.parallelism.summary],
+      }));
+    })().catch((e) => console.log('THREW ' + e.stack));
+  };
+  const out = execFileSync('node', ['-e', `(${harness})(process.argv[1])`, path.join(ROOT, 'plugins/harness-loops/workflows/develop-spec.js')], { encoding: 'utf8' }).trim();
+  if (out.startsWith('THREW')) throw new Error(`develop-spec throws when run — ${out.slice(6)}`);
+  const r = JSON.parse(out);
+  const want = {
+    shape: [['[["01"],["02","04"],["03"]]', '4 ticket(s) in 3 wave(s), 1.3 per wave; the longest chain is 01 → 02 → 03', '01>02>03', true], 'the plan does not say how parallel it is (tickets per wave, the longest chain), or does not say it where the human reads the next step'],
+    review: [[1, 'sonnet', 'high', 3, 3, '03<-02 04<-01', '[["01","03","04"],["02"]]', '4 ticket(s) in 2 wave(s), 2.0 per wave', true, true], 'the dependency seat did not run once on the plan, an edge it invented was kept, or the what-if waves are wrong'],
+    quiet: [[null, 'all 3 reviewed dependencies look needed', null, '[["01"],["02","04"],["03"]]'], 'with nothing avoidable, or a seat that returned nothing, the plan must stay as the tickets declare it'],
+    skipped: [[0, null, 0, 'complete', 0, '3 ticket(s) in 1 wave(s), 3.0 per wave; the longest chain is 01; a wave is wider than maxParallel (2), so it runs in turns'], 'the dependency seat ran on a confirmed run, with dependencyReview: false, or with no dependency to review — or its suggestion changed the real waves'],
+    caps: [['3 ticket(s) in 2 wave(s), 1.5 per wave; the longest chain is 01; 2 tickets add a migration and run one at a time; a wave is wider than maxParallel (1), so it runs in turns'], 'the plan does not say when migrations or maxParallel, not dependencies, are what keeps it serial'],
+  };
+  for (const [k, [v, why]] of Object.entries(want)) {
+    if (JSON.stringify(r[k]) !== JSON.stringify(v)) throw new Error(`${why} (got ${JSON.stringify(r[k])})`);
+  }
+  return 'shape in the plan and the next step · avoidable dependencies named with a what-if · invented edges dropped · plan run only · real waves untouched';
+});
+
 // The wrapper is the one file the audit writes into every project, and the only route to the loop.
 // workflow() does not expand `~` (probed 2026-10-10: "Workflow script file not found: ~/…"), so the
 // wrapper names the copy by absolute path and falls back to the plugin's workflow by name. Only "not
