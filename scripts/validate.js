@@ -102,7 +102,7 @@ const SPLIT = {
     skills: [],
     commands: ['dashboard-harness', 'session-review'],
     agents: [],
-    hooks: ['block-no-verify', 'destructive-guard', 'loop-telemetry', 'repeat-tool-guard', 'secret-scan'],
+    hooks: ['block-no-verify', 'destructive-guard', 'loop-telemetry', 'repeat-tool-guard', 'secret-scan', 'weekly-review'],
   },
 };
 // A module two plugins need ships in each of them, byte for byte; the first plugin listed holds the
@@ -242,7 +242,7 @@ check('each plugin is self-contained: copied alone, every path it names resolves
     }
   });
   const totals = Object.entries(union).map(([k, v]) => `${v.length} ${k}`).join(', ');
-  if (totals !== '1 skills, 6 commands, 7 agents, 8 hooks') throw new Error(`the three plugins ship ${totals}; expected 2.9.0's 1 skills, 6 commands, 7 agents, 7 hooks + sync-workflows`);
+  if (totals !== '1 skills, 6 commands, 7 agents, 9 hooks') throw new Error(`the three plugins ship ${totals}; expected 1 skills, 6 commands, 7 agents, 9 hooks (2.9.0's 7, sync-workflows, weekly-review)`);
   return `${lines.join(' · ')} — union ${totals}`;
 });
 
@@ -1068,6 +1068,47 @@ check('harness-panel counts from local files, quotes no prompt, and makes no net
     const empty = execFileSync('node', [script, '--out', out], { env: { PATH: process.env.PATH, HOME: path.join(tmp, 'nobody') }, encoding: 'utf8' });
     if (!empty.includes(`file://${out}`) || !/The gate log is empty/.test(fs.readFileSync(out, 'utf8'))) throw new Error('a machine with no transcripts and no gate log must still get a page that says so');
     return 'fixture counted by hand · no prompt text on the page · no network without --web-fonts · quota ahead flagged · empty machine still renders · coach notes escaped, off with --no-coach';
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// weekly-review is the invitation the first dashboard never had: it was shipped, and not opened once in two months.
+// It runs on every session start, so what matters is when it stays quiet, that it never calls a model on its own,
+// and that the part that costs tokens is off until the operator turns it on.
+//
+// Negative controls (2026-11-26, each applied to weekly-review.js, observed, reverted — all exit 1):
+//   CONTROLS
+check('weekly-review invites once a week with a link, stays quiet otherwise, and asks for an agent only when the coach is on', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-weekly-'));
+  try {
+    const script = path.join(ROOT, 'plugins/harness-guards/scripts/hooks/weekly-review.js');
+    const cfgFile = path.join(tmp, 'weekly.json');
+    const projects = path.join(tmp, 'projects');
+    const run = (payload, extra = {}) => execFileSync('node', [script], { input: JSON.stringify(payload), encoding: 'utf8',
+      env: { PATH: process.env.PATH, HOME: tmp, XDG_CACHE_HOME: path.join(tmp, 'cache'), HARNESS_WEEKLY_FILE: cfgFile, HARNESS_PROJECTS_DIR: projects, HARNESS_WEEKLY_DRY: '1', ...extra } });
+    const start = { hook_event_name: 'SessionStart', source: 'startup' };
+    if (run(start) !== '') throw new Error('with no transcripts on the machine there is nothing to review, and the hook spoke');
+    fs.mkdirSync(path.join(projects, '-p'), { recursive: true });
+    if (run({ ...start, source: 'resume' }) !== '' || run({ hook_event_name: 'Stop' }) !== '') throw new Error('the hook spoke on a resumed session or on another event');
+    const first = JSON.parse(run(start));
+    const link = `file://${path.join(tmp, 'cache', 'harness-audit', 'panel', 'index.html')}`;
+    if (!first.systemMessage.includes(link) || !first.hookSpecificOutput.additionalContext.includes(link)) throw new Error('the invitation does not carry a file:// link to the panel');
+    if (/agent|sonnet|coach-brief/i.test(first.hookSpecificOutput.additionalContext)) throw new Error('with the coach off the hook asked the session to start an agent — that costs tokens nobody agreed to');
+    if (!JSON.parse(fs.readFileSync(cfgFile, 'utf8')).lastRun) throw new Error('the week was not recorded');
+    if (run(start) !== '') throw new Error('the invitation came back in the same week');
+    const old = new Date(Date.now() - 8 * 86400000).toISOString();
+    fs.writeFileSync(cfgFile, JSON.stringify({ lastRun: old, coach: true, lang: 'es', quotaFile: '/q.json' }));
+    const coach = JSON.parse(run(start));
+    const ctx = coach.hookSpecificOutput.additionalContext;
+    if (!/ONE background agent \(model sonnet, high effort\)/.test(ctx) || !ctx.includes('--coach-brief --lang es') || !ctx.includes('--quota-file "/q.json"') || !/^Tu resumen semanal/.test(coach.systemMessage)) {
+      throw new Error('with the coach on, the session is not told to run one Sonnet agent on the brief, or the config (language, quota file) did not reach the commands');
+    }
+    const kept = JSON.parse(fs.readFileSync(cfgFile, 'utf8'));
+    if (kept.coach !== true || kept.quotaFile !== '/q.json' || kept.lastRun === old) throw new Error('recording the week dropped the operator\'s config');
+    fs.writeFileSync(cfgFile, JSON.stringify({ enabled: false }));
+    if (run(start) !== '') throw new Error('"enabled": false did not silence the hook');
+    return 'no transcripts → quiet · startup only · link in the invitation · once per week · coach off → no agent · coach on → one Sonnet agent · config kept · enabled:false silences';
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
