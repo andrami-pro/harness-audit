@@ -4,6 +4,14 @@ Every change to the harness that an operator can notice, newest first. Each entr
 not how it is built. Minor internal fixes live in the commits; they make the list only when they
 change behavior.
 
+## 2026-11-26 · One page that answers "is it helping?" (harness-guards 1.1.0)
+
+**The dashboard counted everything and was hard to read.** `harness-panel` is one page for one question: what the
+gate caught, how many waves tickets landed and why the others were blocked, how parallel the plans are, how you
+prompt, what you use and what you never ran, and one proposal for the week. It counts and never quotes a prompt,
+costs no tokens, and makes no network request unless you ask for web fonts. `--quota-file` adds your weekly quota
+against the days left.
+
 ## 2026-11-26 · The plan says how parallel it is, and questions its dependencies (harness-loops 1.9.0)
 
 **Two waves in three held a single ticket.** In the first 26 plans, 50 of 78 waves had one ticket and 86 of 116

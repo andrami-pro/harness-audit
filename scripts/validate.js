@@ -1010,6 +1010,64 @@ check('loop-stats reads the skill inventory, the review lifecycle, and fires car
 //   ${CLAUDE_PLUGIN_ROOT} without the :-.claude fallback ... "must use the ${CLAUDE_PLUGIN_ROOT:-.claude} form"
 //   disable-model-invocation removed ...................... "must be manual-only"
 //   a Read of a .jsonl added to the body .................. "must not read transcripts itself"
+// harness-panel is the page the operator shows someone else, so two things must hold whatever it counts: no prompt
+// text ever reaches the page (it counts, it does not quote), and the page makes no network request unless asked.
+// The counts are asserted on a transcript small enough to check by hand.
+//
+// Negative controls (2026-11-26, each applied to harness-panel.js, observed, reverted — all exit 1):
+//   subagent (sidechain) prompts counted ......... "the panel miscounts the fixture: …" (got [1,4,1,…])
+//   tool results counted as prompts .............. same message (got [1,4,1,…])
+//   every blocked run counted as a catch ......... same message (got […,3,1,…])
+//   the font link written without --web-fonts .... "the page names a network address without --web-fonts"
+//   a prompt's text written into the footer ...... "the page quotes a prompt — it may only count"
+//   the quota warning disabled ................... "a quota 30 points ahead of the week is not flagged"
+check('harness-panel counts from local files, quotes no prompt, and makes no network request unless asked', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-panel-'));
+  try {
+    const proj = path.join(tmp, 'projects', '-home-demo-app');
+    fs.mkdirSync(proj, { recursive: true });
+    const now = new Date().toISOString();
+    const u = (content, extra = {}) => JSON.stringify({ type: 'user', timestamp: now, message: { role: 'user', content }, ...extra });
+    const spec = { plan: { root: '/r', waves: [['01'], ['02', '03']], tickets: [{ id: '01', blockedBy: [] }, { id: '02', blockedBy: ['01'] }, { id: '03', blockedBy: [] }] }, brief: 'b',
+      handoff: { status: 'blocked', summary: '1 landed, 2 blocked, 0 waiting', blocker: '02: Preflight failed — fix before commit · 03: [FAIL] a — x' } };
+    fs.writeFileSync(path.join(proj, 's1.jsonl'), [
+      u('Build the ZEBRA-SECRET invoice export for the client'),
+      u('dale'),
+      u([{ type: 'text', text: 'no, te dije que sin tocar la base' }]),
+      u([{ type: 'tool_result', tool_use_id: 't', content: 'x' }]),
+      u('a subagent prompt', { isSidechain: true }),
+      u('<command-name>/model</command-name>'),
+      u(`<task-notification><task-id>w1</task-id><result>${JSON.stringify(spec)}</result></task-notification>`),
+      JSON.stringify({ type: 'assistant', timestamp: now, message: { role: 'assistant', content: [{ type: 'tool_use', id: 't', name: 'Skill', input: { skill: 'acme:polish' } }] } }),
+    ].join('\n') + '\n');
+    const gateLog = path.join(tmp, 'gate.ndjson');
+    fs.writeFileSync(gateLog, [['blocked', 1], ['blocked', 2], ['green', 1], ['blocked', 1]].map(([result, attempt]) => JSON.stringify({ ts: now, repo: 'app', result, attempt })).join('\n') + '\n');
+    const quota = path.join(tmp, 'quota.json');
+    fs.writeFileSync(quota, JSON.stringify({ rate_limits: { seven_day: { used_percentage: 80, resets_at: Math.floor(Date.now() / 1000) + 3.5 * 86400 } } }));
+    const env = { PATH: process.env.PATH, HOME: tmp, HARNESS_PROJECTS_DIR: path.join(tmp, 'projects'), HARNESS_GATE_LOG: gateLog };
+    const script = path.join(ROOT, 'plugins/harness-guards/scripts/harness-panel.js');
+    const run = (...a) => execFileSync('node', [script, ...a], { env, encoding: 'utf8' });
+    const j = JSON.parse(run('--json', '--quota-file', quota));
+    const got = [j.sessions, j.prompts, j.continuations, j.correctionSessions, j.modelSwitches, j.spec.landed, j.spec.blocked, j.spec.friction, j.spec.working, j.spec.waves, j.spec.perWave,
+      j.gate.catches, j.gate.fixed, JSON.stringify(j.topSkills), j.quota.used, j.quota.elapsed, j.unused.includes('develop-spec')];
+    const want = [1, 3, 1, 1, 1, 1, 2, 1, 1, 2, 1.5, 2, 1, '[["polish",1]]', 80, 50, true];
+    if (JSON.stringify(got) !== JSON.stringify(want)) throw new Error(`the panel miscounts the fixture: a tool result or a subagent prompt counted as a prompt, consecutive blocks counted as separate catches, or a waves result misread (got ${JSON.stringify(got)})`);
+    const out = path.join(tmp, 'p.html');
+    run('--out', out, '--lang', 'es', '--quota-file', quota);
+    const html = fs.readFileSync(out, 'utf8');
+    if (/ZEBRA-SECRET|te dije/.test(html)) throw new Error('the page quotes a prompt — it may only count');
+    if (/https?:\/\//.test(html)) throw new Error('the page names a network address without --web-fonts');
+    if (!/30 puntos por delante de la semana/.test(html)) throw new Error('a quota 30 points ahead of the week is not flagged');
+    run('--out', out, '--web-fonts');
+    if (!/fonts\.googleapis\.com/.test(fs.readFileSync(out, 'utf8'))) throw new Error('--web-fonts did not add the font stylesheet');
+    const empty = execFileSync('node', [script, '--out', out], { env: { PATH: process.env.PATH, HOME: path.join(tmp, 'nobody') }, encoding: 'utf8' });
+    if (!empty.includes(out) || !/The gate log is empty/.test(fs.readFileSync(out, 'utf8'))) throw new Error('a machine with no transcripts and no gate log must still get a page that says so');
+    return 'fixture counted by hand · no prompt text on the page · no network without --web-fonts · quota ahead flagged · empty machine still renders';
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 check('dashboard-harness runs the script and never parses transcripts itself', () => {
   const rel = commandPath('dashboard-harness');
   mustExist(rel);

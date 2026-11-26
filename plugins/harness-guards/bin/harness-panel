@@ -1,0 +1,4 @@
+#!/bin/sh
+# One readable page from the local transcripts and the gate log: is the harness helping? Shortcut of:
+#   node <repo>/scripts/harness-panel.js
+exec node "$(CDPATH= cd -- "$(dirname -- "$0")/../scripts" && pwd)/harness-panel.js" "$@"
