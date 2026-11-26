@@ -508,14 +508,27 @@ async function runStatic(browser, cfg, axeSrc, shotsDir, found, notReady) {
   for (const [width, height] of cfg.viewports) {
     for (const scheme of cfg.colorSchemes) {
       const ctx = await browser.newContext({ viewport: { width, height }, colorScheme: scheme, reducedMotion: 'reduce' })
-      const page = await ctx.newPage()
       let screen = ''
+      const listen = (page) => {
       page.on('console', (m) => { if (m.type() === 'error' && !/^Failed to load resource/.test(m.text())) found.push({ rule: 'console-error', screen, where: 'console', detail: m.text().slice(0, 140) }) })
       page.on('response', (r) => { if (r.status() >= 400 && !/\/favicon\.ico$/.test(r.url())) found.push({ rule: 'request-failed', screen, where: r.request().method(), detail: `${r.status()} ${r.url().slice(0, 120)}` }) })
       page.on('requestfailed', (r) => { if (!/ERR_ABORTED|ERR_INSUFFICIENT_RESOURCES/.test(r.failure()?.errorText ?? '')) found.push({ rule: 'request-failed', screen, where: r.method(), detail: `${r.failure()?.errorText} ${r.url().slice(0, 120)}` }) })
+        return page
+      }
+      let page = listen(await ctx.newPage())
       for (const route of cfg.routes) {
         screen = `${width}x${height}${scheme === 'light' ? '' : ` ${scheme}`} ${route || '/'}`
-        try { await openScreen(page, cfg, route) } catch (e) { notReady.push(`${screen} — never showed "${cfg.ready}": ${e.message.split('\n')[0]}`); continue }
+        try { await openScreen(page, cfg, route) } catch (e) {
+          // A navigation that never started is tried once more in a fresh tab. In a multi-page app on a dev server
+          // (Nuxt, 18 full loads) the tab stopped loading after a dozen screens that each load alone in seconds.
+          let err = e
+          if (/^page\.goto/.test(e.message)) {
+            await page.close().catch(() => {})
+            page = listen(await ctx.newPage())
+            try { await openScreen(page, cfg, route); err = null } catch (e2) { err = e2 }
+          }
+          if (err) { notReady.push(`${screen} — never showed "${cfg.ready}": ${err.message.split('\n')[0]}`); continue }
+        }
         screens++
         for (const v of await page.evaluate(`(${staticRules.toString()})(document, window)`)) found.push({ ...v, screen })
         if (axeSrc) {
