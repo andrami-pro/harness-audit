@@ -395,6 +395,15 @@ The project wrapper runs it when the args carry `tickets`, with the same config 
   removed. A ticket that does not converge, or does not merge, is marked `blocked` with the reason. Its worktree stays for
   you to inspect, its dependents wait, and the rest of the graph goes on.
 - **Refuses** a checkout with uncommitted changes, since it merges into it, and two tickets that share an id.
+- **One preflight before any ticket.** The first fresh worktree runs the project's preflight once, before an
+  implementer starts. Red, or skipping a check `allowSkipped` does not name, stops the run there: that gate would be
+  red for every ticket, whatever it wrote. `baselinePreflight: false` turns it off.
+- **A ticket that never started leaves nothing.** When setup fails or the run stops before an implementer wrote a
+  line, the empty worktree and branch are removed and the ticket file stays `ready-for-agent`. The brief lists these
+  under "Not started". `blocked` is kept for tickets that carry work.
+- **One attempt at a merge conflict.** A ticket that no longer merges gets one seat in its own worktree: it merges
+  the base in, keeps both intents, and must pass the preflight before the merge is tried again. No ticket review
+  sees that resolution, so the brief names the ticket and the final review covers the merged range.
 - **Checks the config before the plan.** An `agentTypes` value the session cannot run stops the run with one line:
   Claude Code loads project agents only from `.claude/agents/` of the folder the session started in, so a session
   opened in a parent folder does not see the repository's agents. An `integrate` with neither `{branch}` nor a git

@@ -4,6 +4,26 @@ Every change to the harness that an operator can notice, newest first. Each entr
 not how it is built. Minor internal fixes live in the commits; they make the list only when they
 change behavior.
 
+## 2026-11-26 · Waves stop losing tickets to plumbing (harness-loops 1.8.0)
+
+**Of 36 tickets blocked in six weeks of waves runs, about 30 were not blocked by their code.** Counted from the
+results of 41 develop-spec runs on four projects: 11 on a preflight that was red or skipped checks in the worktree,
+8 on setup, 6 on an implementer seat that died, 5 on a merge conflict. The reviewers stopped 8.
+
+- **A red preflight goes back to the implementer.** After the reviews approve, a preflight that fails returns its
+  output to the implementer, and the fix is reviewed again, inside `maxIter`. It used to end the ticket.
+- **One preflight before any ticket.** develop-spec runs it once in the first fresh worktree. Red, or skipping a
+  check you did not declare, stops the run before an implementer is paid for.
+- **A dead implementer is retried once**, told to look at what the first attempt left.
+- **One attempt at a merge conflict**, in the ticket's worktree, proved by the preflight. The brief says which
+  tickets landed that way: no ticket review saw the resolution.
+- **A ticket that never started leaves nothing behind.** No empty worktree, no branch, no `blocked` commit.
+- **Not on Pi yet.** `develop-phase-pi.js` and `develop-spec-pi.js` keep the old behaviour.
+
+**Sonnet or Fable as the reviewer: a tie on this corpus.** 15 labelled diffs (7 new: four subtle bugs, three safe
+changes that look unsafe), each reviewed three times by each model with the same prompt. Both caught 24 of 24 bugs
+with 0 false alarms in 21. The diffs are short and synthetic; a difference may only show on large real changes.
+
 ## 2026-11-26 · The harness starts counting what it catches; waves refuse a config that cannot work
 
 **Nothing said whether the harness helps.** The Stop gate sent the agent back on a failing tree and kept no record.

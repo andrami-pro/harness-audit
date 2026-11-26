@@ -3324,7 +3324,15 @@ check('develop-spec waves: plan first, frontier by Blocked by, slots, one migrat
 // left empty worktrees, branches and tickets committed as blocked (8), and merge conflicts between tickets in flight (5).
 //
 // Negative controls (2026-11-26, each applied to workflow-src/develop-spec.js and rebuilt, observed, reverted — all exit 1):
-//   CONTROLS
+//   the baseline stop made `if (false)` ................ "a preflight that is red in a fresh worktree did not stop the run before any implementer, …" (got ["01:done 02:done 03:ready-for-agent",2,1,0,false,true,true,false])
+//   the unlisted-skip branch made `else if (false)` .... "a baseline that skips checks outside allowSkipped let the tickets run …" (got [3,false,"01:done 02:done 03:done"])
+//   the fresh-worktree condition made `true` ........... "baselinePreflight: false, a reused worktree or a baseline seat that returned nothing must not stop the run" (got [0,…,1,"01:not-started 02:not-started 03:ready-for-agent",…])
+//   tidy() never called ................................ "… or it left tickets marked blocked or worktrees behind" (got […,0,1,0,false,true,true,true])
+//   a failed setup marked blocked, as before ........... "a ticket whose worktree could not be set up was committed as blocked, …" (got ["01:blocked 02:done 03:done",1,0,0,false])
+//   the conflict attempt made `if (false)` ............. "a merge conflict did not get one resolution attempt in the ticket worktree, …" (got ["01:done 02:blocked 03:done",1,false,false,…])
+//   a failed resolution merged anyway .................. same message (got […,"01:done 02:done 03:done",2,0])
+//   the scheduler ignoring baselineProblem ............. "a preflight that is red … did not stop the run …" (got ["01:not-started 02:not-started 03:not-started",…])
+//   a dead baseline seat treated as red ................ "baselinePreflight: false, a reused worktree or a baseline seat that returned nothing must not stop the run" (got […,"01:not-started 02:not-started 03:ready-for-agent"])
 check('develop-spec plumbing: a red baseline preflight stops before any implementer, a ticket that never started leaves nothing, one conflict resolution', () => {
   const harness = (file) => {
     const src = require('fs').readFileSync(file, 'utf8').replace(/^export /m, '');
@@ -3375,7 +3383,7 @@ check('develop-spec plumbing: a red baseline preflight stops before any implemen
         skip: [skip.n(/:impl/), /skips checks in a fresh worktree that allowSkipped does not name/.test(skip.out.handoff.blocker), allowed.st],
         optOut: [off.n(/:baseline$/), off.st, reused.n(/:baseline$/), reused.st, dead.st],
         setup: [setup.st, setup.n(/^01:mark$/), setup.n(/^01:tidy$/), setup.n(/^01:impl/), /01 did not start: worktree not ready: pnpm install failed/.test(setup.out.handoff.blocker)],
-        conflict: [fixed.st, fixed.n(/^02:merge$/), /02 landed after a seat resolved a merge conflict/.test(fixed.out.brief), /keep BOTH intents/.test(fixed.calls.find((c) => c.l === '02:resolve').prompt),
+        conflict: [fixed.st, fixed.n(/^02:merge$/), /02 landed after a seat resolved a merge conflict/.test(fixed.out.brief), /keep BOTH intents/.test(fixed.calls.find((c) => c.l === '02:resolve')?.prompt || ''),
           unfixed.st, unfixed.n(/^02:merge$/), unfixed.n(/^02:mark$/)],
       }));
     })().catch((e) => console.log('THREW ' + e.stack));
