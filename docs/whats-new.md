@@ -4,6 +4,13 @@ Every change to the harness that an operator can notice, newest first. Each entr
 not how it is built. Minor internal fixes live in the commits; they make the list only when they
 change behavior.
 
+## 2026-11-26 · ui-check on path-routed apps (loops 1.11.1)
+
+A screen that does not open is tried once more in a fresh tab, whatever the reason. 1.11.0 retried only a navigation
+that never started; a Vite + React Router app showed the other half: pages that load and never render, 4 of 18,
+different ones each run. All 18 pass now. On Astro 7, `astro dev` goes to the background when it detects an agent:
+write `ASTRO_DEV_BACKGROUND=1 astro dev --ignore-lock --port {port}` in `serve`.
+
 ## 2026-11-26 · The loop fixes of this week, on Pi (loops 1.11.0)
 
 `develop-phase-pi.js` and `develop-spec-pi.js` now behave like the Claude loops where it cost tickets:
