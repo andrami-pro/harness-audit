@@ -4035,12 +4035,15 @@ const piLoop = () => {
   const bin = path.join(tmp, 'bin');
   fs.mkdirSync(bin);
   fs.writeFileSync(path.join(bin, 'pi'), `#!/bin/sh
+for a in "$@"; do case "$a" in @*) P="\${a#@}" ;; esac; done
 case "$HARNESS_SEAT" in
   scout) echo "brief: sum.js:1" ;;
   analyst) if [ -n "$FAKE_BLOCK" ]; then echo "$FAKE_BLOCK: falta decidir";
     elif [ -n "$FAKE_SEAMS" ]; then printf '1. sum.js\\n**SEAMS**:\\n- sum() — devuelve 2\\n- node sum.js — imprime 2\\n\\nRiesgos: x\\n';
     else echo "1. sum.js"; fi ;;
   implementer-*) if [ -n "$FAKE_CONN_ERR" ]; then echo '{"type":"message_end","message":{"role":"assistant","content":[],"errorMessage":"Connection error."}}'; exit 0; fi
+    if [ -n "$FAKE_DIE_ONCE" ] && [ ! -f "$FAKE_DIE_ONCE" ]; then touch "$FAKE_DIE_ONCE"; exit 0; fi
+    if grep -q 'preflight del proyecto FALLÓ' "$P"; then touch fixed.txt; fi
     echo "module.exports = 2;" > sum.js; echo "sum.js cambiado" ;;
   reviewer-*) if [ "$FAKE_REJECT_NOFAIL" = "code" ]; then printf 'RECHAZADO\\n'; else printf '[PASS] a — x\\n**APROBADO**\\n'; fi ;;
   spec-*) if [ "$FAKE_REJECT_NOFAIL" = "spec" ]; then printf 'RECHAZADO\\n'; elif [ -n "$FAKE_SPEC_BULLET" ]; then printf -- '- [FAIL] tarea — falta y\\nRECHAZADO\\n'; elif [ -n "$FAKE_SPEC_REJECT" ]; then printf '[FAIL] tarea — falta x\\nRECHAZADO\\n'; else printf '[PASS] tarea — x\\nAPROBADO\\n'; fi ;;
@@ -4121,6 +4124,28 @@ check('develop-phase-pi: loop in code — pass commits, D25a refuses, BLOQUEO st
 
 // PRD-004 §7, ticket 01: the Pi loop agrees seams, works test-first, accepts the skips a project declares and
 // tells its reviewer it is read-only — the same rules as workflows/develop-phase.js, held here by stub seats.
+// The two loop fixes of loops 1.8, on Pi. Negative controls (2026-11-26, each applied to develop-phase-pi.js, observed,
+// reverted): see the list above the check's body.
+check('develop-phase-pi: a dead implementer is retried once, a failed preflight goes back to the implementer', () => {
+  const { tmp, run, done } = piLoop();
+  try {
+    const once = run('once', { env: { FAKE_DIE_ONCE: path.join(tmp, 'died') } });
+    if (once.code !== 0 || once.out.handoff.status !== 'complete' || once.out.iterations !== 1) throw new Error(`an implementer that died once was not retried: ${once.out && once.out.handoff.status} ${once.err.slice(-200)}`);
+    if (!/murió antes de informar/.test(once.prompt('implementer-1-retry') || '')) throw new Error('the retry was not told that an earlier attempt may have left work behind');
+    const dead = run('dead', { env: { FAKE_CONN_ERR: '1' } });
+    if (dead.out.handoff.status !== 'crash' || !dead.prompt('implementer-1-retry') || dead.prompt('implementer-1-retry-retry')) throw new Error('an implementer that dies twice must crash after exactly one retry');
+    const fed = run('fed', { preflight: 'echo "boom at lint"; test -f fixed.txt', args: ['--max-iter', '2'] });
+    if (fed.code !== 0 || fed.out.handoff.status !== 'complete' || fed.out.iterations !== 2 || !fed.out.preflightPassed) throw new Error(`a failed preflight did not go back to the implementer: ${fed.out && `${fed.out.handoff.status} after ${fed.out.iterations}`}`);
+    const p2 = fed.prompt('implementer-2') || '';
+    if (!p2.includes('boom at lint') || !p2.includes('ENVIRONMENT:') || p2.includes('RECHAZÓ')) throw new Error('the implementer was not given the preflight output and the ENVIRONMENT: way out, or was told the review rejected');
+    const last = run('last', { preflight: 'test -f fixed.txt' });
+    if (last.out.handoff.status !== 'continue' || last.out.iterations !== 1 || last.out.commit) throw new Error('with no round left, a failed preflight must end as before: approved, not committed');
+    const skip = run('skipfed', { preflight: 'echo "SKIP live"', args: ['--max-iter', '2'] });
+    if (skip.out.iterations !== 1) throw new Error('a skipped check was sent back to the implementer, who cannot supply a key');
+  } finally { done(); }
+  return 'died once → retried, complete · died twice → crash after one retry · preflight red → implementer round 2 with the output → complete · last round and SKIP → as before';
+});
+
 check('develop-phase-pi: seams propose stops before the implementer, agreed seams reach every seat, test-first, declared skips, read-only reviewer', () => {
   const { run, done } = piLoop();
   const SEAMS = ['- sum() — devuelve 2', '- node sum.js — imprime 2'];
@@ -4347,6 +4372,8 @@ case "$HARNESS_SEAT" in
   spec-*) if [ "$ID" = "$FAKE_REJECT" ]; then printf '[FAIL] tarea — falta x\\nRECHAZADO\\n'; else printf '[PASS] tarea — x\\nAPROBADO\\n'; fi ;;
   final-*) if [ -n "$FAKE_FINAL_REJECT" ]; then printf '[FAIL] todo — falta y\\nRECHAZADO\\n'; else printf '[PASS] todo — x\\nAPROBADO\\n'; fi ;;
   commit) echo "feat: ticket $ID" ;;
+  resolve-*) if [ "$FAKE_RESOLVE" = "both" ]; then printf '01\\n02\\n' > shared.txt; echo "shared.txt: los dos"; elif [ "$FAKE_RESOLVE" = "markers" ]; then echo "lo dejo"; fi ;;
+  deps) [ -n "$FAKE_DEPS" ] && printf '03<-01 | avoidable | solo necesita f() | - f() — x\\n09<-01 | avoidable | inventada | -\\n' ;;
 esac
 `, { mode: 0o755 });
   const lineup = path.join(tmp, 'lineup.json');
@@ -4410,6 +4437,17 @@ esac
     execFileSync('sh', ['-c', "echo b > base2.txt && sed -i 's/^Status: blocked$/Status: ready-for-agent/' docs/tickets/w/01-x.md && git add -A && git commit -qm base2"], { cwd: resumed.cwd, env: { ...process.env, ...GIT } });
     const again = run({}, { args: ['--confirmed'], reuse: resumed.cwd });
     const lower = run({ '01': T('01').replace('Status:', 'status:') }, { args: ['--confirmed'] });
+    // The plumbing brought over from workflow-src/develop-spec.js (loops 1.8–1.9).
+    const oldGate = run({ '01': T('01') }, { args: ['--confirmed', '--preflight', 'test -f secret.json', '--no-baseline-preflight'] });
+    const redBase = run(three, { args: ['--confirmed', '--preflight', 'echo boom; exit 3'] });
+    const skipBase = run({ '01': T('01') }, { args: ['--confirmed', '--preflight', 'echo "SKIP live"'] });
+    const badSetup = run({ '01': T('01'), '02': T('02') }, { args: ['--confirmed', '--worktree-setup', 'exit 7'] });
+    const note = run(three, { args: ['--confirmed', '--integrate', 'open a PR and wait for CI'] });
+    const envSetup = run(three, { args: ['--worktree-setup', 'cp ../.env .'] });
+    const healed = run({ '01': T('01'), '02': T('02') }, { args: ['--confirmed'], env: { FAKE_CONFLICT: '1', FAKE_RESOLVE: 'both' } });
+    const markers = run({ '01': T('01'), '02': T('02') }, { args: ['--confirmed'], env: { FAKE_CONFLICT: '1', FAKE_RESOLVE: 'markers' } });
+    const deps = run(three, { env: { FAKE_DEPS: '1' } });
+    const noDeps = run(three, { args: ['--no-dependency-review'], env: { FAKE_DEPS: '1' } });
     const got = {
       plan: [plan.code, JSON.stringify(plan.out?.plan.waves), plan.order.length, plan.sh('git worktree list | wc -l')],
       full: [st(full), full.code, full.out?.handoff.status, full.maxActive, full.order.indexOf('S 03') > full.order.indexOf('E 01'),
@@ -4422,7 +4460,15 @@ esac
       conflict: [st(conflict), /conflict in shared\.txt/.test(conflict.out?.brief), conflict.sh('git status --short --untracked-files=no | wc -l')],
       dirty: [dirty.out?.handoff.status, dirty.order.length],
       dupes: [dupes.out?.handoff.status, dupes.order.length, /01-x\.md and 01-y\.md/.test(dupes.out?.handoff.blocker)],
-      setup: [st(setup), st(nosetup)],
+      setup: [st(setup), st(nosetup), nosetup.order.length, nosetup.status('01-x.md'), nosetup.sh('git worktree list | wc -l'), nosetup.sh("git branch --list 'spec/*' | wc -l"), st(oldGate), oldGate.order.length],
+      redBase: [st(redBase), redBase.order.length, redBase.sh('git worktree list | wc -l'), redBase.sh("git log --format=%s | grep -c 'chore(tickets)' || true"), /nothing ran: the preflight \(echo boom; exit 3\) fails in a fresh worktree/.test(redBase.out?.brief), /Waiting \(2\):\n- 02 — T02: the run stopped before its turn\n- 03 — T03: blocked by 01 \(not-started\)/.test(redBase.out?.brief)],
+      skipBase: [st(skipBase), skipBase.order.length, /SKIP live/.test(skipBase.out?.brief)],
+      badSetup: [st(badSetup), badSetup.order.length, badSetup.status('01-x.md'), badSetup.sh('git worktree list | wc -l'), badSetup.sh("git branch --list 'spec/*' | wc -l"), /Not started \(2\)/.test(badSetup.out?.brief)],
+      config: [note.out?.handoff.status, note.order.length, /neither \{branch\} nor a git merge/.test(note.out?.handoff.blocker), /names a secret file/.test(envSetup.out?.plan.warnings[0] || '')],
+      healed: [st(healed), healed.code, healed.sh('cat shared.txt | tr "\\n" ,'), /02 landed after a seat resolved a merge conflict with main/.test(healed.out?.brief), healed.sh('git worktree list | wc -l')],
+      markers: [st(markers), /conflict in shared\.txt/.test(markers.out?.brief), markers.sh('git -C .pi/worktrees/spec-w-02 status --short | wc -l'), markers.sh('git -C .pi/worktrees/spec-w-02 log --format=%s -1')],
+      shape: [plan.out?.plan.parallelism.summary, JSON.stringify(plan.out?.plan.parallelism.longestChain), plan.out?.plan.dependencyReview],
+      deps: [deps.out?.plan.dependencyReview?.reviewed, deps.out?.plan.dependencyReview?.avoidable.length, JSON.stringify(deps.out?.plan.dependencyReview?.whatIf?.waves), /1 of 1 dependencies look avoidable/.test(deps.out?.handoff.blocker), deps.order.length, noDeps.out?.plan.dependencyReview],
       quoted: [st(evil), fs.existsSync(path.join(evil.cwd, 'pwned')), evil.sh('git log --format=%s | grep "^merge: "')],
       usage: usage.code,
       finalReject: [finalReject.code, finalReject.out?.handoff.status, /final code review: \[FAIL\] todo/.test(finalReject.out?.brief)],
@@ -4443,14 +4489,22 @@ esac
       conflict: [['01:done 02:blocked', true, '0'], 'a merge conflict was not aborted, named and the ticket marked blocked'],
       dirty: [['blocked', 0], "a waves run started over the user's uncommitted work"],
       dupes: [['blocked', 0, true], 'two tickets with one id ran'],
-      setup: [['01:done', '01:blocked'], '--worktree-setup did not run in the worktree before its ticket (the gitignored file the preflight reads must be copied in), or a missing one did not block'],
+      setup: [['01:done', '01:not-started', 0, 'ready-for-agent', '1', '0', '01:blocked', 2], '--worktree-setup did not run in the worktree before its ticket (the gitignored file the preflight reads must be copied in), or a preflight that cannot pass in a fresh worktree was found only after an implementer ran, or --no-baseline-preflight did not restore the old order'],
+      redBase: [['01:not-started 02:ready-for-agent 03:ready-for-agent', 0, '1', '0', true, true], 'a preflight that is red before any ticket changed a line did not stop the run with every ticket still ready-for-agent and nothing left behind'],
+      skipBase: [['01:not-started', 0, true], 'a preflight that skips an undeclared check in a fresh worktree still started a ticket'],
+      badSetup: [['01:not-started 02:not-started', 0, 'ready-for-agent', '1', '0', true], 'a ticket whose worktree setup failed was committed as blocked, or left an empty worktree or branch behind'],
+      config: [['blocked', 0, true, true], 'an --integrate that is a note and not a merge command was run, or a --worktree-setup that copies a secret was not warned about on the plan'],
+      healed: [['01:done 02:done', 0, '01,02,', true, '1'], 'a merge conflict between two tickets in flight was not resolved once in the ticket\'s worktree (both sides kept, preflight green, merged), or the brief does not disclose the unreviewed resolution'],
+      markers: [['01:done 02:blocked', true, '0', 'feat: ticket 02'], 'a resolution that left conflict markers was merged, or the ticket\'s worktree was left mid-merge'],
+      shape: [['3 ticket(s) in 2 wave(s), 1.5 per wave; the longest chain is 01 → 03', '["01","03"]', null], 'the plan does not say how parallel it is, or a dependency review appeared from a seat that returned nothing'],
+      deps: [[1, 1, '[["01","02","03"]]', true, 0, null], 'the dependency review kept an edge the tickets do not declare, has no what-if plan, ran a ticket, or ran despite --no-dependency-review'],
       quoted: [['01:done', false, "merge: 01 — x $(touch pwned) it's"], 'a ticket title reached the shell unquoted'],
       usage: [2, '--seams is per ticket and must be refused'],
       finalReject: [[1, 'blocked', true], 'a final review that rejects still let the run report complete'],
       relRun: [['01:done', '0', '1'], "a relative --run-dir was created inside the ticket's worktree and swept into its commit (or kept the worktree from being removed)"],
       linked: [['01:done 02:blocked', false, '0'], 'a conflict in a run started from a linked worktree left the checkout mid-merge'],
       loose: [['blocked', 0, true], 'a ticket file that was never committed ran — its worktree, branched from HEAD, does not hold it'],
-      leftover: [['01:blocked', true], "a file the worktree setup left, which git does not ignore, would have shipped in the ticket's commit"],
+      leftover: [['01:not-started', true], "a file the worktree setup left, which git does not ignore, would have shipped in the ticket's commit"],
       resumed: [['01:blocked', '01:done', 'base2', '1'], 'a resumed ticket did not take what landed on the branch since it was blocked (its implementer must see base2.txt)'],
       lower: [['01:done', 'done'], 'a lower-case status: line was read but never rewritten, so the ticket would run again'],
     };
