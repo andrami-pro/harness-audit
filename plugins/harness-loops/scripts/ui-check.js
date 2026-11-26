@@ -519,14 +519,13 @@ async function runStatic(browser, cfg, axeSrc, shotsDir, found, notReady) {
       for (const route of cfg.routes) {
         screen = `${width}x${height}${scheme === 'light' ? '' : ` ${scheme}`} ${route || '/'}`
         try { await openScreen(page, cfg, route) } catch (e) {
-          // A navigation that never started is tried once more in a fresh tab. In a multi-page app on a dev server
-          // (Nuxt, 18 full loads) the tab stopped loading after a dozen screens that each load alone in seconds.
+          // A screen that did not open is tried once more in a fresh tab. Every screen of a path-routed app is a full
+          // load, and on a dev server the tab gives out after a dozen: a navigation that never starts (Nuxt, 6 of 18)
+          // or a page that loads and never renders (Vite + React Router, 4 of 18, different ones each run).
           let err = e
-          if (/^page\.goto/.test(e.message)) {
-            await page.close().catch(() => {})
-            page = listen(await ctx.newPage())
-            try { await openScreen(page, cfg, route); err = null } catch (e2) { err = e2 }
-          }
+          await page.close().catch(() => {})
+          page = listen(await ctx.newPage())
+          try { await openScreen(page, cfg, route); err = null } catch (e2) { err = e2 }
           if (err) { notReady.push(`${screen} — never showed "${cfg.ready}": ${err.message.split('\n')[0]}`); continue }
         }
         screens++
