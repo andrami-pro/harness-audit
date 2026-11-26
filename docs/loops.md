@@ -395,10 +395,17 @@ The project wrapper runs it when the args carry `tickets`, with the same config 
   removed. A ticket that does not converge, or does not merge, is marked `blocked` with the reason. Its worktree stays for
   you to inspect, its dependents wait, and the rest of the graph goes on.
 - **Refuses** a checkout with uncommitted changes, since it merges into it, and two tickets that share an id.
+- **Checks the config before the plan.** An `agentTypes` value the session cannot run stops the run with one line:
+  Claude Code loads project agents only from `.claude/agents/` of the folder the session started in, so a session
+  opened in a parent folder does not see the repository's agents. An `integrate` with neither `{branch}` nor a git
+  merge is refused: here the merge seat runs it, while in develop-phase the same key is a note for you. A
+  `worktreeSetup` that names `.env` or `.dev.vars` is a warning in the plan.
 - **A worktree holds only what git tracks.** Dependencies and untracked files are not there. `worktreeSetup` names a
   command run in each new worktree before its ticket starts (`pnpm install --frozen-lockfile`). That includes the
   gitignored files your preflight reads: in the first pilot, `private-terms.json` was missing from the worktrees, its
-  check skipped, and both tickets blocked on that one undeclared SKIP (`cp /abs/path/private-terms.json .`). A ticket
+  check skipped, and both tickets blocked on that one undeclared SKIP (`cp /abs/path/private-terms.json .`). Never
+  copy a secret this way: a project that denies reading `.env` blocks the copy, and every ticket with it. Make the
+  preflight pass in a fresh worktree without secrets (typecheck, lint and unit tests need none). A ticket
   set back to `ready-for-agent` after a block resumes in the worktree and branch it kept. Paths, branches and the merge
   message reach the shell single-quoted, so a ticket title is text. A merge that landed counts as landed even when its
   worktree cannot be removed. The brief asks you to tidy it.
