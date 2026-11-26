@@ -309,7 +309,9 @@ const runTicket = async (t) => {
   const made = await agent(
     `${SEAT}Prepare this ticket's worktree. Run each command as written; change nothing else.
 1. cd ${q(read.root)}
-2. If the directory ${q(workdir)} exists, reuse it. Otherwise, if \`git show-ref --verify --quiet refs/heads/${branch}\` succeeds,
+2. If the directory ${q(workdir)} exists, reuse it and bring it up to date: \`git -C ${q(workdir)} merge ${q(read.branch)}\`
+   (a kept branch was cut before other tickets landed). If that merge conflicts, run \`git -C ${q(workdir)} merge --abort\`,
+   done=false, and name the conflicted files in note: the human resolves a kept branch. Otherwise, if \`git show-ref --verify --quiet refs/heads/${branch}\` succeeds,
    run \`git worktree add ${q(workdir)} ${q(branch)}\`; otherwise run \`git worktree add ${q(workdir)} -b ${q(branch)} ${q(read.branch)}\`.
 3. Make sure the line .claude/worktrees/ is in "$(git rev-parse --git-common-dir)/info/exclude" (append it if missing).${cfg.worktreeSetup ? `
 4. cd ${q(workdir)} && ${cfg.worktreeSetup}` : ''}

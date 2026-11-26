@@ -3378,7 +3378,7 @@ check('develop-spec plumbing: a red baseline preflight stops before any implemen
       const fixed = await run({}, { conflict: '02', resolve: true });
       const unfixed = await run({}, { conflict: '02', resolve: false });
       console.log(JSON.stringify({
-        green: [green.st, green.n(/:baseline$/), green.out.handoff.status],
+        green: [green.st, green.n(/:baseline$/), green.out.handoff.status, green.calls.find((c) => c.l === '01:worktree').prompt.includes("reuse it and bring it up to date: `git -C '/r/.claude/worktrees/spec-prd-9-01' merge 'main'`")],
         red: [red.st, red.n(/:impl/), red.n(/:baseline$/), red.n(/:mark$/), red.n(/:tidy$/) >= 1, /nothing ran: the preflight .* fails in a fresh worktree/.test(red.out.handoff.blocker), /TS2307/.test(red.out.handoff.blocker), /Not started \(\d\)/.test(red.out.brief)],
         skip: [skip.n(/:impl/), /skips checks in a fresh worktree that allowSkipped does not name/.test(skip.out.handoff.blocker), allowed.st],
         optOut: [off.n(/:baseline$/), off.st, reused.n(/:baseline$/), reused.st, dead.st],
@@ -3393,7 +3393,7 @@ check('develop-spec plumbing: a red baseline preflight stops before any implemen
   const r = JSON.parse(out);
   const ALL = '01:done 02:done 03:done';
   const want = {
-    green: [[ALL, 1, 'complete'], 'a green baseline stopped the run, or the baseline preflight ran more than once'],
+    green: [[ALL, 1, 'complete', true], 'a green baseline stopped the run, the baseline preflight ran more than once, or a kept worktree is resumed without what landed since (the Pi loop learned this in e6dd54a)'],
     red: [['01:not-started 02:not-started 03:ready-for-agent', 0, 1, 0, true, true, true, true], 'a preflight that is red in a fresh worktree did not stop the run before any implementer, or it left tickets marked blocked or worktrees behind'],
     skip: [[0, true, ALL], 'a baseline that skips checks outside allowSkipped let the tickets run (none could finish), or a declared skip stopped the run'],
     optOut: [[0, ALL, 0, ALL, ALL], 'baselinePreflight: false, a reused worktree or a baseline seat that returned nothing must not stop the run'],
