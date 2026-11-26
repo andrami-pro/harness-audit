@@ -1044,7 +1044,9 @@ check('harness-panel counts from local files, quotes no prompt, and makes no net
     fs.writeFileSync(gateLog, [['blocked', 1], ['blocked', 2], ['green', 1], ['blocked', 1]].map(([result, attempt]) => JSON.stringify({ ts: now, repo: 'app', result, attempt })).join('\n') + '\n');
     const quota = path.join(tmp, 'quota.json');
     fs.writeFileSync(quota, JSON.stringify({ rate_limits: { seven_day: { used_percentage: 80, resets_at: Math.floor(Date.now() / 1000) + 3.5 * 86400 } } }));
-    const env = { PATH: process.env.PATH, HOME: tmp, HARNESS_PROJECTS_DIR: path.join(tmp, 'projects'), HARNESS_GATE_LOG: gateLog };
+    const coachFile = path.join(tmp, 'coach.json');
+    fs.writeFileSync(coachFile, JSON.stringify({ generatedAt: now, period: 'week 48', insights: [{ title: 'COACH-TITLE <b>', evidence: 'saw it', action: 'do this', snippet: 'a rule', kind: 'rule' }, { title: 'no action' }] }));
+    const env = { PATH: process.env.PATH, HOME: tmp, HARNESS_PROJECTS_DIR: path.join(tmp, 'projects'), HARNESS_GATE_LOG: gateLog, HARNESS_COACH_FILE: coachFile };
     const script = path.join(ROOT, 'plugins/harness-guards/scripts/harness-panel.js');
     const run = (...a) => execFileSync('node', [script, ...a], { env, encoding: 'utf8' });
     const j = JSON.parse(run('--json', '--quota-file', quota));
@@ -1056,13 +1058,16 @@ check('harness-panel counts from local files, quotes no prompt, and makes no net
     run('--out', out, '--lang', 'es', '--quota-file', quota);
     const html = fs.readFileSync(out, 'utf8');
     if (/ZEBRA-SECRET|te dije/.test(html)) throw new Error('the page quotes a prompt — it may only count');
+    if (!html.includes('COACH-TITLE &lt;b&gt;') || html.includes('no action')) throw new Error('the coach notes are not rendered escaped, or a note with no action was shown');
+    run('--out', out, '--no-coach');
+    if (/COACH-TITLE/.test(fs.readFileSync(out, 'utf8'))) throw new Error('--no-coach still shows the coach notes: they may paraphrase prompts and must stay off a page meant for others');
     if (/https?:\/\//.test(html)) throw new Error('the page names a network address without --web-fonts');
     if (!/30 puntos por delante de la semana/.test(html)) throw new Error('a quota 30 points ahead of the week is not flagged');
     run('--out', out, '--web-fonts');
     if (!/fonts\.googleapis\.com/.test(fs.readFileSync(out, 'utf8'))) throw new Error('--web-fonts did not add the font stylesheet');
     const empty = execFileSync('node', [script, '--out', out], { env: { PATH: process.env.PATH, HOME: path.join(tmp, 'nobody') }, encoding: 'utf8' });
-    if (!empty.includes(out) || !/The gate log is empty/.test(fs.readFileSync(out, 'utf8'))) throw new Error('a machine with no transcripts and no gate log must still get a page that says so');
-    return 'fixture counted by hand · no prompt text on the page · no network without --web-fonts · quota ahead flagged · empty machine still renders';
+    if (!empty.includes(`file://${out}`) || !/The gate log is empty/.test(fs.readFileSync(out, 'utf8'))) throw new Error('a machine with no transcripts and no gate log must still get a page that says so');
+    return 'fixture counted by hand · no prompt text on the page · no network without --web-fonts · quota ahead flagged · empty machine still renders · coach notes escaped, off with --no-coach';
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
