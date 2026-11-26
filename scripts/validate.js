@@ -1125,7 +1125,15 @@ check('weekly-review invites once a week with a link, stays quiet otherwise, and
 // medium effort, and never breaks D25a to do it.
 //
 // Negative controls (2026-11-26, each applied, observed, reverted — all exit 1):
-//   CONTROLS
+//   the threshold test removed (hook) ............ "5 points ahead of the week is under the threshold, and the hook warned"
+//   the two-day staleness test removed ........... "a snapshot three days old describes another moment, and the hook warned from it"
+//   the once-a-day test removed .................. "the warning came back the same day"
+//   the warning writing `on: true` ............... "the hook must have the session PROPOSE economy mode, and must not turn it on itself"
+//   --economy on ignoring the snapshot's reset ... "economy mode does not end at the weekly reset the snapshot names"
+//   the expiry test made `if (false)` ............ "economy mode outlived the week it was chosen for"
+//   the family guard dropped from economy (loop) . "economy moved a reviewer into the implementer's family — …" (got [null,null,null,false,"blocked"])
+//   EFFORT left empty ............................ "economy: true did not put the reviewers on sonnet and the implementer at medium effort, …"
+//   economy on unless false ...................... "without economy the line-up or the effort changed"
 check('quota-watch warns only when usage runs ahead of the week, economy mode ends with the week, and the loop honours economy without breaking D25a', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-quota-'));
   try {

@@ -395,6 +395,10 @@ The project wrapper runs it when the args carry `tickets`, with the same config 
   removed. A ticket that does not converge, or does not merge, is marked `blocked` with the reason. Its worktree stays for
   you to inspect, its dependents wait, and the rest of the graph goes on.
 - **Refuses** a checkout with uncommitted changes, since it merges into it, and two tickets that share an id.
+- **`economy: true`**, in develop-phase and develop-spec: the code and spec reviewers run on sonnet and the
+  implementer at medium effort, for a week when the quota is short. A reviewer that sonnet would put in the
+  implementer's family stays where it is (D25a has no override), and so does an external reviewer. The result
+  carries `economy: true`. harness-guards' `quota-watch` proposes it; you can also pass it by hand.
 - **The plan says how parallel it is.** "13 tickets in 7 waves, 1.9 per wave; the longest chain is 01 → 02 → 05 →
   09", plus a note when migrations or `maxParallel`, not dependencies, keep it serial. develop-spec schedules what
   the tickets declare: the split is decided where the tickets are written.

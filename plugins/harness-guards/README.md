@@ -102,6 +102,17 @@ six observations about how you work, each with the rule to paste. The panel show
 `Applied` once its text is in your `CLAUDE.md`, and the next edition says what happened after. The notes may
 paraphrase your prompts; `harness-panel --no-coach` builds a page without them.
 
+### The quota warning and economy mode
+
+`quota-watch` (`SessionStart`) is silent until `quotaFile` in `~/.claude/harness-weekly.json` names a snapshot of
+your weekly quota: `{ "at", "rate_limits": { "seven_day": { "used_percentage", "resets_at" } } }`, the shape Claude
+Code hands a statusline. When usage is more than `quotaAhead` points (default 10) ahead of the share of the week
+that has passed, it says so once a day and has the session propose **economy mode**. It switches nothing itself.
+
+Economy mode is a note on disk that ends at the weekly reset. While it is on, each session passes `economy: true`
+to the loops (harness-loops 1.10): Claude-tier reviewers on sonnet, the implementer at medium effort.
+`node scripts/hooks/quota-watch.js --economy on|off|status` sets it by hand. `"quota": false` silences the hook.
+
 ## Loop 6 · Operator — `/session-review [--since 30d] [--top 20]`
 
 The other loops improve the work. This one improves the person driving it — the loop the other five leave open.
