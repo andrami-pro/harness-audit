@@ -2637,10 +2637,10 @@ check('develop-phase loop decides from the verdict line and the exit code, and a
 // retried once and told to look at what the first attempt left.
 //
 // Negative controls (2026-11-26, each applied to develop-phase.js, observed, reverted — all exit 1):
-//   `preflight.exitCode !== 0 && iteration < maxIter` made `false &&` ... "a failed preflight was not sent back" (got [1,"continue",false,false])
-//   the retry block's `if (!lastImpl)` made `if (false)` ................. "a dead implementer was not retried" (got ["blocked",1,…])
-//   `iteration < maxIter` dropped from the preflight condition ........... "the last round's red preflight was hidden" (got ["blocked",…])
-//   the ENVIRONMENT/preflight branch of correctionCtx removed ............ "a failed preflight was not sent back" (got [2,"complete",false,true])
+//   the send-back condition made `false && …` ........ "a failed preflight was not sent back to the implementer with its output, or the fix was not reviewed again" (got [1,"continue",false,false,1,1])
+//   the retry's `if (!lastImpl)` made `if (false)` .... "a dead implementer was not retried once, …" (got ["blocked","impl:iter1",false])
+//   `iteration < maxIter` dropped from the condition .. "the last round's red preflight was hidden, or the loop went past maxIter" (got ["blocked",false,false,2,false])
+//   the preflight branch of correctionCtx removed ..... "a failed preflight was not sent back …" (got [2,"complete",false,false,2,2])
 check('develop-phase loop: a failed preflight goes back to the implementer, a dead implementer is retried once', () => {
   const harness = `
     const fs = require('fs');
@@ -3317,6 +3317,85 @@ check('develop-spec waves: plan first, frontier by Blocked by, slots, one migrat
     if (JSON.stringify(r[k]) !== JSON.stringify(v)) throw new Error(`${why} (got ${JSON.stringify(r[k])})`);
   }
   return 'plan before code · frontier recomputed per merge · 2 slots · 1 migration · 1 merge at a time · blocked → dependents wait · dirty checkout refused · built file current';
+});
+
+// What stopped tickets in the waves runs of 2026-10-10 → 11-26 was mostly not their code: a preflight that is red or
+// skips checks in any fresh worktree (11 tickets, each found after a full implement-and-review), setup failures that
+// left empty worktrees, branches and tickets committed as blocked (8), and merge conflicts between tickets in flight (5).
+//
+// Negative controls (2026-11-26, each applied to workflow-src/develop-spec.js and rebuilt, observed, reverted — all exit 1):
+//   CONTROLS
+check('develop-spec plumbing: a red baseline preflight stops before any implementer, a ticket that never started leaves nothing, one conflict resolution', () => {
+  const harness = (file) => {
+    const src = require('fs').readFileSync(file, 'utf8').replace(/^export /m, '');
+    const AsyncFn = Object.getPrototypeOf(async function () {}).constructor;
+    const T = (id, o = {}) => ({ id, file: `${id}-x.md`, title: `T${id}`, status: 'ready-for-agent', blockedBy: [], migration: false, seams: [], ...o });
+    const pf = (exitCode, skipped = []) => ({ exitCode, skipped, failedCheck: exitCode ? 'typecheck' : null, tail: exitCode ? 'error TS2307: cannot find module x' : 'ok' });
+    const run = async (args, opt = {}) => {
+      const calls = []; const merges = {};
+      const tickets = [T('01'), T('02'), T('03')];
+      const agent = async (prompt, o) => {
+        const l = String(o.label); calls.push({ l, prompt });
+        if (l === 'read') return { root: '/r', branch: 'main', head: 'h0', dirty: [], agents: [], error: null, tickets };
+        const [id, ...rest] = l.split(':'); const seat = rest.join(':');
+        if (id === 'final') return '[PASS] a — x\nAPPROVED';
+        if (seat === 'worktree') return opt.setupFail === id ? { done: false, fresh: true, note: 'pnpm install failed' } : { done: true, fresh: opt.fresh ?? true, note: '' };
+        if (seat === 'baseline') return opt.baseline === undefined ? pf(0) : opt.baseline;
+        if (seat === 'tidy') return { done: true, hash: null, note: '' };
+        if (seat === 'mark') return { done: true, hash: 'k', note: '' };
+        if (seat === 'resolve') return { done: opt.resolve === true, hash: null, note: opt.resolve ? '' : 'both sides rewrote a.ts' };
+        if (seat === 'merge') {
+          merges[id] = (merges[id] || 0) + 1;
+          const fail = opt.conflict === id && merges[id] === 1;
+          return { merged: !fail, hash: `m${id}`, cleaned: !fail, note: fail ? 'conflict in a.ts' : '' };
+        }
+        if (seat.startsWith('review') || seat.startsWith('spec')) return '[PASS] a — x\nAPPROVED';
+        if (seat === 'preflight') return pf(0);
+        if (seat === 'commit') return { committed: true, hash: `c${id}`, message: 'feat: x', note: '' };
+        return 'x';
+      };
+      const out = await new AsyncFn('args', 'agent', 'log', 'phase', src)({ tickets: 'docs/tickets/prd-9', maxIter: 1, confirmed: true, ...args }, agent, () => {}, () => {});
+      const n = (re) => calls.filter((c) => re.test(c.l)).length;
+      return { out, calls, n, st: out.tickets.map((t) => `${t.id}:${t.status}`).join(' ') };
+    };
+    (async () => {
+      const green = await run({});
+      const red = await run({}, { baseline: pf(1) });
+      const skip = await run({}, { baseline: pf(0, ['SKIP: stripe (no key)']) });
+      const allowed = await run({ allowSkipped: ['stripe'] }, { baseline: pf(0, ['SKIP: stripe (no key)']) });
+      const off = await run({ baselinePreflight: false }, { baseline: pf(1) });
+      const reused = await run({}, { baseline: pf(1), fresh: false });
+      const dead = await run({}, { baseline: null });
+      const setup = await run({}, { setupFail: '01' });
+      const fixed = await run({}, { conflict: '02', resolve: true });
+      const unfixed = await run({}, { conflict: '02', resolve: false });
+      console.log(JSON.stringify({
+        green: [green.st, green.n(/:baseline$/), green.out.handoff.status],
+        red: [red.st, red.n(/:impl/), red.n(/:baseline$/), red.n(/:mark$/), red.n(/:tidy$/) >= 1, /nothing ran: the preflight .* fails in a fresh worktree/.test(red.out.handoff.blocker), /TS2307/.test(red.out.handoff.blocker), /Not started \(\d\)/.test(red.out.brief)],
+        skip: [skip.n(/:impl/), /skips checks in a fresh worktree that allowSkipped does not name/.test(skip.out.handoff.blocker), allowed.st],
+        optOut: [off.n(/:baseline$/), off.st, reused.n(/:baseline$/), reused.st, dead.st],
+        setup: [setup.st, setup.n(/^01:mark$/), setup.n(/^01:tidy$/), setup.n(/^01:impl/), /01 did not start: worktree not ready: pnpm install failed/.test(setup.out.handoff.blocker)],
+        conflict: [fixed.st, fixed.n(/^02:merge$/), /02 landed after a seat resolved a merge conflict/.test(fixed.out.brief), /keep BOTH intents/.test(fixed.calls.find((c) => c.l === '02:resolve').prompt),
+          unfixed.st, unfixed.n(/^02:merge$/), unfixed.n(/^02:mark$/)],
+      }));
+    })().catch((e) => console.log('THREW ' + e.stack));
+  };
+  const out = execFileSync('node', ['-e', `(${harness})(process.argv[1])`, path.join(ROOT, 'plugins/harness-loops/workflows/develop-spec.js')], { encoding: 'utf8' }).trim();
+  if (out.startsWith('THREW')) throw new Error(`develop-spec throws when run — ${out.slice(6)}`);
+  const r = JSON.parse(out);
+  const ALL = '01:done 02:done 03:done';
+  const want = {
+    green: [[ALL, 1, 'complete'], 'a green baseline stopped the run, or the baseline preflight ran more than once'],
+    red: [['01:not-started 02:not-started 03:ready-for-agent', 0, 1, 0, true, true, true, true], 'a preflight that is red in a fresh worktree did not stop the run before any implementer, or it left tickets marked blocked or worktrees behind'],
+    skip: [[0, true, ALL], 'a baseline that skips checks outside allowSkipped let the tickets run (none could finish), or a declared skip stopped the run'],
+    optOut: [[0, ALL, 0, ALL, ALL], 'baselinePreflight: false, a reused worktree or a baseline seat that returned nothing must not stop the run'],
+    setup: [['01:not-started 02:done 03:done', 0, 1, 0, true], 'a ticket whose worktree could not be set up was committed as blocked, or its empty worktree was not removed, or the other tickets stopped'],
+    conflict: [[ALL, 2, true, true, '01:done 02:blocked 03:done', 1, 1], 'a merge conflict did not get one resolution attempt in the ticket worktree, the brief does not say the resolution was unreviewed, or a failed attempt was merged anyway'],
+  };
+  for (const [k, [v, why]] of Object.entries(want)) {
+    if (JSON.stringify(r[k]) !== JSON.stringify(v)) throw new Error(`${why} (got ${JSON.stringify(r[k])})`);
+  }
+  return 'red or skipping baseline → stop before any implementer · never-started ticket → tidied, still ready-for-agent · conflict → one attempt, disclosed';
 });
 
 // The wrapper is the one file the audit writes into every project, and the only route to the loop.
