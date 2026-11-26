@@ -4637,6 +4637,8 @@ esac
 //     "a port another server already answers on was checked as if it were the app (exit 0: ui-check: 2 screen(s))"
 //   ignore entries no longer validated ...........................................................................
 //     "an ignore entry without a known rule (it would silence every rule) in the config did not exit 1 (exit 0)"
+//   the retry in a fresh tab removed (2026-11-26) ................................................................
+//     "a page whose first load hung was not tried again in a fresh tab (exit 3): RESULT: NOT VERIFIED — 1 screen(s) never became ready"
 // Not covered by a check: the SIGINT/SIGTERM/SIGHUP handlers that stop the server when ui-check itself is killed.
 const UI_CHECK = 'plugins/harness-loops/scripts/ui-check.js';
 const UI_SERVE = path.join(ROOT, 'scripts/fixtures/ui-check/serve.js');
@@ -4692,6 +4694,9 @@ check('ui-check finds each static rule on bad.html, nothing on good.html, refuse
   }
   const partial = uiCheckRun({ routes: ['good.html', 'missing.html'], ready: 'main', viewports: [[1280, 800]], rules: { accessibility: 'off' } });
   if (partial.code !== 3 || !/RESULT: NOT VERIFIED/.test(partial.stdout)) throw new Error(`a route that never became ready still passed (exit ${partial.code}) — a partial run is NOT VERIFIED`);
+  // A navigation that never starts is retried once in a fresh tab (a multi-page app on a dev server, 2026-11-26).
+  const stuck = uiCheckRun({ routes: ['good.html', 'stuck-once.html'], viewports: [[1280, 800]], rules: { accessibility: 'off' } });
+  if (stuck.code !== 0 || !/2 screen\(s\)/.test(stuck.stdout)) throw new Error(`a page whose first load hung was not tried again in a fresh tab (exit ${stuck.code}): ${stuck.stdout.trim().split('\n').slice(-1)[0]}`);
   const down = require('node:child_process').spawnSync('node', [path.join(ROOT, UI_CHECK), '--url', 'http://127.0.0.1:9/'], { encoding: 'utf8' });
   if (down.status !== 3 || !/NOT VERIFIED/.test(down.stdout)) throw new Error(`an app that never answers did not exit 3 NOT VERIFIED (exit ${down.status})`);
   // With "serve", something already answering on the URL would be checked instead of the app this run starts.
