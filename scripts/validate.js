@@ -1078,7 +1078,12 @@ check('harness-panel counts from local files, quotes no prompt, and makes no net
 // and that the part that costs tokens is off until the operator turns it on.
 //
 // Negative controls (2026-11-26, each applied to weekly-review.js, observed, reverted — all exit 1):
-//   CONTROLS
+//   the no-transcripts exit removed ............ "with no transcripts on the machine there is nothing to review, and the hook spoke"
+//   the startup-only condition removed ......... "the hook spoke on a resumed session or on another event"
+//   the once-a-week condition removed .......... "the invitation came back in the same week"
+//   `coach === true` loosened to `!== false` ... "with the coach off the hook asked the session to start an agent — that costs tokens nobody agreed to"
+//   the `enabled === false` exit removed ....... "\"enabled\": false did not silence the hook"
+//   lastRun written without the rest of cfg .... "recording the week dropped the operator's config"
 check('weekly-review invites once a week with a link, stays quiet otherwise, and asks for an agent only when the coach is on', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-weekly-'));
   try {
