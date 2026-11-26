@@ -67,8 +67,7 @@ and `harness-guards` to keep what you had.
 
 The guards are deliberately conservative; to disable them, uninstall `harness-guards`.
 
-Five more hooks, none of which blocks anything (`loop-telemetry` and `weekly-review` with `harness-guards`, the
-other three with `harness-loops`):
+Five more hooks, none of which blocks anything (two with `harness-guards`, three with `harness-loops`):
 
 | Hook | Event | What it does |
 |---|---|---|
