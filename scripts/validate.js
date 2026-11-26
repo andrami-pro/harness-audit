@@ -4363,7 +4363,7 @@ check('develop-phase-pi: reject without [FAIL] stops on the code axis', () => {
 //   the --integrate check off ............. "an --integrate that is a note and not a merge command was run" (got ["blocked",4,false,true])
 //   no resolution attempt ................. "a merge conflict between two tickets in flight was not resolved once …" (got ["01:done 02:blocked",…])
 //   conflict markers not checked .......... the marked file is merged and the worktree is gone ("Command failed: sh -c git -C .pi/worktrees/spec-w-02 log …")
-//   the preflight after a resolution off .. "a conflict resolution whose preflight is red was merged …"
+//   the preflight after a resolution off .. the red resolution is merged and the worktree is gone (same "Command failed: … log …")
 //   invented dependency edges kept ........ "the dependency review kept an edge the tickets do not declare …" (got [2,2,…])
 //   the run goes on after a red baseline .. "a preflight that is red before any ticket changed a line did not stop the run …" (02 becomes not-started)
 // The one-merge queue has no control: merges run synchronously in one Node process, so they cannot interleave.

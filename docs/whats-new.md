@@ -4,6 +4,21 @@ Every change to the harness that an operator can notice, newest first. Each entr
 not how it is built. Minor internal fixes live in the commits; they make the list only when they
 change behavior.
 
+## 2026-11-26 · The loop fixes of this week, on Pi (loops 1.11.0)
+
+`develop-phase-pi.js` and `develop-spec-pi.js` now behave like the Claude loops where it cost tickets:
+
+- **A dead implementer is retried once**, and **a failed preflight goes back to the implementer** with its output.
+- **One preflight before any ticket**, in the first fresh worktree. Red, or with an undeclared skip, the run stops
+  and every ticket is still `ready-for-agent`. `--no-baseline-preflight` turns it off.
+- **A ticket that never started leaves nothing behind**: no worktree, no branch, no `blocked` commit.
+- **One attempt at a merge conflict.** A seat resolves it in the ticket's worktree; code checks the markers, runs
+  the preflight and commits. The brief names the ticket: no review saw that resolution.
+- **The plan says how parallel it is**, and one seat says which `Blocked by:` look avoidable
+  (`--no-dependency-review` skips it).
+- **An `--integrate` that is not a merge command is refused** before the plan.
+- **Not verified live**: proven with stub seats only, not yet in a real Pi run. Economy mode stays Claude-only.
+
 ## 2026-11-26 · A warning when the quota runs ahead of the week, and economy mode (guards 1.3.0, loops 1.10.0)
 
 - **The warning.** Name a snapshot of your weekly quota and `quota-watch` compares what you used with how much of
@@ -59,7 +74,7 @@ results of 41 develop-spec runs on four projects: 11 on a preflight that was red
 - **One attempt at a merge conflict**, in the ticket's worktree, proved by the preflight. The brief says which
   tickets landed that way: no ticket review saw the resolution.
 - **A ticket that never started leaves nothing behind.** No empty worktree, no branch, no `blocked` commit.
-- **Not on Pi yet.** `develop-phase-pi.js` and `develop-spec-pi.js` keep the old behaviour.
+- **On Pi since loops 1.11.0** (see above).
 
 **Sonnet or Fable as the reviewer: a tie on this corpus.** 15 labelled diffs (7 new: four subtle bugs, three safe
 changes that look unsafe), each reviewed three times by each model with the same prompt. Both caught 24 of 24 bugs
