@@ -640,6 +640,7 @@ return {
 //                 `{branch}` nor a git merge is refused here, so that note is never run as a command
 //   worktreeSetup a command run in each new worktree before its ticket starts (`pnpm install --frozen-lockfile`):
 //                 a worktree holds only what git tracks, so dependencies and untracked files are not there
+//   dependencyReview   false skips the seat that, on the plan run, reads every `Blocked by:` and says which look avoidable
 //   baselinePreflight  false skips the one preflight run in the first fresh worktree, before any implementer
 // A ticket's `## Seams` section is its agreed seams. A ticket without one runs with the analyst's own.
 const cfg = args && typeof args === 'object' ? args : {}
@@ -755,31 +756,94 @@ if (/(^|[\s/'"=])\.(env|dev\.vars)\b/.test(String(cfg.worktreeSetup ?? ''))) {
 for (const t of tickets) {
   for (const b of t.blockedBy) if (!byId[b]) warnings.push(`${t.id} is blocked by ${b}, which is not a ticket in ${TICKETS}`)
 }
-const waves = []
-{
+// blockers(t) → the ids t waits for. The same arithmetic plans the real waves and the what-if below.
+const planWaves = (blockers) => {
+  const out = []
   const landed = new Set(tickets.filter((t) => state[t.id] === DONE).map((t) => t.id))
   let pending = tickets.filter((t) => state[t.id] === READY)
   while (pending.length) {
     let migration = false
-    const wave = pending.filter((t) => t.blockedBy.every((b) => landed.has(b)))
+    const wave = pending.filter((t) => blockers(t).every((b) => landed.has(b)))
       .filter((t) => (t.migration ? (migration ? false : (migration = true)) : true))
     if (!wave.length) break
-    waves.push(wave.map((t) => t.id))
+    out.push(wave.map((t) => t.id))
     wave.forEach((t) => landed.add(t.id))
     pending = pending.filter((t) => !landed.has(t.id))
   }
-  for (const t of pending) warnings.push(`${t.id} can never start: blocked by ${t.blockedBy.filter((b) => !landed.has(b)).join(', ')} (a cycle, a missing ticket, or one not ready-for-agent)`)
+  return { waves: out, pending, landed }
+}
+const planned = planWaves((t) => t.blockedBy)
+const waves = planned.waves
+for (const t of planned.pending) warnings.push(`${t.id} can never start: blocked by ${t.blockedBy.filter((b) => !planned.landed.has(b)).join(', ')} (a cycle, a missing ticket, or one not ready-for-agent)`)
+
+// How parallel the plan is, said before the human approves it. In the first 26 plans two waves in three held one
+// ticket, and nothing on the plan said so: the split is decided where the tickets are written, not here.
+const inPlan = new Set(waves.flat())
+const chainOf = (id, seen = new Set()) => {
+  if (seen.has(id)) return []
+  const below = (byId[id]?.blockedBy ?? []).filter((b) => inPlan.has(b)).map((b) => chainOf(b, new Set([...seen, id])))
+  return [...below.reduce((a, b) => (b.length > a.length ? b : a), []), id]
+}
+const longestChain = [...inPlan].map((id) => chainOf(id)).reduce((a, b) => (b.length > a.length ? b : a), [])
+const shapeOf = (w) => `${w.flat().length} ticket(s) in ${w.length} wave(s), ${w.length ? (w.flat().length / w.length).toFixed(1) : '0'} per wave`
+const migrationsInPlan = tickets.filter((t) => inPlan.has(t.id) && t.migration).length
+const parallelism = {
+  tickets: inPlan.size, waves: waves.length, widest: Math.max(0, ...waves.map((w) => w.length)), maxParallel,
+  longestChain,
+  summary: `${shapeOf(waves)}; the longest chain is ${longestChain.join(' → ') || 'none'}${
+    migrationsInPlan > 1 ? `; ${migrationsInPlan} tickets add a migration and run one at a time` : ''}${
+    waves.some((w) => w.length > maxParallel) ? `; a wave is wider than maxParallel (${maxParallel}), so it runs in turns` : ''}`,
+}
+
+// On the plan run only: one seat reads the tickets and says, for each `Blocked by:`, whether the dependent really
+// needs the blocker merged or only needs to agree an interface with it. It suggests; the tickets stay as written,
+// and the human edits them or not before confirming. A what-if plan shows what the avoidable ones cost.
+const edges = tickets.filter((t) => inPlan.has(t.id)).flatMap((t) => t.blockedBy.filter((b) => inPlan.has(b)).map((b) => `${t.id}<-${b}`))
+let dependencyReview = null
+if (cfg.confirmed !== true && cfg.dependencyReview !== false && edges.length) {
+  const found = await agent(
+    `${SEAT}Read-only: change nothing. In ${read.root}, read these tickets in ${TICKETS}: ${tickets.filter((t) => inPlan.has(t.id)).map((t) => t.file).join(', ')}.
+Each dependency below reads "<ticket><-<blocker>": the ticket will not start until the blocker is merged.
+${edges.join('  ')}
+For EACH one, decide from what the two tickets say they build:
+- needed: the ticket cannot be written or tested without code the blocker adds, and that code's shape cannot be fixed
+  in advance (it changes the same lines, or its behaviour is what the ticket verifies).
+- avoidable: the ticket only needs to know an interface the blocker introduces (a function signature, a table, a route,
+  a type). Both could run at once if that interface were written under a "## Seams" heading in both tickets. Or the
+  dependency is an ordering preference, not a need.
+Give why in one sentence that names the files or symbols, and for an avoidable one, how: the exact seam line to add to
+both tickets. When in doubt, answer needed: a wrong "avoidable" costs a merge conflict.`,
+    { model: cfg.models?.critic ?? 'sonnet', effort: 'high', label: 'deps', phase: 'Read',
+      schema: { type: 'object', additionalProperties: false, required: ['edges'], properties: { edges: { type: 'array', items: {
+        type: 'object', additionalProperties: false, required: ['ticket', 'blocker', 'verdict', 'why', 'how'],
+        properties: { ticket: { type: 'string' }, blocker: { type: 'string' }, verdict: { type: 'string', enum: ['needed', 'avoidable'] }, why: { type: 'string' }, how: { type: ['string', 'null'] } } } } } } })
+  // An edge the seat invented is dropped: only a dependency the tickets declare can be reviewed.
+  const judged = (found?.edges ?? []).filter((e) => edges.includes(`${e.ticket}<-${e.blocker}`))
+  const avoidable = judged.filter((e) => e.verdict === 'avoidable')
+  if (found) {
+    const drop = new Set(avoidable.map((e) => `${e.ticket}<-${e.blocker}`))
+    const whatIf = planWaves((t) => t.blockedBy.filter((b) => !drop.has(`${t.id}<-${b}`))).waves
+    dependencyReview = {
+      reviewed: judged.length, of: edges.length, avoidable,
+      whatIf: avoidable.length ? { waves: whatIf, summary: shapeOf(whatIf) } : null,
+      note: avoidable.length
+        ? `${avoidable.length} of ${edges.length} dependencies look avoidable: without them, ${shapeOf(whatIf)} instead of ${shapeOf(waves)}. A suggestion — to take one, write its seam in both tickets and remove the Blocked by, then re-run the plan`
+        : `all ${judged.length} reviewed dependencies look needed`,
+    }
+  }
 }
 const notReady = tickets.filter((t) => state[t.id] !== READY && state[t.id] !== DONE).map((t) => `${t.id} (${state[t.id]})`)
 log(`${tickets.length} ticket(s) · waves ${waves.map((w) => `[${w.join(', ')}]`).join(' ') || 'none'} · ${maxParallel} in flight`)
+log(`Shape: ${parallelism.summary}`)
+if (dependencyReview) log(`Dependencies: ${dependencyReview.note}`)
 
 const plan = {
-  root: read.root, branch: read.branch, head: read.head, waves, warnings, notReady,
+  root: read.root, branch: read.branch, head: read.head, waves, warnings, notReady, parallelism, dependencyReview,
   tickets: tickets.map((t) => ({ id: t.id, title: t.title, status: t.status, blockedBy: t.blockedBy, migration: t.migration, seams: t.seams.length })),
 }
 if (cfg.confirmed !== true) {
   return blocked('Waves planned — approve the ticket breakdown before any code',
-    'Read the plan; fix the tickets if needed, then re-run with confirmed: true', { plan, tickets: plan.tickets })
+    `Read the plan (${parallelism.summary}${dependencyReview?.avoidable.length ? `; ${dependencyReview.note}` : ''}); fix the tickets if needed, then re-run with confirmed: true`, { plan, tickets: plan.tickets })
 }
 if (!waves.length) return blocked('No ticket can start', warnings.join(' · ') || 'No ticket is ready-for-agent', { plan })
 
@@ -860,7 +924,9 @@ const runTicket = async (t) => {
   const made = await agent(
     `${SEAT}Prepare this ticket's worktree. Run each command as written; change nothing else.
 1. cd ${q(read.root)}
-2. If the directory ${q(workdir)} exists, reuse it. Otherwise, if \`git show-ref --verify --quiet refs/heads/${branch}\` succeeds,
+2. If the directory ${q(workdir)} exists, reuse it and bring it up to date: \`git -C ${q(workdir)} merge ${q(read.branch)}\`
+   (a kept branch was cut before other tickets landed). If that merge conflicts, run \`git -C ${q(workdir)} merge --abort\`,
+   done=false, and name the conflicted files in note: the human resolves a kept branch. Otherwise, if \`git show-ref --verify --quiet refs/heads/${branch}\` succeeds,
    run \`git worktree add ${q(workdir)} ${q(branch)}\`; otherwise run \`git worktree add ${q(workdir)} -b ${q(branch)} ${q(read.branch)}\`.
 3. Make sure the line .claude/worktrees/ is in "$(git rev-parse --git-common-dir)/info/exclude" (append it if missing).${cfg.worktreeSetup ? `
 4. cd ${q(workdir)} && ${cfg.worktreeSetup}` : ''}
