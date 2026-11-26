@@ -19,6 +19,10 @@ change behavior.
 - **An `--integrate` that is not a merge command is refused** before the plan.
 - **Not verified live**: proven with stub seats only, not yet in a real Pi run. Economy mode stays Claude-only.
 
+**ui-check on a multi-page app.** A page that stops loading is tried once more in a fresh tab. Found turning
+ui-check on in a Nuxt project: 6 of 18 screens came back NOT VERIFIED, and all 18 pass now. A dev server that is
+already running in the same folder needs `NUXT_IGNORE_LOCK=1` in `serve`.
+
 ## 2026-11-26 · A warning when the quota runs ahead of the week, and economy mode (guards 1.3.0, loops 1.10.0)
 
 - **The warning.** Name a snapshot of your weekly quota and `quota-watch` compares what you used with how much of

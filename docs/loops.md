@@ -368,6 +368,8 @@ Config, `.harness/ui-check.json` in the project:
   loose red text surfaces. It is slow: about 4 s a button.
 - **Navigation:** a hash route on an app already loaded is reached without a reload — reloading a Vite dev app for
   every screen exhausted Chromium (`net::ERR_INSUFFICIENT_RESOURCES`). The first screen waits up to 90 s for a cold dev server.
+  A navigation that never starts is tried once more in a fresh tab: a multi-page app on a dev server (Nuxt, 18 full
+  loads) stopped loading after a dozen screens that each load alone.
 - **On Pi**: `develop-phase-pi.js --ui-check ["<command>"]` (default: the `ui-check.js` beside it) runs it in code after
   every implementation, no seat in between, with the same rules: BLOCK back to the implementer before review, WARN to
   the code reviewer, exit 3 accepted only by `--allow-skipped ui-check`, any other exit FAILED. `develop-spec-pi.js`
